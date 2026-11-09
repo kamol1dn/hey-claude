@@ -1,0 +1,70 @@
+Licence of the wake-word models (models/hey_claude.onnx and personal models)
+==========================================================================
+
+Short version: the shared "hey claude" model (the GitHub release asset
+wake-model-v1/hey_claude.onnx, downloaded into this folder on first run) is
+licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International (CC BY-NC-SA 4.0), https://creativecommons.org/licenses/by-nc-sa/4.0/
+You may use, share and adapt it for non-commercial purposes, with
+attribution, and adaptations must use the same licence. Models you train
+yourself with Settings -> Wake word (state/wake_models/) come from the same
+data, so the same terms apply if you share them.
+
+This is our reading of the licences involved, not legal advice.
+
+
+Why CC BY-NC-SA 4.0
+-------------------
+
+The model is a small classifier trained by heyclaude/wake_train on features
+from openWakeWord's frozen feature models. What went into it:
+
+| part                                   | licence                  | how it's used                         |
+|----------------------------------------|--------------------------|---------------------------------------|
+| openWakeWord code, melspectrogram and  | Apache 2.0 (the speech   | computes the input features, at       |
+| embedding models (David Scripka;       | embedding is a port of   | training and run time; not part of    |
+| embedding from Google's speech_embedding) | Google's Apache 2.0 model) | the .onnx file                     |
+| Kokoro-82M TTS weights and voices      | Apache 2.0               | synthesises the positive and          |
+| (hexgrad), via kokoro-onnx             |                          | look-alike clips                      |
+| espeak-ng (via phonemizer)             | GPL-3.0                  | a tool that turns text into phonemes; |
+|                                        |                          | its output isn't covered by the GPL   |
+| openWakeWord precomputed features,     | CC BY-NC-SA 4.0          | negative training examples (a sample  |
+| ACAV100M (davidscripka/openwakeword_   |                          | of ~47 h of the 2,000 h)              |
+| features on Hugging Face)              |                          |                                       |
+| openWakeWord false-positive validation | CC BY-NC-SA 4.0          | only to measure false wakes and pick  |
+| set (DiPCo, Santa Barbara corpus,      |                          | the threshold (the output is          |
+| MUSDB; same dataset)                   |                          | calibrated with it)                   |
+
+Everything except the openWakeWord feature dataset is permissive. That
+dataset is CC BY-NC-SA 4.0, and the model's weights are fitted to it, so we
+treat the model as an adaptation of it: non-commercial, with attribution, and
+share-alike. This is also why openWakeWord's own pretrained models (e.g.
+hey_jarvis) are CC BY-NC-SA 4.0. No user recordings went into the shared
+model: it was trained on synthetic voices only.
+
+The hey-claude code itself is not covered by this file.
+
+
+Attribution
+-----------
+
+- openWakeWord, David Scripka, https://github.com/dscripka/openWakeWord
+  (precomputed features and validation set:
+  https://huggingface.co/datasets/davidscripka/openwakeword_features, CC BY-NC-SA 4.0)
+- ACAV100M, Lee et al., https://acav100m.github.io/
+- DiPCo (Amazon), Santa Barbara Corpus of Spoken American English (UCSB), MUSDB18
+  (via the openWakeWord validation set)
+- Google speech_embedding, https://tfhub.dev/google/speech_embedding/1 (Apache 2.0)
+- Kokoro-82M, hexgrad, https://huggingface.co/hexgrad/Kokoro-82M (Apache 2.0)
+
+Changes: a new classifier head trained on these features; no dataset content
+is redistributed in the model file.
+
+
+A fully permissive model
+------------------------
+
+Training without the openWakeWord feature dataset (only Kokoro voices,
+synthetic noise and your own room audio) would avoid the NC/SA terms, but the
+negatives would be far less varied. See README "Wake word" for what was
+measured.

@@ -39,6 +39,8 @@ class Bridge(QObject):
     heard = Signal(str)             # the hotkey session's spoken request was transcribed ("" = nothing)
     partial = Signal(str)           # live transcript while you talk ("" = none yet)
     voice = Signal(str)             # active text-to-speech engine/device, e.g. "kokoro gpu"
+    wake = Signal(str)              # the wake phrase that's loaded ("hey claude", or the fallback)
+    wake_hit = Signal(float)        # the wake word fired (time.time()); "not me" becomes possible
     quit = Signal()
 
 
@@ -82,6 +84,9 @@ class Island(QWidget):
     stop_speaking = Signal()
     interrupt_talk = Signal()       # mic button while it talks: stop and listen to the user
     quit_requested = Signal()
+    not_me = Signal()               # "that wasn't me": the last wake was a false one
+
+    NOT_ME_S = 120                  # how long after a wake the menu item stays available
 
     def __init__(self, bridge: Bridge, cfg: dict, task_manager=None, wake_label: str = "hey jarvis"):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -109,6 +114,10 @@ class Island(QWidget):
         bridge.heard.connect(self._heard)
         bridge.partial.connect(self.set_partial)
         bridge.voice.connect(self.set_voice)
+        bridge.wake.connect(self.set_wake_label)
+        bridge.wake_hit.connect(self._wake_hit)
+        self.last_wake_t = 0.0          # when the wake word last fired (wall clock)
+        self.wake_listening = False     # the current "listening" came from the wake word
         self.stt_label = ""
         self.voice_label = ""
         self.partial = ""               # what you've said so far (listening modes)
@@ -292,6 +301,8 @@ class Island(QWidget):
     def set_state(self, mode: str, text: str):
         if mode not in ("listening", "holding", "followup"):
             self.partial = ""
+        if mode != "listening":
+            self.wake_listening = False
         self.mode, self.text = mode, text
         self.mode_at = time.perf_counter()
         self._place()
@@ -306,6 +317,33 @@ class Island(QWidget):
         self._tooltip()
         self._place()
         self.update()
+
+    def set_wake_label(self, label: str):
+        self.wake_label = label
+        self._place()
+        self.update()
+
+    def _wake_hit(self, t: float):
+        self.last_wake_t = t
+        self.wake_listening = True
+
+    def _not_me_rect(self, head=None):
+        """The "not me" chip at the right end of the head row while listening after a wake."""
+        h = head.height() if head is not None else self._head_h()
+        cy = min(h, PILL_H) / 2
+        return QRectF(self.width() - 14 - 62, cy - 11, 62, 22)
+
+    def _show_not_me(self) -> bool:
+        return self.mode == "listening" and self.wake_listening and not self.partial
+
+    def flash(self, text: str, secs: float = 2.5):
+        """A short note in the idle pill (e.g. after "that wasn't me")."""
+        self.flash_text, self.flash_until = text, time.time() + secs
+        self._place()
+        self.update()
+        QTimer.singleShot(int(secs * 1000) + 50, lambda: (self._place(), self.update()))
+
+    flash_text, flash_until = "", 0.0
 
     def set_voice(self, label: str):
         self.voice_label = label
@@ -410,6 +448,8 @@ class Island(QWidget):
         p.drawEllipse(QRectF(x - r, y - r, 2 * r, 2 * r))
 
     def _idle_label(self) -> str:
+        if time.time() < self.flash_until:
+            return self.flash_text
         running = [x for x in self.task_rows if x["status"] in ("starting", "running")]
         if running:
             return f"{len(running)} task{'s' if len(running) != 1 else ''} running"
@@ -458,6 +498,15 @@ class Island(QWidget):
             p.drawText(QRectF(tx, 0, avail, head.height()), Qt.AlignVCenter | Qt.AlignLeft, text)
         else:
             p.drawText(QRectF(tx, 0, 60, head.height()), Qt.AlignVCenter, "listening")
+        if self._show_not_me():
+            r = self._not_me_rect(head)
+            hover = self.mapFromGlobal(QCursor.pos()) if self.hover else None
+            on = hover is not None and r.contains(hover.toPointF())
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(255, 255, 255, 46 if on else 20))
+            p.drawRoundedRect(r, 11, 11)
+            p.setPen(FG if on else DIM)
+            p.drawText(r, Qt.AlignCenter, "not me")
 
     def _paint_holding(self, p, head, t):
         """Hold key down: still listening, pauses don't end it."""
@@ -549,7 +598,7 @@ class Island(QWidget):
         p.drawRoundedRect(QRectF(s.x() - 5, s.y() - 5, 10, 10), 2, 2)
 
     def mouseMoveEvent(self, e):
-        if self.mode in ("thinking", "speaking"):
+        if self.mode in ("thinking", "speaking", "listening"):
             self.update()                       # button hover highlight
 
     def _paint_loading(self, p, head, t):
@@ -619,6 +668,10 @@ class Island(QWidget):
             if 0 <= i < len(rows):
                 self.open_log(rows[i])
             return
+        if self._show_not_me() and self._not_me_rect().adjusted(-3, -3, 3, 3).contains(pos):
+            self.wake_listening = False
+            self.not_me.emit()
+            return
         if self.mode in ("thinking", "speaking") and pos.y() <= PILL_H:
             mic, stop = self._ctrl_rects()
             if mic.adjusted(-3, -3, 3, 3).contains(pos):
@@ -636,6 +689,10 @@ class Island(QWidget):
         m = QMenu(self)
         m.addAction("Talk now", self.activate.emit)
         m.addAction("Stop speaking", self.stop_speaking.emit)
+        if self.last_wake_t and time.time() - self.last_wake_t < self.NOT_ME_S:
+            a = m.addAction(f"That wasn't me (the wake {int(time.time() - self.last_wake_t)} s ago)", self.not_me.emit)
+            a.setToolTip("Saves the audio that woke it as a \"not the wake word\" example for the next "
+                         "Settings → Wake word tune-up.")
         if self.stt_label:
             m.addAction(f"Speech-to-text: {self.stt_label}").setEnabled(False)
         if self.voice_label:

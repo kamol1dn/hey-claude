@@ -131,11 +131,35 @@ def main():
     # -- settings window --------------------------------------------------------
     settings = {"win": None}
 
+    class _WakeHooks:
+        """What the Settings -> Wake word wizard needs from the running app."""
+        _was_on = None
+
+        def pause(self):                         # recording clips / room sound / live test
+            if self._was_on is None:
+                self._was_on = asst.listening.is_set()
+                if self._was_on:
+                    asst.set_listening(False)
+
+        def resume(self):
+            if self._was_on:
+                asst.set_listening(True)
+            self._was_on = None
+
+        def gpu_util(self):                      # GPU load without hey-claude's own work
+            m = asst.monitor
+            return m.gpu_util() if m is not None else None
+
+        def loaded_label(self):
+            w = getattr(asst, "wake", None)
+            return (w.label, w.fallback) if w is not None else (None, None)
+    wake_hooks = _WakeHooks()
+
     def open_settings():
         from .settings_ui import SettingsWindow
         w = settings["win"]
         if w is None:
-            w = SettingsWindow(cfg, config_path=args.config)
+            w = SettingsWindow(cfg, config_path=args.config, wake_hooks=wake_hooks)
             w.saved.connect(on_saved)
             w.restart_requested.connect(restart)
             settings["win"] = w
@@ -211,6 +235,12 @@ def main():
         # Mic button while it talks: stop, then listen (same as the hotkey: the talk-or-type field).
         island.interrupt_talk.connect(lambda: (asst.hush(), bridge.talk.emit()))
         island.quit_requested.connect(app.quit)
+
+        def not_me():
+            path = asst.reject_wake()
+            island.last_wake_t = 0.0
+            island.flash("saved: not the wake word" if path else "no recent wake to save")
+        island.not_me.connect(not_me)
 
         def attach_tm():
             asst.ready.wait()

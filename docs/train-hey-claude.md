@@ -1,30 +1,102 @@
-# Training the "hey claude" wake word
+# The "hey claude" wake word
 
-Until a model is trained, hey-claude falls back to openWakeWord's stock
-**"hey jarvis"**: the island says "hey jarvis" and the log says why. Training is
-about an hour of mostly waiting, in four steps:
+There are three ways to get a "hey claude" model. Most people need only the
+first.
 
-| step | who | time |
-|---|---|---|
-| 1. record 40 clips of your voice | you, at the PC | 5 min |
-| 2. train in Google Colab | you click, Colab works | 1–2.5 h, mostly unattended |
-| 3. drop the model into `models\` | you | 1 min |
-| 4. measure it and pick the threshold | `tools\wake_eval.py` | 5–15 min |
+| | what you do | time | where the model lives |
+|---|---|---|---|
+| **1. The shared default** | nothing | a 0.4 MB download on first start | `models\hey_claude.onnx` |
+| **2. Personal tune-up** (optional) | Settings → Wake word → *Tune it to my voice…* | ~5 min of recording, ~10–15 min of the PC working | `state\wake_models\` |
+| **3. Colab** (advanced) | record clips, run a notebook | 1–2.5 h, mostly waiting | wherever you put it |
 
-The model is trained on thousands of synthetic voices (Piper TTS) saying the
-phrase, plus your own clips. The synthetic voices are American and British
-English, so your clips are what teaches it **your** "hey claude".
+If no model loads (no network on first start, a broken file), hey-claude falls
+back to openWakeWord's stock **"hey jarvis"**: the island says "hey jarvis" and
+the log says why.
 
-## Why Colab, not this PC
+## 1. The shared default model
 
-openWakeWord's trainer only runs on Linux (Piper's phonemizer). On this PC that
-means WSL, which isn't installed (it needs admin rights and a reboot). The
-trainer also wants ~16 GB of precomputed features and a GPU for an hour, which
-would fight Premiere for the RTX 4060. Colab's free T4 does it without touching
-this machine. If you'd rather train locally later, see "Local training" at the
-end.
+hey-claude ships one "hey claude" model for everyone, trained once on
+**synthetic voices only**: 54 Kokoro voices (American, British, and voices
+built for Japanese, Chinese, Hindi, French, Italian, Spanish and Portuguese,
+reading English, which gives accented English), random blends of two voices,
+speeds 0.75–1.35, pitch ±3 semitones, and several pronunciations:
+"hey claude", "klod", "clod", "klawd", "klode", and Russian/Uzbek-style ones
+(a short pure "o", a final "d" said as "t"). No real person's recordings
+went into it, so it doesn't lean towards anyone's accent, and the repository
+stays free of personal voice data.
 
-## 1. Record your clips
+On first start, if `wake.model` is the default `models/hey_claude.onnx` and the
+file isn't there, hey-claude downloads it from the GitHub release
+`wake-model-v1` and keeps it only if its SHA-256 matches the one in
+`heyclaude/wake_models.py`. A file you put there yourself (an older Colab
+model) is never overwritten. What it measured: README, "Wake word".
+
+Licence: CC BY-NC-SA 4.0, because the negatives come from openWakeWord's
+feature dataset; see [models/LICENSE](../models/LICENSE).
+
+### How it was trained (maintainers)
+
+```bash
+.venv\Scripts\python -m heyclaude.wake_train default --out state\m2a\hey_claude.onnx
+.venv\Scripts\python tools\stage_wake_release.py state\m2a\hey_claude.onnx
+```
+
+The first command runs the whole local pipeline on this PC (native Windows,
+no WSL): it downloads openWakeWord's negative features (resumable ranged
+downloads, sizes shown), synthesises ~12,500 clips with Kokoro, mixes in
+noise and synthetic room reverb, computes openWakeWord embeddings, trains a
+small classifier head (numpy), picks the threshold from held-out voices and
+the 10.7 h validation set, calibrates it to 0.5, and exports ONNX in
+openWakeWord's format. Synthesis and the feature models use the GPU when it's
+under 70% busy (hey-claude's own load excluded), otherwise the CPU. The second
+command copies the model to `dist\wake-model-v1\`, writes its SHA-256 into
+the code and prints the `gh release create` command; it publishes nothing.
+
+## 2. Personal tune-up in Settings
+
+**Settings → Wake word → Tune it to my voice…** opens a wizard. Use it if the
+shared model often misses *you*, or if you want a different phrase.
+
+1. **Phrase.** "hey claude" by default; any 2–3 word phrase works. It warns
+   about phrases that are too short or too common ("hello", "okay").
+2. **Record.** About 25 clips (16 at least), each with a cue: normal, quiet,
+   loud, fast, slow, far away... A live level meter shows the mic, every clip
+   is checked (too quiet, clipped, too short), and **Redo** re-records the last
+   one. Listening is paused while it records. Every 4th clip is held out of
+   training to measure the result honestly.
+3. **Room sound (optional, 1 minute).** Talk normally or leave the TV/fan on:
+   these become "not the wake word" examples from your own room.
+4. **Train.** One button, a progress bar and a time estimate that corrects
+   itself as it goes. The first time it downloads openWakeWord's negative
+   features (it shows the size; interrupted downloads resume). It also learns
+   from every false wake you marked with **not me** (below).
+5. **Test and apply.** It shows the hit rate on your held-out clips and the
+   false wakes per hour on 10.7 h of other people's audio. *Test* runs the new
+   model on the mic so you can see it fire. *Use this model* switches to it
+   immediately, no restart; *Undo* goes back to the previous model (the
+   last 20 changes are kept in `state\wake_models\history.json`).
+
+Your clips stay in `state\wake_samples\`, the room recording in
+`state\wake_room\`, the models in `state\wake_models\`. Nothing leaves the PC.
+
+**"That wasn't me."** When it wakes by mistake, click the **not me** chip on
+the island while it's listening (or right-click the island → *That wasn't me*,
+for 2 minutes after a wake). The ~2.5 s that triggered it are saved to
+`state\wake_negatives\`, the request is dropped, and the next tune-up trains
+on them as negatives.
+
+From a terminal, the same thing is
+`.venv\Scripts\python -m heyclaude.wake_train personal` (it uses the clips in
+`state\wake_samples\`; `--room`, `--false-wakes`, `--phrase` as in the wizard).
+
+## 3. Advanced: your own model in Colab
+
+openWakeWord's full recipe (Piper voices, the whole 2,000 h negative set, a
+GPU for an hour) only runs on Linux, so on this PC it means Colab. It can give
+the best quality for one voice. The steps below record your clips, train in
+Colab, and drop the model into `models\`.
+
+### 3.1 Record your clips
 
 Close or pause hey-claude first (tray → Listening off), or use the tray item,
 which pauses it for you:
@@ -58,7 +130,7 @@ Running it again adds clips after the existing ones. To redo one, delete the
 wav and run `.venv\Scripts\python -m heyclaude.wake_samples --pack` to rebuild
 the zip.
 
-## 2. Train in Colab
+### 3.2 Train in Colab
 
 The notebook linked from openWakeWord's README, and the official
 `automatic_model_training.ipynb`, **no longer run on current Colab** (Python
@@ -154,7 +226,7 @@ you say it quickly, try training again without "hey cloud".
 voice. `models\*.onnx` is git-ignored, since this repo is public. Commit it
 yourself only if you're fine with that.
 
-## 3. Use it
+### 3.3 Use it
 
 Put the file at `D:\coding\hey-claude\models\hey_claude.onnx` and restart
 hey-claude (tray → Quit, then `run.cmd`). That path
@@ -167,7 +239,7 @@ is the default `wake.model`, so nothing else needs changing. The log then says
 and the idle island shows **hey claude**. If the file is missing or broken, it
 falls back to hey_jarvis at 0.5 and says so in `state\logs\app.log`.
 
-Another file name or place: set it in Settings… → Voice & wake → Model
+Another file name or place: set it in Settings… → Wake word → Model
 (Browse…), or in `config.yaml`:
 
 ```yaml
@@ -176,7 +248,7 @@ wake:
   threshold: 0.5                  # step 4 picks this
 ```
 
-## 4. Measure it and pick the threshold
+## Measuring a model and picking the threshold
 
 You need a few hours of audio where nobody says "hey claude": lectures,
 podcasts, YouTube, calls. Any audio or video files work (mp4, mkv, m4a, mp3,
@@ -187,7 +259,9 @@ wav...), or a folder of them; ffmpeg decodes them. 3 hours is the minimum for th
 .venv\Scripts\python tools\wake_eval.py --negatives "D:\path\to\lectures"
 ```
 
-It scores your clips from step 1 and the long audio (CPU only, several
+For the shared default model, measure it on your own voice and lectures the
+same way (record clips with `--record-wake-samples` first; they're only
+scored). It scores your clips and the long audio (CPU only, several
 processes; roughly 1–2 minutes per hour of audio). Then it prints one row per
 threshold:
 
@@ -214,7 +288,7 @@ When both targets are met, write the threshold to `config.yaml`:
 .venv\Scripts\python tools\wake_eval.py --negatives "D:\path\to\lectures" --apply
 ```
 
-(or type it into Settings… → Voice & wake → Threshold, which applies without a
+(or type it into Settings… → Wake word → Threshold, which applies without a
 restart). Every run also leaves a JSON report in `state\wake_eval\`.
 
 Other options: `--model other.onnx` to test another model, `--max-hours 5`,
@@ -239,12 +313,9 @@ still cuts it off. Ignored triggers are logged as
 old behaviour), set `suppress_while_speaking: false`; M4 plans echo
 cancellation for a proper spoken barge-in.
 
-## Local training (optional)
+## Local training
 
-Only worth it if Colab becomes a problem. It needs WSL2 (`wsl --install`, admin,
-reboot) with Ubuntu, the CUDA-on-WSL driver that ships with current NVIDIA
-drivers, and ~30 GB of disk. Inside WSL, run the same notebook's cells as a
-script against the same `train.py`. GPU rule for this PC: only start the
-training when the GPU is under ~70% busy (Premiere idle is fine; check with
-`nvidia-smi`) and never during a Premiere export. Steps 1–2 of `train.py` use
-the GPU for TTS, and step 3 for training.
+Local training is built in now (sections 1 and 2): native Windows, no WSL, no
+Colab. It's lighter than openWakeWord's full recipe (a sample of the negative
+features instead of all 16 GB, Kokoro instead of Piper), so the Colab route
+stays here as the "most data" option.

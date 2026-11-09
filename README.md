@@ -117,7 +117,8 @@ mic ─▶ echo canceller ─▶ openWakeWord ─▶ Silero VAD + end of turn �
    run.cmd
    ```
 
-   First start downloads the wake-word models (~6 MB) and whisper
+   First start downloads the wake-word models (~6 MB, plus the shared
+   "hey claude" model, 0.4 MB, checked with SHA-256) and whisper
    `large-v3-turbo` for the GPU (~1.6 GB, already there if another app on
    this PC uses faster-whisper) and `base.en` for the CPU (~140 MB). On a
    slow line, set `HF_HUB_DISABLE_XET=1` first (Hugging Face's xet transfer
@@ -205,8 +206,9 @@ or `""` to turn it off.
 
 **Settings window** (tray → Settings…) edits `config.yaml`, creating it from
 `config.example.yaml` the first time. Tabs: General (listening at start,
-hotkey with a Record… button, hold key, start with Windows), Voice & wake (wake model
-and threshold; whisper device, GPU and CPU models, GPU precision, busy
+hotkey with a Record… button, hold key, start with Windows), Wake word (model,
+threshold, cooldown, the personal tune-up wizard, back to the shared default,
+undo), Voice (whisper device, GPU and CPU models, GPU precision, busy
 thresholds, the Premiere opt-out; voice, rate, a test button), Models (quick-answer backend and models, the tool agent on/off,
 model and filler line, task model, permission mode and parallel limit),
 Projects (spoken name → folder, with a folder picker) and Permissions (the
@@ -216,7 +218,7 @@ now** button after saving them. Everything else applies on save:
 
 | applies on save | needs a restart |
 |---|---|
-| wake threshold, cooldown and speaking suppression, `listen.*`, `tasks.*` (permission mode, allowed tools, model, parallel limit), projects for "start a task in …", the agent's filler line, `island.*`, hotkey, start with Windows, `stt.*_busy_pct`, `stt.yield_to_premiere` | wake model, the rest of `stt.*` (device, models), `tts.*` (voice, rate, backend), `fast.*`, the agent's on/off, model and allowed tools, `claude.exe` |
+| wake model, threshold, cooldown and speaking suppression, `listen.*`, `tasks.*` (permission mode, allowed tools, model, parallel limit), projects for "start a task in …", the agent's filler line, `island.*`, hotkey, start with Windows, `stt.*_busy_pct`, `stt.yield_to_premiere` | the rest of `stt.*` (device, models), `tts.*` (voice, rate, backend), `fast.*`, the agent's on/off, model and allowed tools, `claude.exe` |
 
 New project names are routed right away; whisper's spelling hints and the
 quick model's project list pick them up after a restart.
@@ -302,15 +304,14 @@ Make a test clip with a Windows voice:
 | click the idle pill | talk without the wake word |
 | press the hotkey (`Ctrl+Alt+Space`) | talk, or type into the field that opens (Enter sends) |
 | click while speaking, or the hotkey | stop speaking (and, with the hotkey, listen again) |
-| right-click the island | menu: talk now / stop / open logs / quit (the tray menu has the rest) |
+| right-click the island | menu: talk now / stop / that wasn't me (after a wake) / open logs / quit (the tray menu has the rest) |
+| **not me** on the island while it listens | it woke by mistake: drops the request and saves the audio as a negative for the next tune-up |
 
-The wake word is **"hey claude"** once its model is trained and saved as
-`models\hey_claude.onnx` (see [docs/train-hey-claude.md](docs/train-hey-claude.md):
-record your voice, train in Colab, measure with `tools\wake_eval.py`). Until
-then it falls back to openWakeWord's stock **"hey jarvis"**: the idle island
-shows which one is loaded, and the log says why it fell back. While it's
-talking, the wake word is ignored (plus 0.7 s), so its own voice can't wake it;
-click or use the hotkey to cut it off. Project
+The wake word is **"hey claude"**: the shared model downloads on first start
+(see "Wake word" below). If it can't load, it falls back to openWakeWord's
+stock **"hey jarvis"**: the idle island shows which one is loaded, and the
+log says why. While it's talking, the wake word is ignored (plus 0.7 s), so
+its own voice can't wake it; click or use the hotkey to cut it off. Project
 names don't have to be heard perfectly: "in ha app" still matches `inha app`,
 and the names are given to whisper as a spelling hint.
 

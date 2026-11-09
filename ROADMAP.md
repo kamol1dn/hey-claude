@@ -86,8 +86,25 @@ question about the task) keeps context, verified with simulated clips.
 
 **Goal:** sounds good and answers in about 2.5 s after you stop talking.
 
-- Kokoro (CPU onnx) as the default voice, with SAPI as a fallback. Measure
-  time-to-first-audio and keep it under 300 ms per sentence.
+- **Kokoro on the GPU as the default voice** (spec approved by the user,
+  2026-11-09; M1 deferred it here because of the installs involved):
+  - Config: `tts.engine: kokoro | sapi | piper` (default `kokoro`),
+    `tts.device: gpu | cpu` (default `gpu`), `tts.voice` (e.g. `af_heart`),
+    `tts.speed`.
+  - Load once at startup and keep it resident on the GPU next to Whisper.
+  - Fallback chain: Kokoro on GPU → Kokoro on CPU → Windows SAPI. Log the
+    reason, and show it on the island.
+  - Respect `stt.yield_to_premiere`: while Premiere Pro is running, Kokoro
+    uses the CPU.
+  - Speak sentence by sentence, so the first sentence plays while the rest
+    is still being generated. Keep time-to-first-audio under 300 ms per
+    sentence.
+  - Pick torch versus `kokoro-onnx` + `onnxruntime-gpu`. Installs to plan
+    for: espeak-ng, ~330 MB of model files, and torch-CUDA or
+    onnxruntime-gpu. Swapping `onnxruntime` for `onnxruntime-gpu` also
+    affects openWakeWord (M2's path), so **check that the wake word still
+    runs after the swap**.
+  - Tests for the fallback chain with CUDA mocked, and README setup steps.
 - Silero VAD with a smarter end-of-turn (shorter silence when the sentence
   is clearly finished).
 - Barge-in while speaking: echo cancellation (WebRTC AEC via `webrtc-audio-
@@ -95,9 +112,12 @@ question about the task) keeps context, verified with simulated clips.
 - Whisper: evaluate `small.en` int8 vs `base.en` on the user's accent; stream
   partial transcripts to the island.
 - Direct Anthropic API path for tier (a) as the recommended low-latency
-  option (needs a key), with the CLI path kept as the no-key default.
+  option (needs a key), with the CLI path kept as the no-key default. Strip
+  `ANTHROPIC_API_KEY` from the environment of every `claude` process
+  hey-claude starts. Otherwise the CLI would likely use the key, and the
+  lookups and tasks would be billed to the API instead of the subscription.
 
-**Touches:** `tts.py`, `listen.py`, `stt.py`, small bits of `assistant.py`.
+**Touches:** `tts.py`, `listen.py`, `stt.py`, `requirements.txt`, `config.example.yaml`, small bits of `assistant.py` and `claude_cli.py`.
 **Done when:** quick-question speech-end → first word ≤ 2.5 s median on normal
 Wi-Fi, logged in `state/latency.csv`.
 

@@ -910,7 +910,12 @@ class Assistant:
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
                 elif kind == "control":
-                    # "volume 30": straight to the agent and its Windows tools, no filler.
+                    # "volume 30": straight to the agent and its Windows tools; the filler only
+                    # if the change hasn't been confirmed after a few seconds.
+                    filler = self.cfg["agent"].get("filler")
+                    late = float(self.cfg["agent"].get("filler_after_s", 3.5) or 0)
+                    if filler and late > 0:
+                        self._late_filler(filler, late, gen)
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
                 elif kind == "undo":

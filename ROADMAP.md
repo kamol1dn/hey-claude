@@ -213,6 +213,62 @@ milestone adds a second check after the wake word fires.
 accepts on other speakers at the chosen threshold, with the added wake
 latency ≤ 100 ms.
 
+## M4c: Speech backends: local, lean, Windows, cloud
+
+**Goal:** the user can choose how much RAM/VRAM speech uses, down to almost
+none, from a tray switch. Build after M4 (it reworks `stt.py`/`tts.py`).
+
+The Claude desktop app's own voice is **out of scope**. It runs on a private
+Anthropic service with no public API, and using it would mean lifting the
+user's claude.ai login token and calling undocumented endpoints. That likely
+breaks the terms, puts the account at risk, and could break on any app
+update.
+
+- **One setting, `speech.backend: local | windows | cloud`**, covering both
+  speech-to-text and voice output (`speech.stt_backend` / `speech.tts_backend`
+  to mix them, e.g. Windows STT + Kokoro). Switch from the tray without a
+  restart. The island shows which backend is active.
+- **`local` + lean mode** (today's faster-whisper/Kokoro):
+  - `speech.lean: true` unloads Whisper and Kokoro after
+    `speech.unload_after_min` idle (default 10), and reloads them on the next
+    wake.
+  - The wake word stays loaded; it's ~20 MB on the CPU.
+  - Show "loading…" on the island during a reload. Measure the cold-start
+    cost per model (turbo GPU, large-v3 GPU, CPU fallback) in the README.
+  - A tray item "Free memory now" unloads immediately.
+- **`windows`: no models, free.**
+  - STT: the WinRT `Windows.Media.SpeechRecognition` API with online
+    dictation, through the `winrt-*` Python packages. It's multilingual and
+    runs in Microsoft's cloud. It needs Settings → Privacy → Speech →
+    "Online speech recognition" on; detect that and tell the user if it's off.
+  - TTS: Windows natural/OneCore voices (`Windows.Media.SpeechSynthesis`),
+    with SAPI as the fallback.
+  - Check that the hotkey talk-or-type and the hold-Ctrl extension still
+    work: hey-claude keeps its own mic capture and VAD, and passes the audio
+    to WinRT.
+- **`cloud`: best accuracy for little memory.**
+  - STT providers behind one interface: Groq (hosted Whisper large-v3-turbo,
+    has a free tier) and OpenAI transcription. Keys come from env vars
+    (`GROQ_API_KEY` / `OPENAI_API_KEY`) or the Windows credential store,
+    never from `config.yaml`.
+  - Optional cloud TTS (OpenAI or ElevenLabs).
+  - Show the estimated monthly cost in settings from usage in
+    `state/latency.csv`.
+  - Audio leaves the machine in this mode only. Say so in settings.
+- **Auto fallback:** if the chosen backend fails (no network, missing key,
+  WinRT error), use the next one in `speech.fallback_order` and say why on
+  the island.
+- **Load-aware option:** `speech.backend: auto` picks local while VRAM/RAM
+  are free, and windows/cloud when free memory is under thresholds
+  (`sysload.py`).
+
+**Touches:** `stt.py`, `tts.py` → a `speech/` package with one module per
+backend, `tray.py`, `settings_ui.py`, `config.example.yaml`, README.
+**Done when:** each backend answers a simulated question; lean mode frees the
+VRAM (verified with NVML) and reloads on the next wake; switching backends
+from the tray works without a restart; offline tests cover backend selection
+and fallback with every backend mocked.
+
 ## M5: Island v2: animation, transitions, response widgets
 
 **Goal:** the island looks and moves like a product, and can show more than text.

@@ -801,3 +801,17 @@ The user asked to add this in milestones. Each step is shippable on its own.
 **M5e: Polish gate**
 - Scope: battery and slow-GPU downgrade, golden frames (check 11), an 8 h soak, and before/after screenshots for the README.
 - *Done when:* the §10 table is measured and met.
+
+---
+
+## 13. As built (M5, 2026-11-09)
+
+All of M5a–M5e shipped in one change. Where the build differs from the plan above, and why:
+
+- **Live tier driver.** A running `FrameAnimation` makes Qt render every vsync, which is 144 frames a second on a 144 Hz laptop panel even when nothing changed. The live tier is therefore a 16 ms `Timer` (about 60 fps on any panel). The rest tiers are `Timer`s as planned, and calm idle stops completely.
+- **Engine.** `ui/island/engine.js` is a port of the preview's integrator. It covers springs with direction presets, followers, tweens, labels, the 48-sample thread with snapshot blending, one-shots and driver tiers. Retargets made inside a frame don't wake the loop (the preview's `inFrame` rule), so ready stays at 8 fps.
+- **Shapes.** The mic glyph is a once-painted Canvas: a `CurveRenderer` Shape there cost about 60 % of a core per frame. The slash, arc, brackets, check and timer ring stay `Shape`s, because they change only on entry.
+- **Nib reveal.** A clip edge instead of the slanted `ShaderEffect`, so no `layer.enabled` appears anywhere.
+- **Hot word.** One `StyledText` per line (newest two lines) with the newest word's colour cooling. There are no TTS word timings, so words appear about 3.3 per second while the voice sounds, and all at once when the text is complete.
+- **Holding-muted (Ctrl+Shift).** The brackets turn dim, the ember turns ash with the slash, and the thread lies flat.
+- **Window.** 600 × 400, so cards fit under the head. The click-through mask is the pill + 2 px, grown to the union while it morphs. When hidden-when-idle, the mask is a 220 × 4 px strip at the top centre.

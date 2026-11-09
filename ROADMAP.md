@@ -426,7 +426,7 @@ terminal; the clipboard is restored; it measures ≤ 1 s from releasing the key
 to the text appearing for a 5 s sentence on turbo; and the dictionary fixes
 the user's top misheard words in a simulated test.
 
-## M5: Island v2: animation, transitions, response widgets
+## M5: Island v2: animation, transitions, response widgets ✅ built (2026-11-09)
 
 **Goal:** the island looks and moves like a product, and can show more than text.
 
@@ -492,6 +492,15 @@ the user's top misheard words in a simulated test.
 **Touches:** `island.py` → `ui/` (QML), `brain.py` prompts (widget field).
 **Done when:** each widget type renders from a simulated reply; 60 fps
 transitions measured; no focus stealing.
+
+**Built (2026-11-09):**
+- `ui/island/` (Island.qml, engine.js, island.frag) with `heyclaude/island_qml.py`. The QML island keeps
+  the Bridge as its interface; `island.engine: classic` keeps the QPainter one.
+- `ui/states.json` (registry 1.0, `heyclaude/states.py`), with `ui/themes/ember-thread` as the first theme.
+- `ui/widgets.schema.json` (11 widgets, `heyclaude/widgets.py`), `ui/services.json` + 48 bundled icons
+  (`heyclaude/service_icons.py`), plan usage from Claude Code's `rate_limit_event`.
+- Bridge signals for M7: `approval`, `approval_withdrawn`, `session_event`; `QmlIsland.approval_decided`.
+- `tools/island_lab.py` (motion lab, `--shots`, `--measure`); the measured numbers are in the PR.
 
 ## M6: Characters as plug-ins (pick one in Settings, add new ones by PR)
 

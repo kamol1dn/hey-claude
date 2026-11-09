@@ -356,3 +356,61 @@ def window_title(hwnd: int) -> str:
     buf = ctypes.create_unicode_buffer(256)
     ctypes.windll.user32.GetWindowTextW(wintypes.HWND(hwnd), buf, 256)
     return buf.value
+
+
+# ---------------------------------------------------------------- island (M5)
+GWL_EXSTYLE = -20
+WS_EX_NOACTIVATE = 0x08000000
+SPI_GETCLIENTAREAANIMATION = 0x1042
+_user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+_user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+_user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+_user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+
+
+def set_no_activate(hwnd: int, on: bool) -> None:
+    """WS_EX_NOACTIVATE on/off without re-creating the window (QWindow.setFlags
+    would hide and re-show it): the island never takes focus, except while its
+    talk-or-type field is open."""
+    if not hwnd:
+        return
+    ex = _user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+    new = (ex | WS_EX_NOACTIVATE) if on else (ex & ~WS_EX_NOACTIVATE)
+    if new != ex:
+        _user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new)
+
+
+def client_area_animation() -> bool:
+    """Windows "Animation effects" (Settings > Accessibility > Visual effects)."""
+    v = wintypes.BOOL(1)
+    if not _user32.SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(v), 0):
+        return True
+    return bool(v.value)
+
+
+class _SYSTEM_POWER_STATUS(ctypes.Structure):
+    _fields_ = [("ACLineStatus", ctypes.c_ubyte), ("BatteryFlag", ctypes.c_ubyte),
+                ("BatteryLifePercent", ctypes.c_ubyte), ("SystemStatusFlag", ctypes.c_ubyte),
+                ("BatteryLifeTime", wintypes.DWORD), ("BatteryFullLifeTime", wintypes.DWORD)]
+
+
+def on_battery() -> bool:
+    """Running on battery, or with battery saver on."""
+    s = _SYSTEM_POWER_STATUS()
+    if not _kernel32.GetSystemPowerStatus(ctypes.byref(s)):
+        return False
+    return s.ACLineStatus == 0 or bool(s.SystemStatusFlag & 1)
+
+
+QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE = 2, 3, 4
+
+
+def fullscreen_app() -> bool:
+    """A full-screen game / video / presentation is in front (SHQueryUserNotificationState)."""
+    st = ctypes.c_int(0)
+    try:
+        if _shell32.SHQueryUserNotificationState(ctypes.byref(st)) != 0:
+            return False
+    except (AttributeError, OSError):
+        return False
+    return st.value in (QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE)

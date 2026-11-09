@@ -1,0 +1,879 @@
+"""The M5 island: Qt Quick / QML, "Ember & Thread" (docs/island-motion.md).
+
+`QmlIsland` keeps the interface of the QPainter `island.Island` (the same
+Bridge signals in, the same Qt signals out, attach_input / toggle_input /
+flash / show_tasks_until ...), so the assistant code barely changes. The
+drawing and all motion live in ui/island/ (Island.qml + engine.js, a port of
+the approved preview); this module only:
+
+- owns the one fixed, transparent, never-focused window (600 x 400 at the top
+  centre) and its click-through mask;
+- routes assistant modes to engine commands (`route()`, pure, tested offline);
+- carries the extras: M9 effects, response widgets (widgets.py), service
+  icons for tools in use (service_icons.py), approval cards and session
+  events for M7, plan usage, file drops;
+- handles the talk-or-type field's focus (taken at open, given back on close).
+
+Python emits nothing per frame. In ready the engine ticks itself at 8 fps,
+in off at 0.
+"""
+from __future__ import annotations
+
+import os
+import time
+from pathlib import Path
+
+from PySide6.QtCore import QObject, QPoint, QRect, QTimer, QUrl, Property, Qt, Signal, Slot
+from PySide6.QtGui import QCursor, QGuiApplication, QImage, QRegion
+from PySide6.QtQuick import QQuickImageProvider, QQuickView, QQuickWindow, QSGRendererInterface
+
+from .config import ROOT
+
+QML_DIR = ROOT / "ui" / "island"
+WIN_W, WIN_H = 600, 400
+NOT_ME_S = 120
+
+
+# ----------------------------------------------------------------- mode routing
+def route(mode: str, text: str, ctx: dict) -> list[tuple[str, list]]:
+    """An assistant mode (Bridge.state) -> engine commands.
+
+    ctx: {"engine": the engine's current state name, "paused_until": epoch s
+    or 0, "paused_since": epoch s, "now": epoch s, "woke_at": epoch s of the
+    last wake word (0 = none), "input": the talk-or-type field is open}.
+    """
+    st = ctx.get("engine", "ready")
+    now = ctx.get("now", time.time())
+    rest_like = st in ("ready", "off", "paused", "loading", "mismatch", "error")
+    if mode == "idle":
+        return [("go", ["ready", {}])]
+    if mode == "off":
+        until = float(ctx.get("paused_until") or 0)
+        if until > now:
+            since = float(ctx.get("paused_since") or now)
+            return [("go", ["paused", {"until": until * 1000, "since": since * 1000}])]
+        return [("go", ["off", {}])]
+    if mode == "loading":
+        return [("go", ["loading", {"text": text or "loading…"}])]
+    if mode == "listening":
+        if ctx.get("input"):
+            return []                                  # the field already shows the mic
+        if st in ("woke",):
+            return []                                  # the catch hands over to listening itself
+        if st in ("listening",):
+            return []
+        if rest_like or st in ("thinking", "speaking"):
+            return [("go", ["woke", {}])]              # hotkey / click / barge-in: the catch
+        return [("go", ["listening", {}])]            # followup / holding -> relabel
+    if mode == "holding":
+        muted = text == "muted"
+        return [("go", ["holding", {"muted": muted}])]
+    if mode == "followup":
+        try:
+            secs = float(text or 5)
+        except ValueError:
+            secs = 5.0
+        return [("go", ["followup", {"seconds": secs}])]
+    if mode == "thinking":
+        if ctx.get("input"):
+            return []
+        if st == "thinking":
+            return [("setThinkText", [text or "…"])]
+        return [("go", ["thinking", {"text": text or "…"}])]
+    if mode == "speaking":
+        if st == "speaking":
+            return [("setSpeakText", [text or ""])]
+        return [("go", ["speaking", {"text": text or ""}])]
+    if mode == "error":
+        return [("go", ["error", {"text": text or "something went wrong"}])]
+    return [("go", ["thinking", {"text": text or mode}])]
+
+
+def stt_short(label: str) -> str:
+    """"gpu (turbo)" -> "gpu"; "cpu (gpu busy 83%)" -> "cpu · gpu busy 83%"."""
+    dev, _, inside = (label or "").partition(" (")
+    inside = inside.rstrip(")").replace("fallback: ", "")
+    return f"{dev} · {inside}" if " " in inside or inside == "premiere" else dev
+
+
+def badge_dir(old: str, new: str) -> int:
+    """+1 an upgrade (to the GPU), -1 a downgrade, 0 neither."""
+    o, n = old.split(" ")[0] if old else "", new.split(" ")[0] if new else ""
+    if o == n or not o:
+        return 0
+    return 1 if n == "gpu" else -1 if o == "gpu" else 0
+
+
+def resolve_motion(setting: str | None) -> str:
+    """island.motion: auto (calm when Windows animations are off) | full | calm | off."""
+    s = str(setting or "auto").strip().lower()
+    if s in ("full", "calm", "off"):
+        return s
+    try:
+        from .winsys import client_area_animation
+        return "full" if client_area_animation() else "calm"
+    except Exception:
+        return "full"
+
+
+def task_rows(rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows[-5:]:
+        st = r.get("status", "")
+        right = r.get("activity") if st in ("starting", "running") else (r.get("summary") or st)
+        out.append({"id": str(r.get("id")), "name": f"{r.get('project', '')}: {r.get('prompt', '')}",
+                    "status": "running" if st in ("starting", "running") else st,
+                    "right": str(right or st or ""), "elapsed": str(r.get("elapsed", ""))})
+    return out
+
+
+# ----------------------------------------------------------------- QML side
+class _ArtProvider(QQuickImageProvider):
+    """image://island/<key>: album art and other in-memory images."""
+
+    def __init__(self):
+        super().__init__(QQuickImageProvider.Image)
+        self.images: dict[str, QImage] = {}
+
+    def requestImage(self, key, size, requested):
+        img = self.images.get(key.split("?")[0], QImage())
+        if size is not None:
+            try:
+                size.setWidth(img.width())
+                size.setHeight(img.height())
+            except Exception:
+                pass
+        return img
+
+
+class IslandModel(QObject):
+    """What Island.qml sees as `model`."""
+    cmd = Signal(str, "QVariantList")
+    # extras (Extras.qml)
+    effectShown = Signal("QVariantMap")
+    effectArt = Signal(str, str)
+    widgetShown = Signal("QVariantMap")
+    widgetCleared = Signal()
+    approvalShown = Signal("QVariantMap")
+    approvalCleared = Signal(str)
+    toolsChanged = Signal("QVariantList")
+    usageChanged = Signal()
+    configChanged = Signal()
+
+    def __init__(self, owner: "QmlIsland"):
+        super().__init__()
+        self.o = owner
+        self._usage: dict = {}
+        self._band = 0.0
+        self._top_margin = -1
+        self._software = False
+        self._usage_on = True
+
+    # properties -------------------------------------------------------------
+    def _get_band(self):
+        return self._band
+
+    band = Property(float, _get_band, notify=configChanged)
+
+    def _get_tm(self):
+        return self._top_margin
+
+    topMargin = Property(int, _get_tm, notify=configChanged)
+
+    def _get_sw(self):
+        return self._software
+
+    software = Property(bool, _get_sw, notify=configChanged)
+
+    def _get_clock(self):
+        return "real"
+
+    clockMode = Property(str, _get_clock, constant=True)
+
+    def _get_usage(self):
+        return self._usage
+
+    usage = Property("QVariantMap", _get_usage, notify=usageChanged)
+
+    def _get_usage_on(self):
+        return self._usage_on and bool(self._usage)
+
+    usageOn = Property(bool, _get_usage_on, notify=usageChanged)
+
+    # slots from QML ------------------------------------------------------------
+    @Slot()
+    def ready(self):
+        self.o._qml_ready()
+
+    @Slot(str)
+    def log(self, msg):
+        print(msg)
+
+    @Slot(float)
+    def frame(self, gap):
+        self.o._frame(gap)
+
+    @Slot(int, int, int, int)
+    def setMask(self, x, y, w, h):
+        self.o._set_mask(x, y, w, h)
+
+    @Slot(bool)
+    def hover(self, on):
+        self.o.hovering = on
+
+    @Slot()
+    def activate(self):
+        self.o.activate.emit()
+
+    @Slot()
+    def stopSpeaking(self):
+        self.o.stop_speaking.emit()
+
+    @Slot()
+    def interruptTalk(self):
+        self.o.interrupt_talk.emit()
+
+    @Slot()
+    def notMe(self):
+        self.o._not_me_clicked()
+
+    @Slot()
+    def contextMenu(self):
+        self.o._menu(QCursor.pos())
+
+    @Slot(int)
+    def openTask(self, i):
+        self.o._open_task(i)
+
+    @Slot("QVariantList")
+    def filesDropped(self, urls):
+        self.o._files_dropped([str(u) for u in urls])
+
+    @Slot(str, bool, result=bool)
+    def inputEnter(self, text, shift):
+        s = self.o.session
+        return bool(s and s.key_enter(text, shift))
+
+    @Slot()
+    def inputEscape(self):
+        if self.o.session is not None:
+            print("[input] Esc")
+            self.o.session.key_escape()
+
+    @Slot(str)
+    def inputEdited(self, text):
+        if self.o.session is not None:
+            self.o.session.edited(text)
+
+    @Slot(str, str)
+    def effectClicked(self, kind, ev_id):
+        self.o._effect_clicked(kind, ev_id)
+
+    @Slot(str, str)
+    def approvalDecided(self, ap_id, action):
+        self.o._approval_decided(ap_id, action)
+
+    @Slot(str, str, "QVariant")
+    def widgetAction(self, wid, action, payload):
+        self.o._widget_action(wid, action, payload)
+
+    @Slot(str)
+    def openUrl(self, url):
+        self.o._open_url(url)
+
+    @Slot(str)
+    def copyText(self, text):
+        QGuiApplication.clipboard().setText(text)
+
+
+class QmlIsland(QObject):
+    """Drop-in replacement for island.Island, drawn in QML."""
+    activate = Signal()
+    stop_speaking = Signal()
+    interrupt_talk = Signal()
+    effect_undo = Signal(str)
+    effect_confirm = Signal(str)
+    effect_cancel = Signal(str)
+    quit_requested = Signal()
+    not_me = Signal()
+    # new in M5
+    files_dropped = Signal(list)                 # local paths
+    widget_action = Signal(str, str, object)     # widget id, action, payload
+    approval_decided = Signal(str, str)          # M7: approval id, action id
+
+    NOT_ME_S = NOT_ME_S
+
+    def __init__(self, bridge, cfg: dict, task_manager=None, wake_label: str = "hey jarvis",
+                 software: bool | None = None, show: bool = True):
+        super().__init__()
+        self.cfg = cfg
+        self.bridge = bridge
+        self.tm = task_manager
+        self._wake_label = wake_label
+        self.session = None
+        self.input_open = False
+        self.hovering = False
+        self.mode, self.text = "loading", "starting up…"
+        self.last_wake_t = 0.0
+        self.wake_listening = False
+        self.partial = ""
+        self.paused_until = 0.0
+        self.paused_since = 0.0
+        self.stt_label = ""
+        self.voice_label = ""
+        self.task_rows: list[dict] = []
+        self.log_windows: dict = {}
+        self.engine_state = "loading"
+        self._prev_fg = 0
+        self._restore_focus = True
+        self._away_since = 0.0
+        self._ready = False
+        self._queue: list[tuple[str, list]] = []
+        self._mask = (0, 0, 0, 0)
+        self._last_gap = None
+        self.frames = 0
+        self.effect: dict | None = None
+        self.widget: dict | None = None
+        self.approvals: dict[str, dict] = {}
+        self.tools: dict[str, dict] = {}
+
+        self.model = IslandModel(self)
+        self.model._usage_on = bool(cfg.get("usage_pill", True))
+        if software is None:
+            software = str(cfg.get("renderer", "auto")).lower() == "software"
+        if software:
+            QQuickWindow.setGraphicsApi(QSGRendererInterface.Software)
+        self.model._software = bool(software)
+        QQuickWindow.setDefaultAlphaBuffer(True)
+
+        self.view = QQuickView()
+        self.view.setColor(Qt.transparent)
+        self.view.setFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+                           | Qt.WindowDoesNotAcceptFocus | Qt.NoDropShadowWindowHint)
+        self.view.setTitle("hey-claude island")
+        self.view.setResizeMode(QQuickView.SizeRootObjectToView)
+        self.art = _ArtProvider()
+        self.view.engine().addImageProvider("island", self.art)
+        self.view.rootContext().setContextProperty("model", self.model)
+        self.view.statusChanged.connect(self._status)
+        self.view.setSource(QUrl.fromLocalFile(str(QML_DIR / "Island.qml")))
+        if self.view.status() == QQuickView.Error:
+            errs = "; ".join(e.toString() for e in self.view.errors())
+            raise RuntimeError(f"island QML failed to load: {errs}")
+        self.root = self.view.rootObject()
+        self.view.resize(WIN_W, WIN_H)
+        self.apply_config()
+        self.view.sceneGraphError.connect(lambda err, msg: print(f"[island] scene graph error: {msg}"))
+
+        # inputs
+        bridge.state.connect(self.set_state)
+        bridge.level.connect(self.push_level)
+        bridge.tasks.connect(self.set_tasks)
+        bridge.listening.connect(self._listening)
+        bridge.stt.connect(self.set_stt)
+        bridge.heard.connect(self._heard)
+        bridge.partial.connect(self.set_partial)
+        bridge.voice.connect(self.set_voice)
+        bridge.wake.connect(self.set_wake_label)
+        bridge.wake_hit.connect(self._wake_hit)
+        bridge.effect.connect(self.show_effect)
+        bridge.effect_art.connect(self._effect_art)
+        for name, slot in (("tts_level", self.push_tts), ("widget", self.show_widget), ("tool", self.tool_event),
+                           ("usage", self.set_usage), ("approval", self.show_approval),
+                           ("approval_withdrawn", self.withdraw_approval), ("session_event", self.session_event),
+                           ("mismatch", self.voice_mismatch)):
+            sig = getattr(bridge, name, None)
+            if sig is not None:
+                sig.connect(slot)
+
+        self._focus_timer = QTimer(self, interval=150, timeout=self._check_focus)
+        self._env_timer = QTimer(self, interval=5000, timeout=self._check_env)
+        self._env_timer.start()
+        self._suspended = False
+        self._battery = None
+        self._check_env()
+        if show:
+            self.show()
+
+    # -- window ---------------------------------------------------------------------
+    def _status(self, st):
+        if st == QQuickView.Error:
+            for e in self.view.errors():
+                print(f"[island] QML: {e.toString()}")
+
+    def _screen(self):
+        screens = QGuiApplication.screens()
+        sel = self.cfg.get("screen", "primary")
+        return screens[int(sel)] if str(sel).isdigit() and int(sel) < len(screens) else QGuiApplication.primaryScreen()
+
+    def apply_config(self):
+        """Position, top margin, motion, hide-when-idle: re-read from cfg (Settings changes apply live)."""
+        s = self._screen()
+        g, ag = s.geometry(), s.availableGeometry()
+        band = max(0, ag.y() - g.y())
+        m = self.cfg.get("top_margin", "auto")
+        self.model._top_margin = int(m) if str(m).strip().lstrip("-").isdigit() else -1
+        self.model._band = float(band)
+        self.model.configChanged.emit()
+        self.view.setScreen(s)
+        # `window_y` moves the whole window down (the motion lab, so it never sits on a running island)
+        self.view.setPosition(g.x() + (g.width() - WIN_W) // 2, g.y() + int(self.cfg.get("window_y", 0) or 0))
+        self.motion = resolve_motion(self.cfg.get("motion", "auto"))
+        self._send("setMotion", [self.motion])
+        self._send("setHideIdle", [bool(self.cfg.get("hide_when_idle", False))])
+        self.model._usage_on = bool(self.cfg.get("usage_pill", True))
+        self.model.usageChanged.emit()
+        self._send("setUsageRow", [self.model._usage_on and bool(self.model._usage)])
+
+    _place = apply_config           # island.Island's name for it (__main__ calls it on Settings changes)
+
+    def show(self):
+        from .winsys import set_no_activate
+        self.view.show()
+        set_no_activate(int(self.view.winId()), True)
+
+    def raise_(self):
+        self.view.raise_()
+
+    def hide(self):
+        self.view.hide()
+
+    def winId(self):
+        return self.view.winId()
+
+    def _set_mask(self, x, y, w, h):
+        self._mask = (x, y, w, h)
+        self.view.setMask(QRegion(QRect(x, y, max(1, w), max(1, h))))
+
+    def _frame(self, gap):
+        self._last_gap = gap          # the driver tier changed: ms between frames, 0 = live, -1 = stopped
+
+    def _send(self, fn: str, args: list):
+        if not self._ready:
+            self._queue.append((fn, args))
+            return
+        self.model.cmd.emit(fn, args)
+
+    def _qml_ready(self):
+        self._ready = True
+        q, self._queue = self._queue, []
+        for fn, args in q:
+            self.model.cmd.emit(fn, args)
+
+    def _check_env(self):
+        """Every 5 s: suspend in full-screen apps / when the screen is locked; 30 fps on battery."""
+        try:
+            from .winsys import fullscreen_app, on_battery
+            susp = fullscreen_app() and self.mode in ("idle", "off") and not self.input_open
+            batt = on_battery()
+        except Exception:
+            return
+        if susp != self._suspended:
+            self._suspended = susp
+            self._send("suspend", [susp])
+        if batt != self._battery:
+            self._battery = batt
+            self._send("setLiveCap", [30 if (batt or self.model._software) else 60])
+
+    # -- inputs from the assistant --------------------------------------------------
+    def set_state(self, mode: str, text: str = ""):
+        prev = self.mode
+        self.mode, self.text = mode, text
+        if mode not in ("listening", "holding", "followup"):
+            self.partial = ""
+        if mode != "listening":
+            self.wake_listening = False
+        ctx = {"engine": self.engine_state, "paused_until": self.paused_until, "paused_since": self.paused_since,
+               "now": time.time(), "input": self.input_open}
+        for fn, args in route(mode, text, ctx):
+            self._send(fn, args)
+            if fn == "go":
+                self.engine_state = "listening" if args[0] == "woke" else args[0]
+        self._update_not_me()
+        if mode == "thinking" and prev != "thinking":
+            self.tools.clear()
+            self._send("setTool", ["", ""])
+        if mode in ("idle", "off") and self.widget and self.widget.get("_expire_on_rest"):
+            pass
+        snap = os.environ.get("HEYCLAUDE_SNAP")
+        if snap:
+            QTimer.singleShot(450, lambda m=mode: self.grab().save(os.path.join(snap, f"{time.strftime('%H%M%S')}-{m}.png")))
+
+    def _listening(self, on: bool, until: float):
+        if until and until > time.time():
+            self.paused_until = float(until)
+            self.paused_since = time.time()
+        else:
+            self.paused_until = 0.0
+        if self.engine_state == "paused" and self.paused_until:
+            self._send("setPaused", [self.paused_until * 1000])
+
+    def push_level(self, v: float):
+        self._send("pushLevel", [float(v)])
+
+    def push_tts(self, v: float):
+        self._send("pushTts", [float(v)])
+
+    def set_tasks(self, rows: list):
+        before = {r["id"]: r["status"] for r in self.task_rows}
+        self.task_rows = list(rows)
+        self._send("setTasks", [task_rows(rows)])
+        if any(before.get(r["id"]) != r["status"] for r in rows):
+            self._send("popList", [6000])
+        for r in rows:
+            lw = self.log_windows.get(r["id"])
+            if lw:
+                lw.update_task(r)
+
+    def set_stt(self, label: str):
+        old = self.stt_label
+        self.stt_label = label
+        self._send("setBadge", [stt_short(label), badge_dir(old, label)])
+
+    def set_voice(self, label: str):
+        self.voice_label = label
+
+    def set_wake_label(self, label: str):
+        self.wake_label = label
+
+    def _get_wake_label(self):
+        return self._wake_label
+
+    def _set_wake_label(self, v):
+        self._wake_label = v
+        self._send("setWakeLabel", [v])
+
+    wake_label = property(_get_wake_label, _set_wake_label)
+
+    def _get_show_until(self):
+        return 0.0
+
+    def _set_show_until(self, t):
+        ms = max(0, int((float(t) - time.time()) * 1000))
+        if ms:
+            self._send("popList", [ms])
+
+    show_tasks_until = property(_get_show_until, _set_show_until)
+
+    def set_partial(self, text: str):
+        self.partial = text if self.mode in ("listening", "holding", "followup") else ""
+        self._send("setPartial", [self.partial])
+        self._update_not_me()
+
+    def _wake_hit(self, t: float):
+        self.last_wake_t = t
+        self.wake_listening = True
+        if not self.input_open:
+            self._send("go", ["woke", {}])
+            self.engine_state = "listening"
+        self._update_not_me()
+
+    def voice_mismatch(self, *_):
+        self._send("go", ["mismatch", {}])
+        self.engine_state = "ready"
+
+    def _update_not_me(self):
+        on = self.mode == "listening" and self.wake_listening and not self.partial
+        self._send("setNotMe", [on])
+
+    def _not_me_clicked(self):
+        self.wake_listening = False
+        self._update_not_me()
+        self.not_me.emit()
+
+    def flash(self, text: str, secs: float = 2.5):
+        self._send("flashLabel", [text, int(secs * 1000)])
+
+    # -- talk-or-type ------------------------------------------------------------------
+    def attach_input(self, open_mic, cancel_mic, submit, closed=None):
+        from .inputbox import InputSession
+        self._on_closed = closed
+        self._submit_cb = submit
+        self.session = InputSession(open_mic, cancel_mic, self._submit_with_attachment,
+                                    show=self._show_input, close=self._hide_input)
+        self.attachment: list[str] = []
+
+    def _submit_with_attachment(self, text: str):
+        att, self.attachment = getattr(self, "attachment", []), []
+        wrap, self._wrap = getattr(self, "_wrap", None), None
+        if wrap is not None:
+            text = wrap(text)
+        if att:
+            from .widgets import attachment_prompt
+            text = attachment_prompt(att, text)
+        self._submit_cb(text)
+
+    def open_input(self, prefill: str = "", wrap=None):
+        """Open the talk-or-type field with some text in it; `wrap(text)` turns what
+        the user sends into the request (e.g. a Telegram draft being edited)."""
+        if self.session is None:
+            return
+        self._wrap = wrap
+        if not self.session.is_open:
+            self.session.hotkey()
+        if prefill:
+            self._send("inputText", [prefill])
+
+    def toggle_input(self):
+        if self.session is not None:
+            if self.session.is_open:
+                print("[input] hotkey pressed again: closing the field")
+            self.session.hotkey()
+
+    def _show_input(self):
+        from .winsys import force_foreground, foreground_window, set_no_activate
+        self._prev_fg = foreground_window()
+        self._restore_focus = True
+        self._away_since = 0.0
+        self._opened_at = time.monotonic()
+        self.input_open = True
+        hwnd = int(self.view.winId())
+        set_no_activate(hwnd, False)
+        self._send("openInput", [", ".join(Path(p).name for p in getattr(self, "attachment", []))])
+        self.engine_state = "input"
+        self.view.requestActivate()
+        ok = force_foreground(hwnd)
+        self._focus_timer.start()
+        print(f"[input] open (focus {'ok' if ok else 'NOT taken'})")
+
+    def _hide_input(self, submitted: bool):
+        from .winsys import restore_foreground, set_no_activate
+        self.input_open = False
+        self._focus_timer.stop()
+        self._send("closeInput", [bool(submitted)])
+        set_no_activate(int(self.view.winId()), True)
+        if getattr(self, "_on_closed", None):
+            self._on_closed()
+        if self._restore_focus and self._prev_fg:
+            restore_foreground(self._prev_fg)
+        self._prev_fg = 0
+        if not submitted:
+            self.attachment = []
+            self._wrap = None
+        print(f"[input] {'sent' if submitted else 'cancelled'}")
+        if not submitted:
+            self.engine_state = "ready"
+            self.set_state(self.mode, self.text)        # back to whatever the assistant shows
+        else:
+            self.engine_state = "thinking"
+            self._send("go", ["thinking", {"text": "…"}])
+
+    def _heard(self, text: str):
+        if self.session is None or not self.input_open:
+            return
+        if text.strip():
+            self._send("inputText", [text])
+        self.session.heard(text)
+
+    def _check_focus(self):
+        if not self.input_open or time.monotonic() - self._opened_at < 0.5:
+            return
+        from .winsys import foreground_is_ours, foreground_window, window_title
+        if foreground_is_ours():
+            self._away_since = 0.0
+            return
+        now = time.monotonic()
+        if not self._away_since:
+            self._away_since = now
+        elif now - self._away_since > 0.3 and self.session is not None:
+            self._away_since = 0.0
+            print(f"[input] focus moved to {window_title(foreground_window())!r}: closing the field")
+            self._restore_focus = False
+            self.session.cancel()
+
+    # -- file drop ---------------------------------------------------------------------
+    def _files_dropped(self, urls: list[str]):
+        paths = []
+        for u in urls:
+            p = QUrl(u).toLocalFile() if u.startswith("file:") else ""
+            if p and os.path.exists(p):
+                paths.append(os.path.normpath(p))
+        if not paths:
+            self.flash("only files can be dropped here")
+            return
+        print(f"[drop] {len(paths)} file(s): {', '.join(Path(p).name for p in paths)}")
+        self.files_dropped.emit(paths)
+        if self.session is not None:
+            self.attachment = paths
+            if not self.session.is_open:
+                self.session.hotkey()               # opens the field (mic on) with the file attached
+            else:
+                self._send("openInput", [", ".join(Path(p).name for p in paths)])
+
+    # -- M9 effects ----------------------------------------------------------------------
+    def show_effect(self, ev: dict):
+        self.effect = dict(ev)
+        self.model.effectShown.emit(_qml_safe(ev))
+
+    def _effect_art(self, effect_id: str, data):
+        img = QImage()
+        if data and img.loadFromData(bytes(data)):
+            self.art.images[f"art-{effect_id}"] = img
+            self.model.effectArt.emit(effect_id, f"image://island/art-{effect_id}")
+
+    def _effect_clicked(self, kind: str, ev_id: str):
+        print(f"[effects] {kind} clicked")
+        sig = {"undo": self.effect_undo, "confirm": self.effect_confirm, "cancel": self.effect_cancel}.get(kind)
+        if sig is not None:
+            sig.emit(ev_id)
+
+    # -- response widgets ---------------------------------------------------------------
+    def show_widget(self, spec: dict):
+        from .widgets import for_qml
+        w = for_qml(spec)
+        if w is None:
+            return
+        self.widget = w
+        self.model.widgetShown.emit(w)
+
+    def clear_widget(self):
+        self.widget = None
+        self.model.widgetCleared.emit()
+
+    def _widget_action(self, wid: str, action: str, payload):
+        print(f"[widget] {action} on {wid}")
+        w = self.widget or {}
+        if action in ("dismiss", "cancel"):
+            self.widget = None
+        elif action == "edit" and w.get("widget") == "telegram_draft":
+            chat = (w.get("data") or {}).get("chat", "")
+            self.open_input(str(payload or ""), wrap=lambda t, c=chat: f"Change the Telegram draft to {c} to this "
+                            f"(show it again as a telegram_draft card, don't send it): {t}")
+        elif action == "send":
+            self.flash("sending needs approvals (coming in M7)", 3.0)
+        self.widget_action.emit(wid, action, payload)
+
+    def _open_url(self, url: str):
+        from .widgets import safe_open
+        safe_open(url)
+
+    # -- service icons for tools in use ------------------------------------------------
+    def tool_event(self, ev: dict):
+        """{"id", "name", "phase": "start" | "end", "input"?} from the tool agent (or an M7 session)."""
+        from .service_icons import describe
+        tid = str(ev.get("id") or ev.get("name"))
+        if ev.get("phase") == "end":
+            self.tools.pop(tid, None)
+        else:
+            d = describe(ev.get("name", ""), ev.get("input") or {}, self.cfg.get("service_icons") or {},
+                         fetch=bool(self.cfg.get("fetch_favicons", False)))
+            if d is None:
+                return
+            self.tools[tid] = d
+        self.model.toolsChanged.emit(list(self.tools.values()) if self.cfg.get("icons", True) else [])
+        if self.tools:
+            d = list(self.tools.values())[-1]
+            n = len(self.tools)
+            label = d["label"] + (f"  +{n - 1}" if n > 1 else "")
+            self._send("setTool", [label, ""])
+        else:
+            self._send("setTool", ["", ""])
+
+    # -- plan usage ----------------------------------------------------------------------
+    def set_usage(self, info: dict):
+        self.model._usage = dict(info or {})
+        self.model.usageChanged.emit()
+        self._send("setUsageRow", [self.model._usage_on and bool(self.model._usage)])
+
+    # -- M7: approval cards and session events ------------------------------------------
+    def show_approval(self, req: dict):
+        """{"id", "title", "detail"?, "tool"?, "session"?, "actions": [{"id", "label", "primary"?}], "ttl_s"?}"""
+        if not req.get("id"):
+            return
+        req = dict(req)
+        req.setdefault("actions", [{"id": "allow", "label": "Allow", "primary": True}, {"id": "deny", "label": "Deny"}])
+        if req.get("tool"):
+            from .service_icons import describe
+            d = describe(str(req["tool"]), {}, self.cfg.get("service_icons") or {})
+            if d:
+                req.setdefault("icon_url", d.get("icon_url", ""))
+                req.setdefault("service", d.get("service", ""))
+        self.approvals[req["id"]] = req
+        self.model.approvalShown.emit(_qml_safe(req))
+
+    def withdraw_approval(self, ap_id: str):
+        if self.approvals.pop(ap_id, None) is not None:
+            self.model.approvalCleared.emit(ap_id)
+
+    def _approval_decided(self, ap_id: str, action: str):
+        if self.approvals.pop(ap_id, None) is None:
+            return
+        print(f"[approval] {ap_id}: {action}")
+        self.approval_decided.emit(ap_id, action)
+
+    def session_event(self, ev: dict):
+        """{"session", "kind": tool | tool_done | idle | done | error | started, "tool"?, "text"?}"""
+        kind = ev.get("kind")
+        sid = f"session:{ev.get('session', '')}"
+        if kind == "tool" and ev.get("tool"):
+            self.tool_event({"id": sid, "name": ev["tool"], "phase": "start", "input": ev.get("input") or {}})
+        elif kind in ("tool_done", "idle", "done", "error"):
+            self.tool_event({"id": sid, "phase": "end"})
+        if kind in ("done", "error") and self.mode in ("idle", "off"):
+            label = ev.get("text") or f"{ev.get('session', 'session')} {'finished' if kind == 'done' else 'stopped'}"
+            self.flash(label, 3.0)
+
+    # -- tasks: log windows, menu ----------------------------------------------------------
+    def _open_task(self, i: int):
+        rows = self.task_rows[-5:]
+        if 0 <= i < len(rows):
+            self.open_log(rows[i])
+
+    def open_log(self, row: dict):
+        from .island import LogWindow
+        w = self.log_windows.get(row["id"])
+        if w is None:
+            w = LogWindow(row, self.tm)
+            self.log_windows[row["id"]] = w
+        w.show()
+        w.raise_()
+        w.activateWindow()
+
+    def _menu(self, at: QPoint):
+        from PySide6.QtWidgets import QMenu
+        m = QMenu()
+        m.addAction("Talk now", self.activate.emit)
+        m.addAction("Stop speaking", self.stop_speaking.emit)
+        if self.last_wake_t and time.time() - self.last_wake_t < self.NOT_ME_S:
+            a = m.addAction(f"That wasn't me (the wake {int(time.time() - self.last_wake_t)} s ago)", self._not_me_clicked)
+            a.setToolTip("Saves the audio that woke it as a \"not the wake word\" example for the next "
+                         "Settings → Wake word tune-up.")
+        if self.widget is not None:
+            m.addAction("Dismiss the card", self.clear_widget)
+        if self.stt_label:
+            m.addAction(f"Speech-to-text: {self.stt_label}").setEnabled(False)
+        if self.voice_label:
+            m.addAction(f"Voice: {self.voice_label}").setEnabled(False)
+        m.addSeparator()
+        m.addAction("Open logs folder", lambda: os.startfile(str(ROOT / "state" / "logs")))
+        m.addSeparator()
+        m.addAction("Quit", self.quit_requested.emit)
+        self._menu_ref = m
+        m.exec(at)
+
+    # -- debugging / tests ---------------------------------------------------------------
+    def grab(self) -> QImage:
+        return self.view.grabWindow()
+
+    def call(self, fn: str, *args):
+        """Call a function of Island.qml (tests, the motion lab)."""
+        from PySide6.QtCore import QMetaObject, Q_RETURN_ARG, Q_ARG
+        ret = QMetaObject.invokeMethod(self.root, fn, Qt.DirectConnection, Q_RETURN_ARG("QVariant"),
+                                       *[Q_ARG("QVariant", a) for a in args])
+        return ret
+
+    def close(self):
+        self._env_timer.stop()
+        self._focus_timer.stop()
+        self.view.close()
+
+
+def _qml_safe(v):
+    """JSON-ish values only (QVariantMap can't carry bytes or sets)."""
+    if isinstance(v, dict):
+        return {str(k): _qml_safe(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_qml_safe(x) for x in v]
+    if isinstance(v, (str, int, float, bool)) or v is None:
+        return v
+    return str(v)

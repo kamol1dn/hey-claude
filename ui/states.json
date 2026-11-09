@@ -1,0 +1,47 @@
+{
+  "_doc": [
+    "The state registry shared by island themes (M5) and character packs (M6). Versioned major.minor:",
+    "a new state is a new entry with a sensible fallback and a minor bump, so an older theme or pack",
+    "never breaks; a state it doesn't implement walks its fallback chain to one it does.",
+    "Core states (no fallback) must be implemented by every theme and pack.",
+    "inputs: the live values a state gets. kind: loop (holds until the next state) or oneshot (plays once,",
+    "then the app moves on). aliases: names the assistant uses for the same state (Bridge.state modes).",
+    "heyclaude/states.py loads, validates and resolves it."
+  ],
+  "version": "1.0",
+  "inputs": {
+    "level": "mic level 0..1 (~12 Hz while the mic is open)",
+    "amplitude": "loudness of the voice it is speaking 0..1 (~30 Hz)",
+    "progress": "0..1 of something with an end (loading, a pause, the followup window)",
+    "count": "how many (running tasks)",
+    "mood": "neutral | happy | confused",
+    "cursor": "pointer position relative to the island",
+    "theme": "the theme's colours",
+    "text": "the line shown with the state"
+  },
+  "core": ["idle", "off", "listening", "thinking", "talking"],
+  "states": [
+    {"id": "idle", "description": "Wake word armed, nothing happening (all day).", "inputs": ["count", "mood", "cursor", "theme"], "kind": "loop", "fallback": null, "aliases": ["ready"]},
+    {"id": "off", "description": "Listening switched off: the mic is closed.", "inputs": ["count", "theme"], "kind": "loop", "fallback": null, "aliases": []},
+    {"id": "listening", "description": "The mic is open and it is hearing the user.", "inputs": ["level", "text"], "kind": "loop", "fallback": null, "aliases": []},
+    {"id": "thinking", "description": "Working out the answer.", "inputs": ["text"], "kind": "loop", "fallback": null, "aliases": []},
+    {"id": "talking", "description": "Speaking the answer.", "inputs": ["amplitude", "text"], "kind": "loop", "fallback": null, "aliases": ["speaking"]},
+
+    {"id": "woke", "description": "The wake word (or the hotkey) just fired: the catch.", "inputs": [], "kind": "oneshot", "fallback": "listening", "aliases": []},
+    {"id": "holding", "description": "The hold key is down: pauses don't end the turn.", "inputs": ["level"], "kind": "loop", "fallback": "listening", "aliases": []},
+    {"id": "holding_muted", "description": "Hold key down with Ctrl+Shift: still holding, the mic muted.", "inputs": [], "kind": "loop", "fallback": "off", "aliases": []},
+    {"id": "followup", "description": "Listening again without the wake word for a few seconds after an answer.", "inputs": ["level", "progress"], "kind": "loop", "fallback": "listening", "aliases": []},
+    {"id": "input", "description": "The talk-or-type field is open (hotkey).", "inputs": ["level", "text"], "kind": "loop", "fallback": "listening", "aliases": []},
+    {"id": "dictating", "description": "Dictation into another app (M4d).", "inputs": ["level", "text"], "kind": "loop", "fallback": "listening", "aliases": []},
+    {"id": "loading", "description": "Models are loading or reloading.", "inputs": ["progress", "text"], "kind": "loop", "fallback": "thinking", "aliases": []},
+    {"id": "paused", "description": "Listening paused for a while; it resumes by itself.", "inputs": ["progress"], "kind": "loop", "fallback": "off", "aliases": []},
+    {"id": "working", "description": "A task or a watched session is running.", "inputs": ["count", "text"], "kind": "loop", "fallback": "thinking", "aliases": []},
+    {"id": "sending", "description": "Sending something on the user's behalf (Telegram etc.), after approval.", "inputs": ["progress"], "kind": "oneshot", "fallback": "working", "aliases": []},
+    {"id": "approval_needed", "description": "Waiting for the user to approve an action (M7).", "inputs": ["text"], "kind": "loop", "fallback": "confused", "aliases": []},
+    {"id": "done", "description": "A task finished well.", "inputs": ["text"], "kind": "oneshot", "fallback": "happy", "aliases": []},
+    {"id": "happy", "description": "Something went well.", "inputs": [], "kind": "oneshot", "fallback": "idle", "aliases": []},
+    {"id": "error", "description": "Something failed.", "inputs": ["text"], "kind": "oneshot", "fallback": "confused", "aliases": []},
+    {"id": "confused", "description": "It didn't understand, or needs the user.", "inputs": [], "kind": "oneshot", "fallback": "idle", "aliases": []},
+    {"id": "voice_mismatch", "description": "The speaker check rejected a wake (not your voice?).", "inputs": [], "kind": "oneshot", "fallback": "confused", "aliases": ["mismatch"]}
+  ]
+}

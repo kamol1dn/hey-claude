@@ -82,7 +82,7 @@ def main():
             sys.exit(0)
 
     from .assistant import Assistant
-    from .island import Bridge, Island
+    from .island import Bridge, make_island
 
     bridge = Bridge()
     bridge.quit.connect(app.quit)
@@ -231,7 +231,7 @@ def main():
     island = None
     if not args.no_ui:
         from .listen import resolve_wake_model, wake_label
-        island = Island(bridge, cfg["island"], wake_label=wake_label(resolve_wake_model(cfg["wake"]["model"])[0]))
+        island = make_island(bridge, cfg["island"], wake_label=wake_label(resolve_wake_model(cfg["wake"]["model"])[0]))
         island.activate.connect(asst.talk_now)
         island.attach_input(asst.begin_input, asst.cancel_input_mic, asst.submit_text, closed=asst.end_input)
         island.stop_speaking.connect(asst.hush)
@@ -248,6 +248,14 @@ def main():
             island.last_wake_t = 0.0
             island.flash("saved: not the wake word" if path else "no recent wake to save")
         island.not_me.connect(not_me)
+
+        # M5: response widgets that act (a timer ending is said aloud)
+        def widget_action(wid, action, payload):
+            if action == "timer_done":
+                label = str(payload or "").strip()
+                asst.announce(f"Your {label} timer is done." if label else "Your timer is done.")
+        if hasattr(island, "widget_action"):
+            island.widget_action.connect(widget_action)
 
         def attach_tm():
             asst.ready.wait()

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kamol1dn/hey-claude/ui/widgets.schema.json",
+  "title": "hey-claude response widget",
+  "description": "The one contract for response widgets (ROADMAP M5). An answer may end with one line `WIDGET {json}` (not read aloud); the island draws it under the head. Both answering tiers are prompted from this file (heyclaude/widgets.py). A widget whose name isn't listed, or whose data doesn't validate, falls back to its `text` (or nothing). Telegram sending stays off until M7's approvals: telegram_draft shows Send disabled.",
+  "x-version": "1.0",
+  "type": "object",
+  "required": ["widget", "data"],
+  "properties": {
+    "widget": {"type": "string"},
+    "data": {"type": "object"},
+    "text": {"type": "string", "maxLength": 200, "description": "fallback line if the widget can't be shown"},
+    "ttl_s": {"type": "number", "minimum": 3, "maximum": 3600, "description": "how long it stays after the answer (default 12)"}
+  },
+  "x-widgets": {
+    "weather": {
+      "description": "current weather and a short forecast",
+      "example": {"location": "Tashkent", "temp": 21, "unit": "C", "condition": "Partly cloudy", "icon": "partly", "high": 24, "low": 13, "hourly": [{"time": "15:00", "temp": 22, "icon": "sun"}]},
+      "schema": {"type": "object", "required": ["location", "temp"], "properties": {
+        "location": {"type": "string", "maxLength": 40},
+        "temp": {"type": "number"},
+        "unit": {"type": "string", "enum": ["C", "F"]},
+        "condition": {"type": "string", "maxLength": 40},
+        "icon": {"type": "string", "enum": ["sun", "partly", "cloud", "rain", "storm", "snow", "fog", "wind", "night"]},
+        "high": {"type": "number"},
+        "low": {"type": "number"},
+        "hourly": {"type": "array", "maxItems": 6, "items": {"type": "object", "required": ["time", "temp"], "properties": {
+          "time": {"type": "string", "maxLength": 8}, "temp": {"type": "number"},
+          "icon": {"type": "string", "enum": ["sun", "partly", "cloud", "rain", "storm", "snow", "fog", "wind", "night"]}}}}
+      }}
+    },
+    "calendar_list": {
+      "description": "an agenda: events of a day or the next few",
+      "example": {"title": "Tomorrow", "events": [{"start": "10:00", "end": "10:30", "title": "Design review", "location": "Room 4"}]},
+      "schema": {"type": "object", "required": ["events"], "properties": {
+        "title": {"type": "string", "maxLength": 40},
+        "events": {"type": "array", "maxItems": 6, "items": {"type": "object", "required": ["start", "title"], "properties": {
+          "start": {"type": "string", "maxLength": 16}, "end": {"type": "string", "maxLength": 16},
+          "title": {"type": "string", "maxLength": 80}, "location": {"type": "string", "maxLength": 60},
+          "calendar": {"type": "string", "maxLength": 30}, "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}}}}
+      }}
+    },
+    "timer": {
+      "description": "a countdown; when it ends the island says so",
+      "example": {"label": "Tea", "seconds": 240},
+      "schema": {"type": "object", "required": ["seconds"], "properties": {
+        "label": {"type": "string", "maxLength": 40},
+        "seconds": {"type": "number", "minimum": 1, "maximum": 86400}
+      }}
+    },
+    "task_card": {
+      "description": "one task or to-do with its status",
+      "example": {"title": "Write the wake tests", "project": "hey-claude", "status": "running", "detail": "editing test_wake.py", "due": "today"},
+      "schema": {"type": "object", "required": ["title"], "properties": {
+        "title": {"type": "string", "maxLength": 80}, "project": {"type": "string", "maxLength": 40},
+        "status": {"type": "string", "enum": ["todo", "running", "done", "failed", "blocked"]},
+        "detail": {"type": "string", "maxLength": 120}, "due": {"type": "string", "maxLength": 30}
+      }}
+    },
+    "link": {
+      "description": "a web link or a local file to open with a click",
+      "example": {"title": "PySide6 docs", "url": "https://doc.qt.io/qtforpython-6/", "description": "Qt for Python"},
+      "schema": {"type": "object", "required": ["title"], "properties": {
+        "title": {"type": "string", "maxLength": 80},
+        "url": {"type": "string", "maxLength": 500, "pattern": "^(https?://|tg://)"},
+        "path": {"type": "string", "maxLength": 300},
+        "description": {"type": "string", "maxLength": 140}
+      }}
+    },
+    "code": {
+      "description": "a short code snippet (at most 12 lines) with a copy button",
+      "example": {"language": "python", "code": "print('hi')", "title": "hello"},
+      "schema": {"type": "object", "required": ["code"], "properties": {
+        "code": {"type": "string", "maxLength": 900}, "language": {"type": "string", "maxLength": 20},
+        "title": {"type": "string", "maxLength": 60}
+      }}
+    },
+    "image": {
+      "description": "an image from a local file or an https URL",
+      "example": {"url": "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg", "caption": "Example"},
+      "schema": {"type": "object", "properties": {
+        "url": {"type": "string", "maxLength": 500, "pattern": "^https://"},
+        "path": {"type": "string", "maxLength": 300},
+        "caption": {"type": "string", "maxLength": 100}
+      }}
+    },
+    "telegram_chats": {
+      "description": "Telegram chats that need attention",
+      "example": {"chats": [{"name": "Aziz", "unread": 2, "last": "are we still on for 7?", "time": "18:42", "link": "tg://resolve?domain=aziz"}]},
+      "schema": {"type": "object", "required": ["chats"], "properties": {
+        "chats": {"type": "array", "maxItems": 6, "items": {"type": "object", "required": ["name"], "properties": {
+          "name": {"type": "string", "maxLength": 50}, "unread": {"type": "integer", "minimum": 0},
+          "last": {"type": "string", "maxLength": 120}, "time": {"type": "string", "maxLength": 16},
+          "avatar": {"type": "string", "maxLength": 300}, "link": {"type": "string", "maxLength": 200, "pattern": "^tg://"}}}}
+      }}
+    },
+    "telegram_message": {
+      "description": "one Telegram message or a short thread; replies indented",
+      "example": {"chat": "Aziz", "link": "tg://resolve?domain=aziz", "messages": [{"sender": "Aziz", "text": "are we still on for 7?", "time": "18:42"}, {"sender": "You", "text": "yes!", "time": "18:44", "reply": true}]},
+      "schema": {"type": "object", "required": ["messages"], "properties": {
+        "chat": {"type": "string", "maxLength": 50}, "link": {"type": "string", "maxLength": 200, "pattern": "^tg://"},
+        "messages": {"type": "array", "maxItems": 5, "items": {"type": "object", "required": ["text"], "properties": {
+          "sender": {"type": "string", "maxLength": 50}, "text": {"type": "string", "maxLength": 600},
+          "time": {"type": "string", "maxLength": 16}, "reply": {"type": "boolean"}}}}
+      }}
+    },
+    "telegram_draft": {
+      "description": "a reply drafted for the user to Send / Edit / Cancel (Send stays disabled until approvals, M7)",
+      "example": {"chat": "Aziz", "text": "Yes, 7 works. See you there!", "link": "tg://resolve?domain=aziz"},
+      "schema": {"type": "object", "required": ["chat", "text"], "properties": {
+        "chat": {"type": "string", "maxLength": 50}, "text": {"type": "string", "maxLength": 1000},
+        "link": {"type": "string", "maxLength": 200, "pattern": "^tg://"}
+      }}
+    },
+    "text": {
+      "description": "a plain card of text (also the fallback)",
+      "example": {"text": "Bring an umbrella."},
+      "schema": {"type": "object", "required": ["text"], "properties": {
+        "title": {"type": "string", "maxLength": 60}, "text": {"type": "string", "maxLength": 400}
+      }}
+    }
+  }
+}

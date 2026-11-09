@@ -1,0 +1,12 @@
+{
+  "id": "ember-thread",
+  "name": "Ember & Thread",
+  "kind": "island-theme",
+  "author": "hey-claude",
+  "licence": "MIT",
+  "registry": "1.0",
+  "spec": "docs/island-motion.md",
+  "qml": "ui/island/Island.qml",
+  "implements": ["idle", "off", "listening", "thinking", "talking", "woke", "holding", "holding_muted",
+                 "followup", "input", "loading", "paused", "done", "error", "voice_mismatch"]
+}

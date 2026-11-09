@@ -297,3 +297,14 @@ tts:
 island:
   screen: primary        # primary, or a screen index
   top_margin: auto        # px, or auto = centred in a bar docked at the top of the screen (else 8)
+  # M5: the island is Qt Quick ("Ember & Thread", docs/island-motion.md). classic = the old QPainter one.
+  engine: qml
+  # Motion: auto (calm when Windows "Animation effects" is off), full, calm (no decoration), off (instant).
+  motion: auto
+  renderer: auto          # auto (GPU: D3D11) or software (no GPU; live states at 30 fps)
+  hide_when_idle: false   # nothing on screen at rest; touch the top-centre edge to peek
+  widgets: true           # answers may carry a card (weather, agenda, timer...): ui/widgets.schema.json
+  icons: true             # the service icon of a tool in use ("Google Calendar · list events")
+  fetch_favicons: false   # fetch a favicon once for services without a bundled icon (state/icons/)
+  service_icons: {}       # per-server override, e.g. {google_calendar: C:/icons/cal.png}
+  usage_pill: true        # plan usage (5 h / week) in the hover list, as Claude Code reports it

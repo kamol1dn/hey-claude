@@ -884,6 +884,57 @@ allow-list), `ui/effects.json` (with M5), README.
   wallpaper" work end to end in ≤ 2.5 s with their effect and an undo;
 - Windows-MCP's acting tools are confirmed on the island before they run.
 
+## M10: Instant commands without Claude (local intent engine)
+
+**Goal:** simple commands never wait for a model. "Volume 30", "turn it up a
+bit", "mute", "dark mode", "brightness down", "next song", "pause", "what
+time is it", "weather", "set a timer for 5 minutes", "open Spotify", "lock the
+screen", "undo that" all act in **under ~0.5 s** from the end of speech, with
+the M9 effect on the island and a short spoken ack. The stress test measured
+5.7–10.6 s for "set the volume to 30" through the agent.
+
+- **Many phrasings, no model:**
+  - an intent grammar per command (verbs, synonyms, filler words, word
+    order);
+  - slot parsers for spoken numbers ("thirty", "thirty percent", "a third",
+    "half"), relative amounts ("a bit", "a lot", "more", "by 10"), units,
+    durations, app names and on/off;
+  - fuzzy matching for Whisper slips ("dark mod", "volume tree zero");
+  - English first, with Russian/Uzbek phrasings as a stretch.
+- **Second layer, for paraphrases the grammar misses:** a tiny local
+  classifier. Either sentence embeddings on the CPU (a small ONNX model)
+  against a few hundred example phrasings per intent, or a small trained head.
+  It only fires above a confidence threshold, and **anything uncertain falls
+  through to Claude** as today. Never guess on destructive or ambiguous
+  requests.
+- **Context:** "a bit more", "again", "louder", "the other way" apply to the
+  last command; "undo that" stays M9's undo.
+- **Fast feedback:**
+  - act on the final transcript, with an option to act on a confident
+    *partial* transcript once the slot is complete;
+  - acks come from a cache of pre-synthesised Kokoro phrases ("done", "volume
+    30", "dark mode on"), or nothing but the effect;
+  - each turn is logged with `route=instant` and its latency.
+- **Same safety as M9:** only comfort settings, media, timers and app launch.
+  Sleep, restart and shutdown still need the click confirm, never instant.
+  Each executor reuses M9's tool code, so undo and the effects come for free.
+- **Learning from misses:** requests that fell through to Claude but then
+  called exactly one M9 tool are logged locally (`state/`) as candidate
+  phrasings. A "teach it" command adds the last one as an example.
+- **Tests:** a phrasing corpus (hundreds of paraphrases per intent, plus
+  near-misses that must NOT trigger, e.g. "what's the volume of a sphere"),
+  slot-parsing tables, and the UX stress harness's instant-command scenarios
+  in CI.
+
+**Touches:** new `heyclaude/intents/` (grammar, slots, classifier, executors),
+`brain.py` routing (before the quick/agent tiers), ack cache in `tts.py`.
+**Done when:**
+- ≥ 95% of the corpus routes correctly, with 0 false triggers on the
+  near-miss set;
+- the median speech end → effect is ≤ 0.5 s for the commands above, measured
+  by the stress harness;
+- anything uncertain still reaches Claude.
+
 ## M8: Package and ship
 
 **Goal:** a setup a non-developer can install.

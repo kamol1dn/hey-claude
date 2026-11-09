@@ -430,6 +430,40 @@ def test_typed_request_joins_the_conversation_without_a_followup(tmp_path):
     assert "Lima." not in a.brain.chat.sent[-1]        # the quick model remembers its own turn
 
 
+def test_typed_and_spoken_turns_share_one_conversation(tmp_path):
+    """spoken (quick) -> typed (agent) -> spoken follow-up (quick) -> typed task:
+    each tier hears what the others said, whichever way it was asked."""
+    a = _assistant(tmp_path,
+                   fast=[["Canberra is the capital of Australia."], ["About 43 degrees Fahrenheit."]],
+                   agent=[["It's 6 degrees Celsius in Canberra."]])
+    spawned = []
+    a.tasks.spawn = lambda project, path, prompt, context="": (
+        spawned.append(context) or T.Task(id="t9", project=project, path=path, prompt=prompt))
+
+    def typed(text):
+        n = len(a.brain.convo.turns)
+        a.submit_text(text)                              # the hotkey input field's path
+        for _ in range(200):
+            if len(a.brain.convo.turns) > n and not a.conv_lock.locked():
+                return
+            time.sleep(0.02)
+        raise AssertionError(f"typed request {text!r} never finished")
+
+    a.request("What is the capital of Australia?", source="voice", wait=True)
+    typed("what's the weather there right now?")
+    assert "Canberra is the capital" in a.brain.agent.chat.sent[-1]       # spoken -> typed
+    assert a.followup.state == "idle"                                     # typed: no window
+    a.request("What is that in Fahrenheit?", source="followup", wait=True)
+    assert "6 degrees Celsius" in a.brain.chat.sent[-1]                   # typed -> spoken
+    assert a.followup.state == "armed"                                    # spoken: window
+    typed("start a task in sandbox: write that down in temps.txt")
+    assert "6 degrees Celsius" in spawned[0] and "43 degrees" in spawned[0]
+    assert [t.user for t in a.brain.convo.turns] == [
+        "What is the capital of Australia?", "what's the weather there right now?",
+        "What is that in Fahrenheit?", "start a task in sandbox: write that down in temps.txt"]
+    assert [t.tier for t in a.brain.convo.turns] == ["fast", "agent", "fast", "task"]
+
+
 def test_start_fresh_forgets(tmp_path):
     a = _assistant(tmp_path, fast=[["Lima."]])
     a.request("capital of Peru?", wait=True)

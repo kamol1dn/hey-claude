@@ -894,13 +894,17 @@ class Assistant:
                     self.speaker.feed(ev[1])
                 elif kind == "lookup":
                     filler = self.cfg["agent"].get("filler")
-                    # Only longer requests get the filler: a short one is answered quickly anyway.
+                    # Only longer requests get the filler right away: a short one is usually
+                    # answered quickly. If it isn't (a slow tool), it gets it after a few seconds.
+                    late = 0.0
                     if len(text.split()) < int(self.cfg["agent"].get("filler_min_words", 8) or 0):
-                        filler = ""
+                        late = float(self.cfg["agent"].get("filler_after_s", 3.5) or 0)
                     self.set_mode("thinking", "checking with your tools… " + text)
-                    if filler:
+                    if filler and not late:
                         self._filler = filler           # spoken, shown as the status line; not the answer
                         self.speaker.feed(filler + " ")
+                    elif filler and late > 0:
+                        self._late_filler(filler, late, gen)
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
                 elif kind == "control":
@@ -966,6 +970,19 @@ class Assistant:
         if not self.speaker.busy and self.mode == "thinking":
             self.rest()
         self._maybe_exit()
+
+    def _late_filler(self, filler: str, after: float, gen: int):
+        """Say the filler only if nothing has been said yet `after` seconds into the request."""
+        def go():
+            if (gen == self.gen and self.mode == "thinking" and not self._reply and not self._filler
+                    and self.speaker.first_audio_t is None):
+                print(f"[agent] no answer after {after:.1f}s: saying the filler")
+                self._filler = filler
+                self.speaker.feed(filler + " ")
+                self.speaker.flush()
+        t = threading.Timer(after, go)
+        t.daemon = True
+        t.start()
 
     def _say(self, text):
         self._speaking_text = text

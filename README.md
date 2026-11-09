@@ -321,37 +321,49 @@ and the names are given to whisper as a spelling hint.
 
 **"hey claude" works out of the box.** One shared model, trained once on
 synthetic voices only, is downloaded on first start (3.2 MB, from the GitHub
-release `wake-model-v1`, kept only if its SHA-256 matches) and is the default
+release `wake-model-v2`, kept only if its SHA-256 matches) and is the default
 `wake.model`. If it can't be downloaded, hey-claude falls back to the stock
 "hey jarvis" and says why. Details, the personal tune-up and the Colab route:
 [docs/train-hey-claude.md](docs/train-hey-claude.md).
 
-**How the shared model was made (M2a, 2026-11-09).** `python -m
+**How the shared model was made (v2, 2026-11-09).** `python -m
 heyclaude.wake_train default`, on this PC (native Windows, no WSL, no Colab):
 
-- positives: 6,000 Kokoro clips from 46 voices (8 more held out for testing)
-  and random blends of two, speeds 0.75–1.35, pitch ±3 semitones, in 11
+- positives: 12,000 clips, half Kokoro (46 voices, 8 more held out for
+  testing, and random blends of two) and half Piper's multi-speaker
+  LibriTTS-R voice (859 audiobook-reader speakers, 45 more held out), speeds
+  0.75–1.35, pitch ±3 semitones, in 11
   pronunciations (the M2 spellings hey claude / klod / clod / klawd / klode,
   plus Russian/Uzbek-style ones such as a pure short "o" and a final "t"),
   each placed in 3 differently augmented 2 s windows (synthetic room reverb,
   noise and babble at 3–30 dB SNR, speed, gain);
 - negatives: 3,000 look-alikes ("hey cloud", "hey clyde", "claude" alone,
-  "I asked Claude"…), 3,000 ordinary sentences and word salads, 3,000
+  "I asked Claude"…), 3,000 ordinary sentences and word salads (half Kokoro,
+  half Piper), 3,000
   noise windows, and 256 spread-out slices of openWakeWord's ACAV100M feature
   set (1.6 GB of its 17 GB, ~187 h of audio);
 - an ensemble of 8 small heads (numpy) on openWakeWord's embeddings, threshold
-  calibrated to 0.5, exported in openWakeWord's ONNX format; ~20 min of
-  synthesis on the GPU, then ~7 min of training on the CPU.
+  calibrated to 0.5, exported in openWakeWord's ONNX format; ~28 min on
+  this PC (synthesis on the GPU, training on the CPU).
 
-| measured at threshold 0.5 | result | M2a target |
-|---|---|---|
-| hit rate, 480 clips from 8 held-out synthetic voices (never trained on) | **96.5%** | ≥ 95% |
-| false wakes, openWakeWord's 10.7 h validation set (dinner parties, conversations, music) | **3 (0.28 / h)** | < 0.33 / h |
-| `--simulate` with a Windows SAPI voice saying "Hey Claude, what is the capital of France?" | wakes and answers | |
+| measured at threshold 0.5 (`tools\wake_compare.py`, `tools\wake_eval.py`) | v1 (Kokoro only) | **v2 (Kokoro + Piper)** | target |
+|---|---|---|---|
+| hit rate, 480 clips from 8 held-out Kokoro voices (never trained on) | 96.5% | **95.2%** | ≥ 95% |
+| hit rate, 480 clips from 45 held-out Piper LibriTTS-R speakers (never trained on) | 77.5% | **97.5%** | ≥ 95% |
+| hit rate, 24 real recordings of one person (normal, quiet, loud, fast, slow, far, tired; never trained on, never committed) | 50.0% | **87.5%** | ≥ 95% |
+| false wakes, openWakeWord's 10.7 h validation set (dinner parties, conversations, music) | 3 (0.28 / h) | **3 (0.28 / h)** | < 0.33 / h |
+
+Piper's speakers were learned from LibriVox readers (ordinary people,
+ordinary microphones), so they sound much more like real users than Kokoro's
+studio voices: v1 already missed a quarter of them, and half of one real
+person's clips. v2 keeps v1's 6,000 Kokoro positives and adds 6,000 Piper
+ones; an 8,000-clip half-and-half mix (fewer Kokoro clips) dropped to 93.1%
+on the held-out Kokoro voices.
 
 Caveats, honestly: the threshold was picked on that same validation set, so
-the 0.28 / h is a little optimistic. No real person's "hey claude" has been
-measured yet, and nor has lecture audio. Both are one command each with
+the 0.28 / h is a little optimistic. The real recordings are 24 clips of a
+single speaker (still short of 95%: two slow clips and a quiet one score ~0),
+and lecture audio hasn't been measured yet. Both are one command each with
 `tools\wake_eval.py` (record clips with `--record-wake-samples`; they're
 only scored, never committed):
 

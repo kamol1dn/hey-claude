@@ -2,6 +2,9 @@
 look-alikes / ordinary speech (negatives), spoken by many local Kokoro voices.
 
 Variety comes from:
+- Piper's multi-speaker LibriTTS-R voice (904 audiobook readers, "piper:N";
+  see wake_train.piper_voice) for a share of every set, so the model hears
+  ordinary human voices and microphones, not only Kokoro's studio voices;
 - all 54 Kokoro voices, including the non-English ones (Japanese, Chinese,
   Hindi, French, Italian, Spanish, Portuguese) reading English phonemes, which
   gives accented English, plus random blends of two voices (new speakers);
@@ -12,7 +15,8 @@ Variety comes from:
 
 `Utterance` is one planned clip; `plan()` draws them; `Synth.render()` turns
 them into 16 kHz int16 arrays. The TTS engine is injected (`engine.create(text,
-voice, speed, lang, is_phonemes) -> (float32 audio, rate)`), so tests use a fake.
+voice, speed, lang, is_phonemes) -> (float32 audio, rate)`), so tests use a fake;
+piper_voice.MixedEngine routes "piper:N" voices to Piper and the rest to Kokoro.
 """
 from __future__ import annotations
 
@@ -37,6 +41,9 @@ KOKORO_ALL = (
     "pm_alex", "pm_santa", "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi", "zm_yunjian", "zm_yunxi",
     "zm_yunxia", "zm_yunyang",
 )
+# Piper speakers are voices named "piper:<speaker id>" (see wake_train.piper_voice).
+PIPER_PREFIX = "piper:"
+
 # Held out of training for the default model, to measure the hit rate on voices it never heard:
 # two English, and one each of the accent families.
 HELD_OUT_VOICES = ("af_kore", "bm_lewis", "am_echo", "jf_nezumi", "zm_yunxia", "hm_omega", "pm_santa", "if_sara")
@@ -107,7 +114,7 @@ class Utterance:
     label: str                     # what it says, for reports
     text: str                      # text, or IPA phonemes when is_phonemes
     is_phonemes: bool
-    voice: str                     # "af_heart" or "af_heart+jm_kumo@0.35" (blend: 35% of the second)
+    voice: str                     # "af_heart", "af_heart+jm_kumo@0.35" (blend: 35% of the second), "piper:123"
     speed: float
     pitch: float                   # semitones
     lang: str = "en-us"
@@ -152,12 +159,13 @@ def plan(rng: random.Random, n: int, variants: list[tuple], voices: list[str], b
     """Draw n utterances: a pronunciation by weight, a voice (or a blend of two),
     a speed, a pitch, and en-us / en-gb for text that espeak reads."""
     weights = [v[3] for v in variants]
+    blendable = [x for x in voices if not x.startswith(PIPER_PREFIX)]   # Piper speakers can't be blended
     out = []
     for _ in range(n):
         label, text, ph, _w = rng.choices(variants, weights)[0]
         v = rng.choice(voices)
-        if len(voices) > 1 and rng.random() < blend_p:
-            w = rng.choice([x for x in voices if x != v])
+        if not v.startswith(PIPER_PREFIX) and len(blendable) > 1 and rng.random() < blend_p:
+            w = rng.choice([x for x in blendable if x != v])
             v = f"{v}+{w}@{rng.uniform(0.2, 0.6):.2f}"
         lang = "en-us" if (ph is not None or rng.random() < 0.6) else "en-gb"
         out.append(Utterance(label, ph if ph is not None else text, ph is not None, v,
@@ -168,6 +176,27 @@ def plan(rng: random.Random, n: int, variants: list[tuple], voices: list[str], b
 def plan_text(rng: random.Random, n: int, texts: list[str], voices: list[str], **kw) -> list[Utterance]:
     """Utterances of plain text (negatives)."""
     return plan(rng, n, [(t, t, None, 1) for t in texts], voices, **kw)
+
+
+def plan_mixed(rng: random.Random, n: int, variants: list[tuple], kokoro: list[str], piper: list[str],
+               piper_share: float, **kw) -> list[Utterance]:
+    """n utterances, `piper_share` of them (rounded) by Piper speakers ("piper:N",
+    never blended) and the rest by Kokoro voices (and blends), as `plan` draws them.
+    Piper has ~900 speakers to Kokoro's 54, so a plain `plan` over both lists
+    would be nearly all Piper; this keeps the mix explicit. With no Piper
+    speakers (or share 0) it is exactly `plan(rng, n, variants, kokoro)`."""
+    n_p = int(round(n * piper_share)) if piper else 0
+    if not kokoro:
+        n_p = n
+    out = plan(rng, n - n_p, variants, kokoro, **kw) if n - n_p else []
+    if n_p:
+        out += plan(rng, n_p, variants, piper, **dict(kw, blend_p=0.0))
+    return out
+
+
+def plan_text_mixed(rng: random.Random, n: int, texts: list[str], kokoro: list[str], piper: list[str],
+                    piper_share: float, **kw) -> list[Utterance]:
+    return plan_mixed(rng, n, [(t, t, None, 1) for t in texts], kokoro, piper, piper_share, **kw)
 
 
 def random_word_phrases(rng: random.Random, n: int, k=(2, 5)) -> list[str]:

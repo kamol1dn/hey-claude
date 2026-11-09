@@ -5,8 +5,10 @@
 
 Two modes share it:
 - "default" (M2a): synthetic voices only, for the shared model everyone
-  downloads. It refuses user clips, and holds 8 Kokoro voices out of training
-  to measure the hit rate on voices it never heard.
+  downloads. Half of every synthetic set is spoken by Kokoro, half by Piper's
+  multi-speaker LibriTTS-R voice (904 audiobook readers; size key `piper`).
+  It refuses user clips, and holds 8 Kokoro voices and 45 Piper speakers out
+  of training to measure the hit rate on voices it never heard.
 - "personal" (M2b, the Settings wizard): adds the user's clips (positives,
   every 4th held out), their room recording and "that wasn't me" clips
   (negatives). Results stay in state/.
@@ -17,8 +19,8 @@ the GPU when onnxruntime has CUDA, there is VRAM to spare and the GPU is under
 The classifier head is small and always trains on the CPU (numpy).
 
 Measurements, all in the report:
-- hit rate on held-out positives (synthetic held-out voices; the user's
-  held-out clips in personal mode), as the best score over a few end offsets,
+- hit rate on held-out positives (held-out Kokoro voices and Piper speakers,
+  reported separately; the user's held-out clips in personal mode), as the best score over a few end offsets,
   like the streaming app sees it;
 - false wakes per hour on openWakeWord's ~10.7 h validation set (dinner
   parties, conversations, music; never trained on), with a 2 s refractory;
@@ -43,15 +45,17 @@ from .. import wake_metrics as WM
 from . import augment as A
 from . import download as D
 from . import head as H
+from . import piper_voice as PV
 from . import synth as S
 
 SIZES = {
-    # synthetic clips: positives, held-out positives, look-alikes, sentences, random words;
-    # windows per positive clip; ACAV slices (6.3 MB each); training steps
-    "default": dict(n_pos=6000, n_held=480, n_look=3000, n_sent=1500, n_words=1500, aug_pos=3,
-                    acav=256, steps=8000, user_copies=0, heads=8),
-    "personal": dict(n_pos=1000, n_held=0, n_look=700, n_sent=300, n_words=300, aug_pos=3,
-                     acav=256, steps=5000, user_copies=25, heads=3),
+    # synthetic clips: positives, held-out positives (Kokoro voices / Piper speakers), look-alikes,
+    # sentences, random words; windows per positive clip; ACAV slices (6.3 MB each); training steps;
+    # piper: percent of every synthetic set spoken by Piper's LibriTTS-R speakers (0 = Kokoro only)
+    "default": dict(n_pos=12000, n_held=480, n_held_piper=480, n_look=3000, n_sent=1500, n_words=1500, aug_pos=3,
+                    acav=256, steps=8000, user_copies=0, heads=8, piper=50),
+    "personal": dict(n_pos=1000, n_held=0, n_held_piper=0, n_look=700, n_sent=300, n_words=300, aug_pos=3,
+                     acav=256, steps=5000, user_copies=25, heads=3, piper=0),
 }
 FRAME_S = 0.08
 REFRACTORY_FRAMES = 25          # 2 s, like tools/wake_eval.py's default
@@ -255,14 +259,26 @@ def render_parallel(utts: list[S.Utterance], engines: list, progress=None, cance
     return [c if c is not None else np.zeros(0, np.int16) for c in out]
 
 
-def make_engines(device: str, tts_cfg: dict, free_mb: float | None = None) -> list:
+def make_engines(device: str, tts_cfg: dict, free_mb: float | None = None, piper_model: Path | None = None,
+                 kokoro: bool = True) -> list:
+    """One engine per synthesis thread: Kokoro, plus Piper when `piper_model` is
+    given (behind a piper_voice.MixedEngine that routes "piper:N" voices)."""
     cores = os.cpu_count() or 4
     if device == "cuda":
         n = 3 if (free_mb is None or free_mb > 3500) else 2 if free_mb > 2200 else 1
-        return [S.load_kokoro("cuda", model=tts_cfg.get("kokoro_model"), voices=tts_cfg.get("kokoro_voices"))
-                for _ in range(n)]
-    n = max(1, min(4, (cores - 2) // 4))
-    return [S.load_kokoro("cpu", threads=4, model=tts_cfg.get("kokoro_model"), voices=tts_cfg.get("kokoro_voices"))
+    else:
+        n = max(1, min(4, (cores - 2) // 4))
+
+    def kok():
+        if not kokoro:
+            return None
+        if device == "cuda":
+            return S.load_kokoro("cuda", model=tts_cfg.get("kokoro_model"), voices=tts_cfg.get("kokoro_voices"))
+        return S.load_kokoro("cpu", threads=4, model=tts_cfg.get("kokoro_model"), voices=tts_cfg.get("kokoro_voices"))
+    if piper_model is None:
+        return [kok() for _ in range(n)]
+    lock = threading.Lock()                       # Piper's espeak-ng phonemizer is shared and not thread-safe
+    return [PV.MixedEngine(kok(), PV.load_piper(piper_model, device, threads=4, phonemize_lock=lock))
             for _ in range(n)]
 
 
@@ -341,10 +357,11 @@ def _windows_and_features(job, clips, user_train, user_held, room, false_w, devi
         work_items += [("fw", c, "placed")] * 12
     work_items += [("noise", None, "noise")] * 3000
     eval_src = []
-    for c in clips["held"]:
-        if len(c):
-            eval_src.append("synthetic")
-            work_items.append(("eval", c, "eval-noisy"))
+    for name, src in (("held", "kokoro"), ("held_piper", "piper")):    # voices / speakers never trained on
+        for c in clips.get(name, []):
+            if len(c):
+                eval_src.append(src)
+                work_items.append(("eval", c, "eval-noisy"))
     for c in user_held:
         eval_src.append("yours")
         work_items.append(("eval", c, "eval"))
@@ -391,12 +408,35 @@ def _windows_and_features(job, clips, user_train, user_held, room, false_w, devi
 
 
 # -- the run ------------------------------------------------------------------------------
+def plan_sets(job: Job, rng: random.Random, variants, held: set, train_voices: list[str],
+              use_piper: bool) -> dict[str, list[S.Utterance]]:
+    """Every synthetic set of a run. With Piper, `piper` percent of pos / look /
+    sent / words is spoken by Piper speakers; in default mode every 20th Piper
+    speaker is held out of all of them and speaks the "held_piper" set instead."""
+    share = job.size("piper") / 100.0 if use_piper else 0.0
+    p_held = [PV.voice_name(s) for s in PV.held_out_speakers()] if (share and job.mode == "default") else []
+    p_train = [PV.voice_name(s) for s in (PV.train_speakers() if p_held else range(PV.N_SPEAKERS))] if share else []
+    sets = {
+        "pos": S.plan_mixed(rng, job.size("n_pos"), variants, train_voices, p_train, share),
+        "held": S.plan(rng, job.size("n_held"), variants, sorted(held), blend_p=0.0) if held else [],
+        "look": S.plan_text_mixed(rng, job.size("n_look"), S.negative_phrases(job.phrase), list(S.KOKORO_ALL),
+                                  p_train, share),
+        "sent": S.plan_text_mixed(rng, job.size("n_sent"), S.SENTENCES, list(S.KOKORO_ALL), p_train, share,
+                                  speed=(0.85, 1.25)),
+        "words": S.plan_text_mixed(rng, job.size("n_words"), S.random_word_phrases(rng, 400), list(S.KOKORO_ALL),
+                                   p_train, share),
+    }
+    if p_held and job.size("n_held_piper"):
+        sets["held_piper"] = S.plan(rng, job.size("n_held_piper"), variants, p_held, blend_p=0.0)
+    return sets
+
+
 def estimates(job: Job, device: str, have_bytes: int, rate_mb_s: float = 0.7) -> dict:
-    n_clips = sum(job.size(k) for k in ("n_pos", "n_held", "n_look", "n_sent", "n_words"))
+    n_clips = sum(job.size(k) for k in ("n_pos", "n_held", "n_held_piper", "n_look", "n_sent", "n_words"))
     synth_rate = 9.0 if device == "cuda" else 3.5
     n_win = job.size("n_pos") * job.size("aug_pos") + job.size("n_look") * 2 + job.size("n_sent") * 3 \
         + job.size("n_words") + 3000 + len(job.user_clips) * job.size("user_copies")
-    need = D.plan_bytes(job.size("acav")) - have_bytes
+    need = D.plan_bytes(job.size("acav")) + (PV.plan_bytes() if job.size("piper") else 0) - have_bytes
     return dict(download=max(1.0, need / (rate_mb_s * 2 ** 20)), voices=n_clips / synth_rate,
                 features=n_win * 0.004 + n_win / (700 if device == "cuda" else 220),
                 train=job.size("steps") * job.size("heads") * 0.008, check=25.0, export=2.0)
@@ -419,32 +459,37 @@ def run(job: Job, progress_cb=None, cancel=None, log=print) -> dict:
 
     device, why = pick_device(job.device, job.gpu_busy_pct, job.gpu_util)
     log(f"[wake_train] {job.mode} model for {job.phrase!r} on {device} ({why})")
-    prog = Progress(progress_cb, estimates(job, device, D.have_bytes(feat_dir, job.size("acav"))))
+    piper_dir = work / "piper"
+    use_piper = job.size("piper") > 0
+    if use_piper:
+        import importlib.util
+        if importlib.util.find_spec("piper") is None:
+            raise RuntimeError('this run mixes in Piper voices: .venv\\Scripts\\python -m pip install "piper-tts>=1.8" '
+                               "(or --size piper=0 for Kokoro only)")
+    have =D.have_bytes(feat_dir, job.size("acav")) + (PV.have_bytes(piper_dir) if use_piper else 0)
+    prog = Progress(progress_cb, estimates(job, device, have))
     report: dict = dict(mode=job.mode, phrase=job.phrase, device=device, device_why=why,
                         when=time.strftime("%Y-%m-%d %H:%M:%S"), sizes={k: job.size(k) for k in SIZES[job.mode]})
 
     # 1. download -----------------------------------------------------------------------
     prog.stage("download")
-    total = D.plan_bytes(job.size("acav"))
-    prog.update(0, f"Negative features: {D.fmt_mb(D.have_bytes(feat_dir, job.size('acav')))} of {D.fmt_mb(total)}")
+    total = D.plan_bytes(job.size("acav")) + (PV.plan_bytes() if use_piper else 0)
+    prog.update(0, f"Downloads: {D.fmt_mb(have)} of {D.fmt_mb(total)}")
 
-    def dl(base):
-        return lambda d, t: prog.update((base + d) / total, f"Negative features: {D.fmt_mb(base + d)} of {D.fmt_mb(total)}")
+    def dl(base, what="Negative features"):
+        return lambda d, t: prog.update((base + d) / total, f"{what}: {D.fmt_mb(base + d)} of {D.fmt_mb(total)}")
     val_path = D.validation_set(feat_dir, dl(0), cancel)
     acav_paths = D.acav_slices(job.size("acav"), feat_dir, dl(D.VAL_BYTES), cancel)
+    piper_model = None
+    if use_piper:
+        piper_model = PV.ensure_voice(piper_dir, dl(D.plan_bytes(job.size("acav")), "Piper voice"), cancel, log=log)
 
     # 2. voices -------------------------------------------------------------------------
     prog.stage("voices")
     held = set(S.HELD_OUT_VOICES) if job.mode == "default" else set()
     train_voices = [v for v in S.KOKORO_ALL if v not in held]
     variants = S.phrase_variants(job.phrase)
-    sets = {
-        "pos": S.plan(rng, job.size("n_pos"), variants, train_voices),
-        "held": S.plan(rng, job.size("n_held"), variants, sorted(held), blend_p=0.0) if held else [],
-        "look": S.plan_text(rng, job.size("n_look"), S.negative_phrases(job.phrase), list(S.KOKORO_ALL)),
-        "sent": S.plan_text(rng, job.size("n_sent"), S.SENTENCES, list(S.KOKORO_ALL), speed=(0.85, 1.25)),
-        "words": S.plan_text(rng, job.size("n_words"), S.random_word_phrases(rng, 400), list(S.KOKORO_ALL)),
-    }
+    sets = plan_sets(job, rng, variants, held, train_voices, use_piper)
     clips: dict[str, list[np.ndarray]] = {}
     todo = {}
     for name, utts in sets.items():
@@ -456,14 +501,17 @@ def run(job: Job, progress_cb=None, cancel=None, log=print) -> dict:
     n_todo = sum(len(u) for u, _ in todo.values())
     if todo:
         engines = []
+        want = [u.voice for utts, _ in todo.values() for u in utts]
+        need_kokoro = any(not v.startswith(S.PIPER_PREFIX) for v in want)
+        pm = piper_model if any(v.startswith(S.PIPER_PREFIX) for v in want) else None
         try:
-            engines = make_engines(device, job.tts)
+            engines = make_engines(device, job.tts, piper_model=pm, kokoro=need_kokoro)
         except Exception as e:
             if device != "cuda":
                 raise
-            log(f"[wake_train] Kokoro on the GPU failed ({e}); using the CPU")
+            log(f"[wake_train] synthesis on the GPU failed ({e}); using the CPU")
             device, report["device"], report["device_why"] = "cpu", "cpu", f"GPU failed: {e}"[:120]
-            engines = make_engines("cpu", job.tts)
+            engines = make_engines("cpu", job.tts, piper_model=pm, kokoro=need_kokoro)
         done_before = 0
         for name, (utts, f) in todo.items():
             def p(d, t, base=done_before):
@@ -489,7 +537,7 @@ def run(job: Job, progress_cb=None, cancel=None, log=print) -> dict:
     # 3. windows + features (in chunks, so the audio never piles up in memory) ---------------
     prog.stage("features")
     fkey = _key([u.key() for v in sets.values() for u in v], job.seed, job.size("aug_pos"), job.size("user_copies"),
-                [str(Path(x).resolve()) for x in job.user_clips + job.room + job.false_wakes], A.WINDOW, "v1")
+                [str(Path(x).resolve()) for x in job.user_clips + job.room + job.false_wakes], A.WINDOW, "v2")
     fcache = cache / f"features-{fkey}.npz"
     if job.mode == "default" and fcache.is_file():   # personal runs always redo it (the clips may have changed)
         z = np.load(fcache, allow_pickle=False)

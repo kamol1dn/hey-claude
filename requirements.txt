@@ -13,6 +13,8 @@ anthropic>=0.40      # the direct API path for quick answers (only with an API k
 kokoro-onnx>=0.6     # tts.engine: kokoro (bundles espeak-ng; no system install)
 livekit>=1.2         # WebRTC echo cancellation (AEC3) for barge-in
 onnx>=1.16           # wake-word training: writes the trained model (Settings -> Wake word)
+# Maintainers only, to retrain the shared "hey claude" model (python -m heyclaude.wake_train default):
+#   pip install "piper-tts>=1.8"    # second voice source: Piper's 904-speaker LibriTTS-R voice (75 MB, fetched on first run)
 # M9: the Windows settings MCP server (heyclaude/mcp_windows). Pure Python or
 # small wheels (~5 MB together); none of them touches the GPU stack.
 mcp>=1.9             # MCP server SDK (FastMCP; MCPServer in 2.x)

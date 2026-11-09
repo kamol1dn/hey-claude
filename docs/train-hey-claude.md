@@ -19,7 +19,10 @@ hey-claude ships one "hey claude" model for everyone, trained once on
 **synthetic voices only**: 54 Kokoro voices (American, British, and voices
 built for Japanese, Chinese, Hindi, French, Italian, Spanish and Portuguese,
 reading English, which gives accented English), random blends of two voices,
-speeds 0.75–1.35, pitch ±3 semitones, and several pronunciations:
+and, since v2, Piper's multi-speaker LibriTTS-R voice for half of every set:
+904 speakers learned from LibriVox audiobook readers, ordinary people on
+ordinary microphones, which sound far more like real users than Kokoro's
+studio voices. Speeds 0.75–1.35, pitch ±3 semitones, and several pronunciations:
 "hey claude", "klod", "clod", "klawd", "klode", and Russian/Uzbek-style ones
 (a short pure "o", a final "d" said as "t"). No real person's recordings
 went into it, so it doesn't lean towards anyone's accent, and the repository
@@ -27,7 +30,7 @@ stays free of personal voice data.
 
 On first start, if `wake.model` is the default `models/hey_claude.onnx` and the
 file isn't there, hey-claude downloads it from the GitHub release
-`wake-model-v1` and keeps it only if its SHA-256 matches the one in
+`wake-model-v2` and keeps it only if its SHA-256 matches the one in
 `heyclaude/wake_models.py`. A file you put there yourself (an older Colab
 model) is never overwritten. What it measured: README, "Wake word".
 
@@ -43,14 +46,22 @@ feature dataset; see [models/LICENSE](../models/LICENSE).
 
 The first command runs the whole local pipeline on this PC (native Windows,
 no WSL): it downloads openWakeWord's negative features (resumable ranged
-downloads, sizes shown), synthesises ~12,500 clips with Kokoro, mixes in
+downloads, sizes shown) and Piper's LibriTTS-R voice (75 MB, pinned revision,
+SHA-256 checked; needs `pip install "piper-tts>=1.8"`), synthesises ~19,000
+clips with Kokoro and Piper (half each; 8 Kokoro voices and 45 of the 904
+Piper speakers are held out of every training set), mixes in
 noise and synthetic room reverb, computes openWakeWord embeddings, trains a
-small classifier head (numpy), picks the threshold from held-out voices and
+small classifier head (numpy), picks the threshold from the held-out voices and
 the 10.7 h validation set, calibrates it to 0.5, and exports ONNX in
 openWakeWord's format. Synthesis and the feature models use the GPU when it's
 under 70% busy (hey-claude's own load excluded), otherwise the CPU. The second
-command copies the model to `dist\wake-model-v1\`, writes its SHA-256 into
-the code and prints the `gh release create` command; it publishes nothing.
+command copies the model to `dist\<tag>\` (`--tag wake-model-v2`), writes its
+SHA-256 into the code and prints the `gh release create` command; it publishes
+nothing. To compare two models on the same held-out voices and validation set:
+
+```bash
+.venv\Scripts\python tools\wake_compare.py dist\wake-model-v1\hey_claude.onnx state\m2c\hey_claude.onnx
+```
 
 ## 2. Personal tune-up in Settings
 
@@ -317,5 +328,6 @@ cancellation for a proper spoken barge-in.
 
 Local training is built in now (sections 1 and 2): native Windows, no WSL, no
 Colab. It's lighter than openWakeWord's full recipe (a sample of the negative
-features instead of all 16 GB, Kokoro instead of Piper), so the Colab route
+features instead of all 16 GB, and Kokoro plus one multi-speaker Piper voice
+instead of many Piper voices), so the Colab route
 stays here as the "most data" option.

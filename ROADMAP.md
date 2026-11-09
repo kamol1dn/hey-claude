@@ -317,6 +317,23 @@ the user's top misheard words in a simulated test.
 - **Motion:** implement `docs/island-motion.md` (state-by-state motion spec
   with springs, timings, reduced motion and perf budget; approved through the
   preview page `docs/island-motion-preview.html`).
+- **Show the app or service being used, with its icon.** While the tool agent
+  (or a watched session, M7) calls a tool, the island shows e.g. "Google
+  Calendar · checking today" with the Calendar icon.
+  - Tool names come from the stream-json `tool_use` events
+    (`mcp__<server>__<tool>`) and the M7 hook payloads. Map the server to a
+    friendly name: claude.ai connectors, local MCPs such as Telegram, and
+    built-in tools (Bash, Edit, WebSearch) get their own small glyphs.
+  - Icon sources, in order:
+    1. icons the MCP server declares itself (the MCP spec's `icons` on the
+       server/tool metadata);
+    2. a bundled set of common service logos as SVG (Simple Icons, CC0),
+       shown only to name the service in use;
+    3. the service's favicon, fetched once and cached under `state/icons/`;
+    4. a neutral plug glyph with the service's initials.
+  - Settings: icons on/off, and a per-server override (pick any image).
+  - Several tools in a row → the icons slide through like a ticker; parallel
+    calls → stacked icons.
 - Ideas taken from Coucou (ideas only; no names, character, icons or sounds,
   which their `LICENSE-ASSETS.md` keeps):
   - **Drop a file on the island** to ask about it. The file goes to the tool

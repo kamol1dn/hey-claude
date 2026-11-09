@@ -180,6 +180,39 @@ question about the task) keeps context, verified with simulated clips.
 **Done when:** quick-question speech-end → first word ≤ 2.5 s median on normal
 Wi-Fi, logged in `state/latency.csv`.
 
+## M4b (optional): Wake only on the user's voice
+
+**Goal:** a "hey claude" from anyone else (a roommate, a video, a classmate on a
+call) doesn't wake it. It's **off by default**; build it only if the user asks.
+
+Training the wake word (M2) doesn't do this: the model detects the phrase,
+not the speaker, because it's trained mostly on synthetic voices. This
+milestone adds a second check after the wake word fires.
+
+- **Speaker check:** embed the wake audio (~1 s) with a speaker model on the CPU
+  (SpeechBrain ECAPA or Resemblyzer, ~50 ms) and compare it with the user's
+  voiceprint (cosine similarity). Below the threshold, ignore the wake.
+  - Compare against openWakeWord's built-in custom verifier (lighter, but
+    less strict) and pick one with numbers.
+- **Enrolment** reuses M2's recorder clips in `state/wake_samples/`
+  (git-ignored). The voiceprint lives in `state/` too, never in the repo.
+  "Re-enrol my voice" goes in the tray/settings.
+- **Settings:** `wake.only_my_voice: false` (default), `wake.voice_match`
+  threshold. The island shows "voice didn't match" briefly, so a rejected
+  wake isn't a mystery.
+- **Applies to the wake word only.** The hotkey and clicking the island skip
+  the check. Follow-ups inside an M3 conversation window also skip it.
+- **It's a convenience, not security.** A recording or a similar voice can
+  pass, so task permission approvals (M7) never rely on it.
+- **Eval:** extend `tools/wake_eval.py` with the false-accept rate on other
+  speakers (LibriSpeech/VoxCeleb clips or lecture audio of other voices) and
+  the false-reject rate on the user's held-out clips.
+
+**Touches:** `listen.py` (post-wake hook), new `speaker.py`, `tools/wake_eval.py`, settings.
+**Done when:** ≤ 5% false rejects on the user's held-out clips and ≤ 2% false
+accepts on other speakers at the chosen threshold, with the added wake
+latency ≤ 100 ms.
+
 ## M5: Island v2: animation, transitions, response widgets
 
 **Goal:** the island looks and moves like a product, and can show more than text.

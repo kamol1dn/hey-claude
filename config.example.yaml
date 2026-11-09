@@ -67,6 +67,7 @@ listen:
   # end the utterance until you let go). ctrl = either Ctrl; also right ctrl,
   # caps lock, f13... "" = off. Ctrl+C etc. during a hold count as shortcuts.
   hold_key: ctrl
+  hold_mute_key: shift       # while holding the hold key, also hold this to mute the mic; "" = off
   max_utterance_s: 180    # safety cap once a hold was used
 
 stt:
@@ -150,6 +151,63 @@ agent:
     - mcp__claude_ai_Google_Drive__list_recent_files
     - mcp__claude_ai_Google_Drive__get_file_metadata
     - mcp__claude_ai_Google_Drive__read_file_content
+    # M9: hey-claude's own Windows settings server ("windows"): its read tools
+    # and comfort-setting changes, each shown on the island with an Undo button.
+    # Left out on purpose: close_window (unsaved work), and the experimental
+    # set_default_output_device / set_night_light (undocumented Windows APIs).
+    - mcp__windows__get_volume
+    - mcp__windows__set_volume
+    - mcp__windows__set_mute
+    - mcp__windows__list_app_volumes
+    - mcp__windows__set_app_volume
+    - mcp__windows__list_audio_devices
+    - mcp__windows__get_brightness
+    - mcp__windows__set_brightness
+    - mcp__windows__get_theme
+    - mcp__windows__set_theme
+    - mcp__windows__get_wallpaper
+    - mcp__windows__set_wallpaper
+    - mcp__windows__get_night_light
+    - mcp__windows__get_radios
+    - mcp__windows__set_wifi
+    - mcp__windows__set_bluetooth
+    - mcp__windows__battery_status
+    - mcp__windows__get_power_mode
+    - mcp__windows__set_power_mode
+    - mcp__windows__lock_pc
+    - mcp__windows__request_power_action
+    - mcp__windows__now_playing
+    - mcp__windows__media_control
+    - mcp__windows__list_apps
+    - mcp__windows__launch_app
+    - mcp__windows__list_windows
+    - mcp__windows__focus_window
+    - mcp__windows__minimize_window
+    - mcp__windows__restore_window
+    - mcp__windows__snap_window
+    - mcp__windows__get_clipboard
+    - mcp__windows__set_clipboard
+    - mcp__windows__screenshot
+    - mcp__windows__open_settings_page
+    # Windows-MCP (only when windows_mcp.enabled): looking at the screen only.
+    # Its acting tools (Click, Type, Shortcut, Drag, App, ...) stay off until
+    # M7's island approvals exist; hey-claude drops them from this list (and
+    # PowerShell / Registry, always) even if you add them.
+    - mcp__windows-mcp__Snapshot
+    - mcp__windows-mcp__Screenshot
+  # M9: control Windows by voice ("volume 30", "dark mode", "next song",
+  # "brightness down", "change my wallpaper to <file>", "undo that").
+  # hey-claude's own settings server, started with this Python (needs the
+  # requirements.txt packages mcp, pycaw, monitorcontrol, winrt-*). Config:
+  # state/agent-windows-mcp.json, written at every start.
+  windows_settings: true
+  # Windows-MCP (CursorTouch, MIT): accessibility snapshots and screenshots of
+  # any app. Optional, and installed apart from hey-claude's venv so it can't
+  # touch the GPU stack:   uv tool install windows-mcp   (~86 packages, ~30 MB)
+  windows_mcp:
+    enabled: false
+    command: null              # null = windows-mcp on PATH or in ~/.local/bin
+    exclude_tools: [PowerShell, Registry]   # never exposed; always added even if removed here
   # MCP servers that live in the Claude *desktop app's* config
   # (claude_desktop_config.json) are invisible to the CLI. List names here to
   # copy them into state/agent-mcp.json and pass them with --mcp-config.

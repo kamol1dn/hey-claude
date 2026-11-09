@@ -1,0 +1,58 @@
+name: Release
+
+# Push a tag like v0.4.0 (matching heyclaude.__version__) to publish a GitHub
+# release. The tests run first; nothing is published if they fail.
+# Tags with a hyphen (v0.5.0-rc1) become pre-releases.
+# Release notes are generated from the merged PRs (see .github/release.yml).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)publish, e.g. v0.4.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Tag must match heyclaude.__version__
+        run: |
+          v=$(python3 -c "import re;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"',open('heyclaude/__init__.py').read()).group(1))")
+          if [ "v$v" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match heyclaude.__version__ = $v"; exit 1
+          fi
+
+      - name: Build source archive and checksums
+        run: |
+          mkdir dist
+          git archive --format=zip --prefix="hey-claude-$TAG/" -o "dist/hey-claude-$TAG.zip" "$TAG"
+          cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Publish the release
+        run: |
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease";; esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --generate-notes --title "hey-claude $TAG" $pre
+          fi

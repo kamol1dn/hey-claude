@@ -97,5 +97,6 @@ def setup(max_bytes: int = 1_000_000, backups: int = 3) -> str:
 
     sys.excepthook = hook
     threading.excepthook = thread_hook
-    log.info("---- hey-claude starting (python %s) ----", sys.version.split()[0])
+    from . import __version__
+    log.info("---- hey-claude %s starting (python %s) ----", __version__, sys.version.split()[0])
     return str(path)

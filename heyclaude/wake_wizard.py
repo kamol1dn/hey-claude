@@ -320,6 +320,22 @@ def _console_python() -> str:
     return exe
 
 
+def missing_requirements(tts_cfg: dict | None = None, find_spec=None, isfile=os.path.isfile) -> list[str]:
+    """What the trainer needs that isn't installed (empty = ready)."""
+    import importlib.util
+    find = find_spec or importlib.util.find_spec
+    out = []
+    pkgs = [m for m, pip in (("kokoro_onnx", "kokoro-onnx"), ("onnx", "onnx")) if find(m) is None]
+    if pkgs:
+        out.append("Python packages: .venv\\Scripts\\python -m pip install " +
+                   " ".join({"kokoro_onnx": "kokoro-onnx", "onnx": "onnx"}[m] for m in pkgs))
+    from .tts import kokoro_paths
+    model, voices = kokoro_paths(tts_cfg or {})
+    if not (isfile(model) and isfile(voices)):
+        out.append(f"the Kokoro voice files ({model}, {voices}); see README \"Kokoro voice\"")
+    return out
+
+
 def fmt_eta(s: float) -> str:
     s = max(0, int(s))
     return f"{s // 60} min {s % 60:02d} s" if s >= 60 else f"{s} s"
@@ -639,9 +655,9 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
                 self.btn_rec.setEnabled(not self.recorder.busy)
                 self.btn_redo.setEnabled(bool(self.st.clips) and not self.recorder.busy)
             elif pg == "train":
-                self._plan_text()
                 running = self.st.train_status == "running"
                 self.btn_train.setEnabled(not running)
+                self._plan_text()
                 self.btn_train.setText("Train again" if self.st.train_status in ("done", "failed", "cancelled")
                                        else "Train")
                 self.btn_cancel.setEnabled(running)
@@ -767,6 +783,11 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
             dl = (f"First it downloads openWakeWord's negative features: <b>{D.fmt_mb(need)}</b> "
                   f"(once; it resumes if interrupted; ~{need / 2 ** 20 / 0.7 / 60:.0f} min at 0.7 MB/s). "
                   if need > 0 else "The negative features are already downloaded. ")
+            missing = missing_requirements(cfg.get("tts", {}))
+            self.btn_train.setEnabled(not missing and self.st.train_status != "running")
+            if missing:
+                self.lb_plan.setText("<b>Can't train yet.</b> Missing: " + "; ".join(missing))
+                return
             gu = hooks.gpu_util() if hooks is not None else None
             gpu = ("The GPU is busy, so it runs on the CPU (slower). " if gu is not None and gu >= 70 else
                    "It uses the GPU if it's free (under 70% busy), otherwise the CPU. ")

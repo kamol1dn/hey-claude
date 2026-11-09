@@ -1,5 +1,7 @@
 # hey-claude
 
+[![CI](https://github.com/kamol1dn/hey-claude/actions/workflows/ci.yml/badge.svg)](https://github.com/kamol1dn/hey-claude/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/kamol1dn/hey-claude?include_prereleases)](https://github.com/kamol1dn/hey-claude/releases)
+
 An always-listening voice assistant for Windows 11. Say the wake word and a
 small black "island" drops in at the top of the screen. Ask a quick question
 and a small model answers out loud in a second or two. Say *"start a task in
@@ -483,6 +485,93 @@ Gmail and Drive tools (list/search/get/read). Sending email, creating events
 and editing files are denied unless you add them. To see every tool name, run
 `tools\trace_agent.py "list your tools that mention X"`.
 
+## Control Windows by voice (M9)
+
+"Volume 30", "dark mode", "next song", "brightness down", "change my
+wallpaper to D:\pics\hill.jpg", "open Bluetooth settings", "snap this window
+left", "what's on my screen?". Each change shows on the island with its own
+small animation and an **Undo** button for ~8 s, and **"undo that"** puts the
+last change back.
+
+**How it works.** These requests skip the quick model and go straight to the
+tool agent (a local pattern in `brain.py` spots them), which now also loads
+hey-claude's own **Windows settings MCP server** (`heyclaude/mcp_windows/`,
+FastMCP/MCPServer over stdio, started with hey-claude's Python). The config
+for it is written to `state/agent-windows-mcp.json` at every start. Every
+change returns `{old, new}`. hey-claude watches the agent's tool calls in its
+stream-json, turns each into an effect event (`ui/effects.json` →
+`heyclaude/effects.py`) and remembers how to undo it (`heyclaude/undo.py`).
+Undo runs in hey-claude's own process with no model round trip, so it takes
+about 0.1 s.
+
+| group | tools (all `mcp__windows__…`) |
+|---|---|
+| audio | `get_volume`, `set_volume` (level or ±delta; unmutes), `set_mute`, `list_app_volumes`, `set_app_volume`, `list_audio_devices`, `set_default_output_device` (*experimental*, undocumented IPolicyConfig) |
+| display | `get_brightness` / `set_brightness` (laptop panel via WMI, external monitors via DDC/CI), `get_theme` / `set_theme` (dark/light, apps/system), `get_wallpaper` / `set_wallpaper` (per monitor, IDesktopWallpaper), `get_night_light` / `set_night_light` (*experimental*, registry blob) |
+| radios | `get_radios` (Wi-Fi, Bluetooth, airplane mode), `set_wifi`, `set_bluetooth` |
+| power | `battery_status`, `get_power_mode` / `set_power_mode` (efficiency / balanced / performance), `lock_pc`, `request_power_action` |
+| media | `now_playing`, `media_control` (play, pause, play_pause, next, previous) |
+| apps, windows | `list_apps`, `launch_app` (Start-menu apps only), `list_windows`, `focus_window`, `minimize_window`, `restore_window`, `snap_window`, `close_window` |
+| other | `get_clipboard`, `set_clipboard`, `screenshot` (≤ 1280 px JPEG for the agent, never saved), `open_settings_page` (`ms-settings:` pages by name) |
+
+**Safety.** A voice assistant can be set off by a video or by someone else in
+the room, so:
+- **Never exposed:** Defender, firewall, UAC, user accounts, raw registry
+  editing, arbitrary PowerShell, drivers and services. `launch_app` refuses
+  shells, the registry editor and security/account tools, and
+  `open_settings_page` refuses security, account and sign-in pages.
+- **Sleep, restart and shutdown only ask.** `request_power_action` does
+  nothing by itself. The island shows **Confirm / Cancel** for 20 s, and only
+  the click runs it. No voice command can confirm.
+- The default allow-list (`agent.allowed_tools`) has the read tools and the
+  comfort-setting writes. It leaves out `close_window` (unsaved work) and the
+  two experimental tools; anything not listed is denied without a prompt.
+
+**Windows-MCP, optional** ([CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP),
+MIT): accessibility-tree snapshots and screenshots of any app. It installs
+**apart from hey-claude's venv**, so it can't disturb the GPU stack:
+
+```bash
+uv tool install windows-mcp
+```
+
+That is about 86 packages. Here it took 4 minutes on a ~0.5–1 MB/s line: the
+biggest downloads were pywin32 6.6 MB, cryptography 3.6 MB, pydantic-core
+2.2 MB and rapidfuzz 1.7 MB, about 20 MB in all (numpy and pillow came from
+uv's cache). Then set `agent.windows_mcp.enabled: true`. hey-claude starts it as
+`windows-mcp serve --transport stdio --exclude-tools PowerShell,Registry`
+(those two are always excluded) with its telemetry off
+(`ANONYMIZED_TELEMETRY=false`). Only its **read-only** tools, `Snapshot` and
+`Screenshot`, may be allowed. Its acting tools (Click, Type, Shortcut, Drag,
+App, …) need an island approval per app first, which arrives with M7's
+approvals. Until then hey-claude removes them from `--allowedTools` even if
+you add them, and says so in the log. The agent prompt tells it to use the
+settings tools for settings and Windows-MCP only to look.
+
+**The settings server's own packages** (in `requirements.txt`, ~5 MB, pure
+Python or small wheels): `mcp`, `pycaw`, `monitorcontrol` and the `winrt-*`
+projections for media and radios.
+
+**Checking it on your PC:** `tools\check_windows_settings.py` runs every
+tool, checks the result, puts each value back and checks that too. It also
+starts the server over stdio the way the agent does. Wi-Fi/Bluetooth
+switching, the default output device and locking are opt-in (`--radios`,
+`--device`, `--lock`, or `--all`), because they can cut you off.
+Measured here (2026-11-09, a laptop, panel brightness via WMI): 18 checks ok,
+lock skipped.
+
+**Effects** (`heyclaude/island_effects.py` paints them, from the data in
+`ui/effects.json`): a volume slider that glides to the new level, a speaker
+with its slash drawn in for mute, a sun whose ring of dots grows or shrinks
+for brightness, a sun ↔ moon flip with a light wash for dark/light mode, a
+media card with the album art (read by hey-claude itself, never sent to the
+model) and the title sliding on skip, a shutter flash for screenshots, a
+Confirm row for power actions, and a generic "icon + old → new" for
+everything else. An undo plays the same effect backwards. They are short
+(~0.6 s) and calm. After the entry only a countdown hairline redraws, at 4 fps,
+and nothing runs once the row has gone. M5 will port them to QML with the same
+data contract.
+
 ## Conversations and sessions
 
 - **One conversation across all tiers.** hey-claude keeps a rolling
@@ -717,6 +806,34 @@ Where the rest of the time goes, and the knobs:
 - "start a task in …" is matched locally, without a model call. You hear
   "Okay, starting that…" as soon as whisper finishes.
 
+## CI and releases
+
+- **CI** (`.github/workflows/ci.yml`) runs every `tests/test_*.py` suite on
+  Windows with Python 3.12 for each push to `main` and each pull request. Only
+  CPU packages are installed: no mic, GPU, models or Claude login are needed,
+  because the suites mock them. Qt runs offscreen. Run the same thing locally
+  with `for %t in (tests\test_*.py) do .venv\Scripts\python %t`.
+- **Releases** (`.github/workflows/release.yml`):
+  1. Bump `__version__` in `heyclaude/__init__.py` and merge it.
+  2. Tag that commit and push the tag:
+
+     ```bash
+     git tag v0.4.0
+     ```
+
+     ```bash
+     git push origin v0.4.0
+     ```
+
+  The workflow re-runs the tests, checks that the tag matches `__version__`,
+  and publishes a GitHub release. It attaches a source zip and
+  `SHA256SUMS.txt`, with notes generated from the merged PRs. A tag with a
+  hyphen (`v0.5.0-rc1`) makes a pre-release.
+- **Later assets:** the default wake-word model (M2a) and the Windows
+  installer (M8) are attached to the same releases when those milestones land.
+- Dependabot keeps the workflow actions up to date. Python packages are
+  pinned by hand because of the GPU stack.
+
 ## Files
 
 ```
@@ -752,13 +869,20 @@ heyclaude/
   tts.py          Kokoro (GPU → CPU → SAPI chain, per-reply device choice), SAPI (direct COM), Piper;
                   sentence streaming, the output stream that feeds the echo canceller
   island.py       the pill, task list, log window
+  island_effects.py  M9: paints the tool effects (volume slider, sun/moon, media card...) on the island
+  effects.py      M9: tool call -> effect event (the data contract; ui/effects.json maps tools to effects)
+  undo.py         M9: "undo that" and the island's Undo button (inverse calls, run locally)
+  mcp_windows/    M9: the Windows settings MCP server (audio, display, radios, power, media, apps,
+                  clipboard, screen, Settings pages) and its tool registry (allow-list, undo)
   claude_cli.py   finds claude.exe, launch flags
 tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
                   wake_eval.py (wake word hit rate, false wakes per hour, threshold),
                   stage_wake_release.py (stage the shared model as a release asset; publishes nothing),
-                  stt_eval.py (record your voice; whisper models' speed and word error rate)
-tests/            offline tests (python tests\test_offline.py, tests\test_wake.py, tests\test_conversation.py,
-                  tests\test_input.py, tests\test_voice.py, tests\test_wake_train.py)
+                  stt_eval.py (record your voice; whisper models' speed and word error rate),
+                  check_windows_settings.py (M9: every settings tool, live, values restored)
+tests/            offline tests (python tests	est_offline.py, tests	est_wake.py, tests	est_conversation.py,
+                  tests	est_input.py, tests	est_voice.py, tests	est_windows.py, tests	est_wake_train.py)
+ui/               effects.json: which island effect each tool gets (M9)
 models/           hey_claude.onnx (downloaded on first start, git-ignored) and its LICENSE
 docs/             the wake word: shared model, tune-up, Colab
 ```

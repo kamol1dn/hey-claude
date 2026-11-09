@@ -41,6 +41,8 @@ class Bridge(QObject):
     voice = Signal(str)             # active text-to-speech engine/device, e.g. "kokoro gpu"
     wake = Signal(str)              # the wake phrase that's loaded ("hey claude", or the fallback)
     wake_hit = Signal(float)        # the wake word fired (time.time()); "not me" becomes possible
+    effect = Signal(dict)           # M9: a tool effect event (effects.py), e.g. volume 45 -> 30
+    effect_art = Signal(str, object)  # M9: album art bytes for the media card (effect id, bytes)
     quit = Signal()
 
 
@@ -83,6 +85,9 @@ class Island(QWidget):
     activate = Signal()             # user clicked the pill to talk
     stop_speaking = Signal()
     interrupt_talk = Signal()       # mic button while it talks: stop and listen to the user
+    effect_undo = Signal(str)       # M9: the Undo button of an effect (its id)
+    effect_confirm = Signal(str)    # M9: Confirm on a sleep / restart / shutdown request
+    effect_cancel = Signal(str)
     quit_requested = Signal()
     not_me = Signal()               # "that wasn't me": the last wake was a false one
 
@@ -118,6 +123,10 @@ class Island(QWidget):
         bridge.wake_hit.connect(self._wake_hit)
         self.last_wake_t = 0.0          # when the wake word last fired (wall clock)
         self.wake_listening = False     # the current "listening" came from the wake word
+        from .island_effects import EffectPlayer
+        self.fx = EffectPlayer()                    # M9 tool effects: one row under the head
+        bridge.effect.connect(self.show_effect)
+        bridge.effect_art.connect(self._effect_art)
         self.stt_label = ""
         self.voice_label = ""
         self.partial = ""               # what you've said so far (listening modes)
@@ -266,6 +275,10 @@ class Island(QWidget):
             h = PILL_H if fm.horizontalAdvance(self.text) < 480 else PILL_H + 20
         else:
             w, h = 200, PILL_H
+        if self.fx.visible():
+            from .island_effects import EFFECT_H
+            w = max(w, self.fx.width())
+            h = (h if h > PILL_H or self.mode in ("idle", "off") else PILL_H) + EFFECT_H
         if self._tasks_visible():
             w = max(w, 460)
             h += 6 + ROW_H * len(self._visible_rows()) + 6
@@ -349,6 +362,26 @@ class Island(QWidget):
         self.voice_label = label
         self._tooltip()
 
+    # -- M9 effects --------------------------------------------------------------------
+    def show_effect(self, ev: dict):
+        """A tool changed something: show it (volume slider, sun/moon flip, ...) for ~8 s."""
+        self.fx.show(ev)
+        self._place()
+        self.update()
+        snap = os.environ.get("HEYCLAUDE_SNAP")   # debug: a png mid-entry and once settled
+        if snap:
+            for ms, tag in ((330, "a"), (1100, "b")):
+                QTimer.singleShot(ms, lambda t=tag, e=ev["effect"]: self.grab().save(
+                    os.path.join(snap, f"{time.strftime('%H%M%S')}-effect-{e}{'-undo' if ev.get('reverse') else ''}-{t}.png")))
+
+    def _effect_art(self, effect_id: str, data):
+        self.fx.set_art(effect_id, data)
+        self.update()
+
+    def _effect_rect(self) -> QRectF:
+        from .island_effects import EFFECT_H
+        return QRectF(0, self._head_h(), self.width(), EFFECT_H)
+
     def _tooltip(self):
         lines = (f"speech-to-text: {self.stt_label}" if self.stt_label else "",
                  f"voice: {self.voice_label}" if self.voice_label else "")
@@ -385,6 +418,14 @@ class Island(QWidget):
         if self.input_open and time.monotonic() - self._opened_at > 0.5:
             self._check_focus()
         busy = self.input_open or self.mode not in ("idle", "off") or any(t["status"] in ("starting", "running") for t in self.task_rows)
+        if self.fx.ev is not None:
+            now = time.perf_counter()
+            if self.fx.expired(now):
+                self.fx.clear()
+                self._place()
+                self.update()
+            elif not busy and self.fx.needs_frame(now):
+                self.update()               # entry at the tick rate, then 4 fps for the countdown only
         was = getattr(self, "_was_visible", False)
         vis = self._tasks_visible()
         if vis != was:
@@ -420,7 +461,7 @@ class Island(QWidget):
             self._paint_input(p, time.perf_counter() - self.t0)
             return
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        rad = min(20.0, r.height() / 2) if not self._tasks_visible() else 18.0
+        rad = min(20.0, r.height() / 2) if not (self._tasks_visible() or self.fx.visible()) else 18.0
         path = QPainterPath()
         path.addRoundedRect(r, rad, rad)
         p.fillPath(path, QColor(8, 8, 8, 245))
@@ -428,11 +469,24 @@ class Island(QWidget):
         p.drawPath(path)
 
         top_h = 28 if self.mode in ("idle", "off") else (PILL_H if self.height() < PILL_H + 30 or self._tasks_visible() is False else PILL_H)
-        head = QRectF(0, 0, self.width(), min(self.height(), top_h if not self._tasks_visible() else self._head_h()))
+        fx_on = self.fx.visible()
+        expanded = self._tasks_visible() or fx_on
+        head = QRectF(0, 0, self.width(), min(self.height(), top_h if not expanded else self._head_h()))
         t = time.perf_counter() - self.t0
         getattr(self, "_paint_" + self.mode, self._paint_text)(p, head, t)
+        below = head.bottom()
+        if fx_on:
+            fr = self._effect_rect()
+            p.save()
+            p.setClipPath(path)
+            self.fx.paint(p, fr, time.perf_counter())
+            p.restore()
+            below = fr.bottom()
         if self._tasks_visible():
-            self._paint_tasks(p, head.bottom() + 6, t)
+            self._paint_tasks(p, below + 6, t)
+        flash = self.fx.flash_alpha(time.perf_counter())
+        if flash > 0:                                   # screenshot: a shutter flash over the pill
+            p.fillPath(path, QColor(255, 255, 255, int(255 * flash)))
 
     def _head_h(self):
         fm = QFontMetrics(self.font_main)
@@ -509,21 +563,27 @@ class Island(QWidget):
             p.drawText(r, Qt.AlignCenter, "not me")
 
     def _paint_holding(self, p, head, t):
-        """Hold key down: still listening, pauses don't end it."""
+        """Hold key down: still listening, pauses don't end it. Ctrl+Shift: muted, still holding."""
         cy = head.center().y()
-        self._dot(p, 20, cy, 5, ACCENT)
-        p.setPen(QPen(ACCENT, 1.5))
+        muted = self.text == "muted"
+        ring = DIM if muted else ACCENT
+        self._dot(p, 20, cy, 5, ring)
+        p.setPen(QPen(ring, 1.5))
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(QRectF(20 - 9, cy - 9, 18, 18))
+        if muted:                                   # the slash, like the muted pill
+            p.setPen(QPen(QColor(8, 8, 8), 2.2))
+            p.drawLine(QPointF(14, cy - 6), QPointF(26, cy + 6))
         bw, x0 = 5, 40
         p.setPen(Qt.NoPen)
-        p.setBrush(FG)
+        p.setBrush(QColor(110, 110, 110) if muted else FG)
         for i, v in enumerate(self.levels):
-            hh = 3 + v * (head.height() - 16)
+            hh = 3 if muted else 3 + v * (head.height() - 16)
             p.drawRoundedRect(QRectF(x0 + i * (bw + 3), cy - hh / 2, bw, hh), 2, 2)
         p.setFont(self.font_small)
-        p.setPen(ACCENT)
-        p.drawText(QRectF(x0 + len(self.levels) * (bw + 3) + 4, 0, 60, head.height()), Qt.AlignVCenter, "holding")
+        p.setPen(DIM if muted else ACCENT)
+        p.drawText(QRectF(x0 + len(self.levels) * (bw + 3) + 4, 0, 70, head.height()), Qt.AlignVCenter,
+                   "muted" if muted else "holding")
 
     def _paint_followup(self, p, head, t):
         """Listening again without the wake word; the ring drains as the window runs out."""
@@ -598,6 +658,12 @@ class Island(QWidget):
         p.drawRoundedRect(QRectF(s.x() - 5, s.y() - 5, 10, 10), 2, 2)
 
     def mouseMoveEvent(self, e):
+        if self.fx.visible():
+            hov = self.fx.hit(self._effect_rect(), e.position())
+            if hov != self.fx.hover:
+                self.fx.hover = hov
+                self.setCursor(Qt.PointingHandCursor if hov else Qt.ArrowCursor)
+                self.update()
         if self.mode in ("thinking", "speaking", "listening"):
             self.update()                       # button hover highlight
 
@@ -662,6 +728,19 @@ class Island(QWidget):
             self._menu(e.globalPosition().toPoint())
             return
         head_h = self._head_h()
+        if self.fx.visible():
+            fr = self._effect_rect()
+            if fr.contains(pos):
+                hit = self.fx.hit(fr, pos)
+                ev_id = self.fx.ev["id"]
+                if hit:
+                    print(f"[effects] {hit} clicked")
+                    {"undo": self.effect_undo, "confirm": self.effect_confirm, "cancel": self.effect_cancel}[hit].emit(ev_id)
+                    self.fx.clear()
+                    self._place()
+                    self.update()
+                return
+            head_h = fr.bottom()
         if self._tasks_visible() and pos.y() > head_h + 6:
             i = int((pos.y() - head_h - 6) // ROW_H)
             rows = self._visible_rows()

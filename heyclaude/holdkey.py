@@ -47,26 +47,37 @@ def parse(spec: str) -> frozenset[int]:
 
 
 class HoldState:
-    """The hold logic, without Windows: feed key events, read `held`."""
+    """The hold logic, without Windows: feed key events, read `held` and `muted`.
 
-    def __init__(self, vks: frozenset[int], clock=time.perf_counter):
-        self.vks, self.clock = vks, clock
+    `mute_vks` (Shift by default): while the hold key is held, holding Shift
+    mutes the mic (the hold goes on); releasing Shift unmutes. Shift on its own,
+    outside a hold, means nothing. Ctrl+Shift+another key is still a shortcut.
+    """
+
+    def __init__(self, vks: frozenset[int], clock=time.perf_counter, mute_vks: frozenset[int] = frozenset()):
+        self.vks, self.clock, self.mute_vks = vks, clock, mute_vks
         self.down = False          # hold key physically down
         self.cancelled = False     # another key went down during this press: it's a shortcut
         self.held = False          # down, and not a shortcut
+        self.mute_down = False     # mute key physically down
         self.released_at: float | None = None   # when the last real hold ended
         self.used = False          # a real hold happened since reset()
         self._used_before = False
 
-    def reset(self, key_down_now: bool = False):
+    @property
+    def muted(self) -> bool:
+        return self.held and self.mute_down
+
+    def reset(self, key_down_now: bool = False, mute_down_now: bool = False):
         # A key already down when listening starts (e.g. Ctrl of the push-to-talk
         # hotkey) doesn't count: a hold must be a fresh press.
         self.down, self.cancelled, self.held = key_down_now, key_down_now, False
+        self.mute_down = mute_down_now
         self.released_at, self.used = None, False
 
     def key(self, vk: int, is_down: bool) -> bool:
-        """One key event. Returns True if `held` changed."""
-        before = self.held
+        """One key event. Returns True if `held` or `muted` changed."""
+        before = (self.held, self.muted)
         if vk in self.vks:
             if is_down:
                 if not self.down:              # ignore auto-repeat
@@ -77,13 +88,15 @@ class HoldState:
                 if self.held:
                     self.released_at = self.clock()
                 self.down = self.held = self.cancelled = False
+        elif vk in self.mute_vks:
+            self.mute_down = is_down           # a modifier: never a shortcut on its own
         elif is_down and self.down and not self.cancelled:
-            self.cancelled = True              # Ctrl+C etc.: a shortcut, not a hold
+            self.cancelled = True              # Ctrl+C, Ctrl+Shift+T etc.: a shortcut, not a hold
             if self.held:
                 self.held = False
                 self.used = self._used_before
                 self.released_at = self.clock()
-        return self.held != before
+        return (self.held, self.muted) != before
 
 
 # --- Windows hook ------------------------------------------------------------------
@@ -122,8 +135,9 @@ _kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 class HoldKey:
     """Watches the hold key while armed. on_change(held) runs on the hook thread."""
 
-    def __init__(self, spec: str = "ctrl", on_change: Callable[[bool], None] | None = None):
-        self.state = HoldState(parse(spec))
+    def __init__(self, spec: str = "ctrl", on_change: Callable[[bool], None] | None = None,
+                 mute_spec: str | None = "shift"):
+        self.state = HoldState(parse(spec), mute_vks=self._mute_vks(spec, mute_spec))
         self.on_change = on_change
         self._hook = None
         self._proc = HOOKPROC(self._hook_proc)     # keep a reference: the hook calls it
@@ -135,17 +149,31 @@ class HoldKey:
             raise RuntimeError("hold-key thread did not start")
 
     # -- public (any thread) ------------------------------------------------------
-    def set_key(self, spec: str):
+    @staticmethod
+    def _mute_vks(spec, mute_spec) -> frozenset[int]:
+        """Mute key codes; none if it's off ("") or the same key as the hold key."""
+        if not str(mute_spec or "").strip():
+            return frozenset()
+        vks = parse(mute_spec)
+        return frozenset() if vks & parse(spec) else vks
+
+    def set_key(self, spec: str, mute_spec: str | None = "shift"):
         self.state.vks = parse(spec)
+        self.state.mute_vks = self._mute_vks(spec, mute_spec)
 
     @property
     def held(self) -> bool:
         return self.state.held
 
+    @property
+    def muted(self) -> bool:
+        return self.state.muted
+
     def arm(self):
         """Start watching (installs the hook). Resets the hold state."""
         down = any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in self.state.vks)
-        self.state.reset(key_down_now=bool(down))
+        mute = any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in self.state.mute_vks)
+        self.state.reset(key_down_now=bool(down), mute_down_now=bool(mute))
         _user32.PostThreadMessageW(self._tid, _ARM, 0, 0)
 
     def disarm(self):

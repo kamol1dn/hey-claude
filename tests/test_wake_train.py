@@ -28,6 +28,9 @@ from heyclaude.wake_train import download as D  # noqa: E402
 from heyclaude.wake_train import head as H  # noqa: E402
 from heyclaude.wake_train import pipeline as P  # noqa: E402
 from heyclaude.wake_train import synth as S  # noqa: E402
+from heyclaude.wake_train.features import ensure_feature_models  # noqa: E402
+
+ensure_feature_models()          # openWakeWord's feature models (a fresh CI runner doesn't have them)
 
 
 # -- synthesis plumbing (TTS mocked) -----------------------------------------------------
@@ -494,6 +497,12 @@ def test_wizard_train_args(tmp_path):
     assert a[a.index("--false-wakes") + 1] == str(fw)
     st.set_phrase("okay jasper")
     assert "--false-wakes" not in st.train_args(false_wakes_dir=fw)    # those were "hey claude" false wakes
+
+
+def test_missing_requirements():
+    assert W.missing_requirements({}, find_spec=lambda m: object(), isfile=lambda p: True) == []
+    miss = W.missing_requirements({}, find_spec=lambda m: None if m == "onnx" else object(), isfile=lambda p: False)
+    assert len(miss) == 2 and miss[0].endswith("pip install onnx") and "Kokoro" in miss[1]
 
 
 def test_apply_and_undo_keep_a_history(tmp_path):

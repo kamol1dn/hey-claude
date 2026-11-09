@@ -11,6 +11,8 @@ Every utterance goes through `Brain.handle(text)`, which yields events:
     ("task_ask", ref, question) "what did the inha app task change?"
     ("task_stop", ref)          "stop the task"
     ("task_resume", ref)        "resume the last task in a terminal"
+    ("control", text)           "volume 30", "dark mode": the agent with the Windows tools, no filler
+    ("undo",)                   "undo that": revert the last Windows settings change locally
 
 `ref` is how the user named a task ("inha app", "last", "readme", "#<id>");
 tasks.find_task turns it into a task.
@@ -96,6 +98,23 @@ _LOOKUP_RE = re.compile(
     r"\b(telegram|gmail|e-?mails?|inbox|calendar|schedule|meetings?|appointments?|drive|"
     r"google docs?|messaged|messages?|dms?|unread|notifications?|my files?|weather|news|"
     r"search (the web|online|for)|look up|google)\b", re.I)
+# Controlling this PC (M9) -> the agent with the Windows settings tools, no model hop first.
+_PC_RE = re.compile(
+    r"\b(volume|mute|unmute|louder|quieter|brightness|brighter|dimmer|dark (?:mode|theme)|light (?:mode|theme)|"
+    r"wallpaper|desktop background|wi-?fi|bluetooth|airplane mode|night light|power mode|battery|"
+    r"(?:next|previous|last|skip(?: this| the)?) (?:song|track)|skip (?:this|it)|"
+    r"(?:pause|resume|stop|play) (?:the |my )?(?:music|song|video|track|playback|spotify)|"
+    r"what(?:'?s| is) (?:playing|this song)|what song|now playing|"
+    r"lock (?:the |my )?(?:pc|computer|laptop|screen)|screenshot|on my screen|"
+    r"(?:open|show) (?:the )?[\w -]{0,30}settings|snap (?:this|the|it|[\w ]{1,30}) (?:window )?(?:to the )?(?:left|right)|"
+    r"minimi[sz]e|clipboard|(?:put|send) (?:the |my )?(?:pc|computer|laptop) to sleep|"
+    r"(?:restart|shut ?down|reboot) (?:the |my )?(?:pc|computer|laptop))\b", re.I)
+_UNDO_RE = re.compile(
+    r"^(?:(?:and|so|ok(?:ay)?|please|now|then|can you|could you|would you|hey|no|oops|wait)[,\s]+)*"
+    r"(?:undo|revert|reverse)(?: (?:that|it|this|the last (?:change|thing|one)|what you (?:just )?did))?"
+    r"(?:,? please)?[.!]?$|"
+    r"^(?:(?:and|so|ok(?:ay)?|please|no|oops)[,\s]+)*(?:put|change|set|switch|turn) (?:it|that) back(?:,? please)?[.!]?$",
+    re.I)
 
 
 _POLITE = r"^(?:(?:and|so|ok(?:ay)?|please|now|then|can you|could you|would you|hey)[,\s]+)*"
@@ -144,6 +163,8 @@ def local_route(text: str, projects: Projects):
     t = text.strip()
     if _NOOP_RE.match(t):
         return ("noop",)
+    if _UNDO_RE.match(t):
+        return ("undo",)
     if _FRESH_RE.match(t):
         return ("fresh",)
     m = _TSTOP_RE.match(t)
@@ -166,6 +187,8 @@ def local_route(text: str, projects: Projects):
         return ("task_ask", _task_ref(t, projects), t)
     m = _TASK_RE.match(t)
     if not m:
+        if _PC_RE.search(t):
+            return ("control", t)
         if _LOOKUP_RE.search(t):
             return ("lookup", t)
         return None
@@ -196,8 +219,9 @@ def system_prompt(projects: Projects, has_agent: bool = True) -> str:
     names = ", ".join(projects.map) or "(none configured)"
     lookup = (
         "If answering needs the user's own data or live information (their messages, Telegram, "
-        "email, calendar, files, Drive, or a web search, news, weather, prices), do not guess; "
-        "reply with exactly: LOOKUP\n" if has_agent else "")
+        "email, calendar, files, Drive, or a web search, news, weather, prices), or controlling this "
+        "PC (volume, brightness, dark mode, wallpaper, Wi-Fi, Bluetooth, music, apps, windows, Settings), "
+        "do not guess; reply with exactly: LOOKUP\n" if has_agent else "")
     return (
         "You are a voice assistant on the user's Windows PC. Your reply is read aloud by TTS, so: "
         "plain sentences, no markdown, no lists, no code, no emoji. Answer in one or two short "
@@ -225,6 +249,24 @@ AGENT_PROMPT = (
     "conversation that another part of the assistant answered; use it to resolve 'there', "
     "'then', 'that' and the like."
 )
+# Added when the Windows settings server is on (M9).
+AGENT_WINDOWS_PROMPT = (
+    " To control this PC (volume, mute, brightness, dark or light mode, wallpaper, night light, Wi-Fi, "
+    "Bluetooth, power mode, media playback, opening apps, windows, clipboard, Settings pages) use the "
+    "mcp__windows tools: they are exact and undoable. Act right away without asking; the island shows "
+    "the change with an Undo button, so just confirm in a few words, e.g. 'Volume 30.' or 'Dark mode on.' "
+    "Short commands: 'volume 30' means set it to 30; 'brightness down' or 'quieter' means about 20 less; "
+    "'next song' means media_control next. For sleep, restart or shutdown call request_power_action and "
+    "tell the user to click Confirm on the island; never try another way. Never click or type through "
+    "the UI to change a setting; Windows-MCP tools, when present, are only for looking at the screen."
+)
+
+# Windows-MCP (CursorTouch) tools that act on the UI. They stay off the allow-list
+# until M7's island approvals exist; PowerShell and Registry are never allowed.
+WINDOWS_MCP_SERVER = "windows-mcp"
+WINDOWS_MCP_READ_ONLY = ("Snapshot", "Screenshot")
+NEVER_ALLOWED = re.compile(r"(?:^|__)(PowerShell|Registry)$|powershell|regedit", re.I)
+
 
 TASK_QA_PROMPT = (
     "The user is asking about this session's work by voice, after it finished. Answer from what "
@@ -254,6 +296,7 @@ class _CliChat:
         self.lock = threading.Lock()
         self.init_info: dict | None = None
         self.epoch = 0      # bumped on every new process: the Transcript re-sends context then
+        self.on_tool = None  # callback(kind, block): "tool_use" / "tool_result" content blocks (M9 effects)
         if persistent:
             self._spawn()
 
@@ -334,6 +377,8 @@ class _CliChat:
             except json.JSONDecodeError:
                 continue
             t = ev.get("type")
+            if t in ("assistant", "user") and self.on_tool is not None:
+                self._tool_blocks(t, ev)
             if t == "system" and ev.get("subtype") == "init":
                 self.init_info = ev
             elif t == "stream_event" and not self.final_only:
@@ -352,6 +397,19 @@ class _CliChat:
                 if not got_text and ev.get("result"):
                     yield ev["result"]
                 return
+
+    def _tool_blocks(self, kind: str, ev: dict):
+        """Hand tool_use (assistant) and tool_result (user) blocks to on_tool."""
+        content = (ev.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            return
+        want = "tool_use" if kind == "assistant" else "tool_result"
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == want:
+                try:
+                    self.on_tool(want, block)
+                except Exception as e:          # an effect must never break an answer
+                    print(f"[effects] {want} handler failed: {e}")
 
 
 def api_key(fast_cfg: dict | None = None) -> str | None:
@@ -441,6 +499,70 @@ def _desktop_mcp_file(names: list[str], out_path) -> str | None:
     return str(out_path)
 
 
+def _console_python() -> str:
+    """This interpreter, as python.exe (an MCP server needs stdio; pythonw has none)."""
+    import sys
+    exe = sys.executable
+    if os.path.basename(exe).lower() == "pythonw.exe":
+        cand = os.path.join(os.path.dirname(exe), "python.exe")
+        if os.path.isfile(cand):
+            return cand
+    return exe
+
+
+def find_windows_mcp(command: str | None = None) -> str | None:
+    """The `windows-mcp` executable from `uv tool install windows-mcp` (its own
+    isolated venv, never hey-claude's), or `command` if given."""
+    import shutil
+    if command:
+        return command if os.path.isfile(command) or shutil.which(command) else None
+    hit = shutil.which("windows-mcp")
+    if hit:
+        return hit
+    home = os.path.expanduser("~")
+    for p in (os.path.join(home, ".local", "bin", "windows-mcp.exe"),
+              os.path.join(os.environ.get("APPDATA", ""), "uv", "tools", "windows-mcp", "Scripts", "windows-mcp.exe")):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def windows_mcp_servers(agent_cfg: dict) -> dict:
+    """mcpServers entries for M9: our settings server ("windows"), plus
+    Windows-MCP ("windows-mcp") when it's switched on and installed."""
+    from .config import ROOT
+    servers = {}
+    if agent_cfg.get("windows_settings", True):
+        servers["windows"] = {"command": _console_python(), "args": ["-m", "heyclaude.mcp_windows"],
+                              "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}}
+    wm = agent_cfg.get("windows_mcp") or {}
+    if wm.get("enabled"):
+        exe = find_windows_mcp(wm.get("command"))
+        if exe:
+            exclude = list(dict.fromkeys(["PowerShell", "Registry", *[str(x) for x in wm.get("exclude_tools") or []]]))
+            servers[WINDOWS_MCP_SERVER] = {
+                "command": exe, "args": ["serve", "--transport", "stdio", "--exclude-tools", ",".join(exclude)],
+                "env": {"ANONYMIZED_TELEMETRY": "false"}}
+        else:
+            print("[agent] windows_mcp is on but `windows-mcp` isn't installed (uv tool install windows-mcp)")
+    return servers
+
+
+def gate_allowed_tools(tools: list[str]) -> tuple[list[str], list[str]]:
+    """(kept, dropped). PowerShell / Registry never pass, and of Windows-MCP
+    only the read-only tools do: its acting tools (Click, Type, Shortcut, Drag,
+    App...) wait for M7's island approvals."""
+    kept, dropped = [], []
+    wm = f"mcp__{WINDOWS_MCP_SERVER}"
+    for t in tools:
+        s = str(t).strip()
+        bad = bool(NEVER_ALLOWED.search(s))
+        if s == wm or s.startswith(wm + "__"):
+            bad = bad or s[len(wm) + 2:] not in WINDOWS_MCP_READ_ONLY
+        (dropped if bad else kept).append(s)
+    return kept, dropped
+
+
 class Agent:
     """Tier (b): one warm Claude Code process with tools, reused for every lookup."""
 
@@ -453,6 +575,20 @@ class Agent:
                              max_turns=int(a.get("max_turns", 30)), final_only=True, name="agent",
                              timeout=float(a.get("timeout", 180)))
         self.reported = False
+        # M9: tool calls are watched so changes get an island effect and an undo.
+        self.on_tool_result = None          # callback(name, input, result, is_error)
+        self._pending_tools: dict[str, tuple[str, dict]] = {}
+        self.chat.on_tool = self._tool_event
+
+    def _tool_event(self, kind: str, block: dict):
+        if kind == "tool_use":
+            self._pending_tools[block.get("id", "")] = (block.get("name", ""), block.get("input") or {})
+            return
+        name, args = self._pending_tools.pop(block.get("tool_use_id", ""), ("", {}))
+        if not name or self.on_tool_result is None:
+            return
+        from .effects import parse_result
+        self.on_tool_result(name, args, parse_result(block.get("content")), bool(block.get("is_error")))
 
     def _args(self) -> list[str]:
         """With conversation.save on, the session is saved and named per day
@@ -461,18 +597,30 @@ class Agent:
 
         a = self.cfg["agent"]
         day = self.day = session_name(self.cfg.get("conversation"))
+        win = windows_mcp_servers(a)
+        prompt = AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
         args = ["--model", a["model"], "--output-format", "stream-json", "--verbose",
                 "--permission-mode", a["permission_mode"], "--permission-prompts", "none",
-                "--append-system-prompt", AGENT_PROMPT, "--name", day or "hey-claude assistant"]
+                "--append-system-prompt", prompt, "--name", day or "hey-claude assistant"]
         if not day:
             args.append("--no-session-persistence")
         if a.get("allowed_tools"):
-            args += ["--allowedTools", ",".join(a["allowed_tools"])]
+            kept, dropped = gate_allowed_tools(list(a["allowed_tools"]))
+            if dropped:
+                print(f"[agent] not allowed without approvals (M7): {', '.join(dropped)}")
+            if kept:
+                args += ["--allowedTools", ",".join(kept)]
         mcp = list(a.get("mcp_configs") or [])
         if a.get("import_desktop_mcp"):
             f = _desktop_mcp_file(list(a["import_desktop_mcp"]), STATE_DIR / "agent-mcp.json")
             if f:
                 mcp.append(f)
+        if win:
+            f = STATE_DIR / "agent-windows-mcp.json"       # git-ignored, regenerated at every start
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            with open(f, "w", encoding="utf-8") as fh:
+                json.dump({"mcpServers": win}, fh, indent=1)
+            mcp.append(str(f))
         if mcp:
             args += ["--mcp-config", *mcp]
         args += [str(x) for x in a.get("extra_args") or []]
@@ -609,7 +757,7 @@ class Brain:
             tid = self.convo.last_task_id()
             if tid:
                 routed = ("task_ask", "#" + tid, text.strip())
-        if routed and not (routed[0] == "lookup" and not self.agent):
+        if routed and not (routed[0] in ("lookup", "control") and not self.agent):
             self.timing["route"] = "local-" + routed[0]
             yield routed
             return

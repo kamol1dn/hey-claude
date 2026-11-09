@@ -24,9 +24,22 @@ N_FRAMES = 16
 EMB_DIM = 96
 
 
+def ensure_feature_models():
+    """The melspectrogram and embedding models aren't in openwakeword's wheel;
+    fetch them (~2 MB, from openWakeWord's GitHub release) if they're missing."""
+    import os
+
+    import openwakeword
+    from openwakeword.utils import download_models
+    d = os.path.join(os.path.dirname(openwakeword.__file__), "resources", "models")
+    if not all(os.path.isfile(os.path.join(d, f)) for f in ("melspectrogram.onnx", "embedding_model.onnx")):
+        download_models(["no-wake-word-model"])     # feature (+ VAD) models only
+
+
 class Embedder:
     def __init__(self, device: str = "cpu", ncpu: int = 4, batch: int = 256):
         from openwakeword.utils import AudioFeatures
+        ensure_feature_models()
         if device == "cuda":
             from ..tts import ort_cuda_available
             ok, why = ort_cuda_available()

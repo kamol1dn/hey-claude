@@ -194,23 +194,26 @@ def main():
             asst.hold = None
             print("[hold] off")
             return
+        mute = cfg["listen"].get("hold_mute_key", "shift")
         try:
             parse(spec)
+            if mute:
+                parse(mute)
         except ValueError as e:
             print(f"[hold] {e}")
             return
         if asst.hold is None:
-            asst.hold = HoldKey(spec, on_change=asst.on_hold)
+            asst.hold = HoldKey(spec, on_change=asst.on_hold, mute_spec=mute)
         else:
-            asst.hold.set_key(spec)
-        print(f"[hold] {spec}")
+            asst.hold.set_key(spec, mute)
+        print(f"[hold] {spec}" + (f" (+{mute} mutes)" if mute else ""))
 
     def on_saved(new: dict, _changed: list):
         changed = asst.apply_config(new)
         print(f"[settings] saved: {', '.join(changed) or 'no changes'}"
               + (f"; restart needed for {', '.join(config.needs_restart(changed))}"
                  if config.needs_restart(changed) else ""))
-        if "listen.hold_key" in changed and interactive:
+        if ("listen.hold_key" in changed or "listen.hold_mute_key" in changed) and interactive:
             set_hold_key(cfg["listen"].get("hold_key"))
         if "app.hotkey" in changed:
             set_hotkey(cfg["app"].get("hotkey"))
@@ -235,6 +238,10 @@ def main():
         # Mic button while it talks: stop, then listen (same as the hotkey: the talk-or-type field).
         island.interrupt_talk.connect(lambda: (asst.hush(), bridge.talk.emit()))
         island.quit_requested.connect(app.quit)
+        # M9: tool effects. Undo runs locally; sleep/restart/shutdown only ever on this click.
+        island.effect_undo.connect(asst.undo_clicked)
+        island.effect_confirm.connect(asst.confirm_clicked)
+        island.effect_cancel.connect(asst.cancel_clicked)
 
         def not_me():
             path = asst.reject_wake()

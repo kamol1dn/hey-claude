@@ -460,21 +460,27 @@ class Island(QWidget):
             p.drawText(QRectF(tx, 0, 60, head.height()), Qt.AlignVCenter, "listening")
 
     def _paint_holding(self, p, head, t):
-        """Hold key down: still listening, pauses don't end it."""
+        """Hold key down: still listening, pauses don't end it. Ctrl+Shift: muted, still holding."""
         cy = head.center().y()
-        self._dot(p, 20, cy, 5, ACCENT)
-        p.setPen(QPen(ACCENT, 1.5))
+        muted = self.text == "muted"
+        ring = DIM if muted else ACCENT
+        self._dot(p, 20, cy, 5, ring)
+        p.setPen(QPen(ring, 1.5))
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(QRectF(20 - 9, cy - 9, 18, 18))
+        if muted:                                   # the slash, like the muted pill
+            p.setPen(QPen(QColor(8, 8, 8), 2.2))
+            p.drawLine(QPointF(14, cy - 6), QPointF(26, cy + 6))
         bw, x0 = 5, 40
         p.setPen(Qt.NoPen)
-        p.setBrush(FG)
+        p.setBrush(QColor(110, 110, 110) if muted else FG)
         for i, v in enumerate(self.levels):
-            hh = 3 + v * (head.height() - 16)
+            hh = 3 if muted else 3 + v * (head.height() - 16)
             p.drawRoundedRect(QRectF(x0 + i * (bw + 3), cy - hh / 2, bw, hh), 2, 2)
         p.setFont(self.font_small)
-        p.setPen(ACCENT)
-        p.drawText(QRectF(x0 + len(self.levels) * (bw + 3) + 4, 0, 60, head.height()), Qt.AlignVCenter, "holding")
+        p.setPen(DIM if muted else ACCENT)
+        p.drawText(QRectF(x0 + len(self.levels) * (bw + 3) + 4, 0, 70, head.height()), Qt.AlignVCenter,
+                   "muted" if muted else "holding")
 
     def _paint_followup(self, p, head, t):
         """Listening again without the wake word; the ring drains as the window runs out."""

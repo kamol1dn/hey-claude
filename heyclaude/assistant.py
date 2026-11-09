@@ -133,7 +133,8 @@ class Assistant:
     def on_hold(self, held: bool):
         """Hold key went down/up (hook thread). Only shown while listening."""
         if self.mode in ("listening", "holding", "followup"):
-            self.set_mode("holding" if held else "listening")
+            muted = bool(held and self.hold is not None and self.hold.muted)
+            self.set_mode("holding" if held else "listening", "muted" if muted else "")
 
     # -- hotkey input session (talk or type) -----------------------------------
     def begin_input(self):

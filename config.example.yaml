@@ -63,6 +63,7 @@ listen:
   # end the utterance until you let go). ctrl = either Ctrl; also right ctrl,
   # caps lock, f13... "" = off. Ctrl+C etc. during a hold count as shortcuts.
   hold_key: ctrl
+  hold_mute_key: shift       # while holding the hold key, also hold this to mute the mic; "" = off
   max_utterance_s: 180    # safety cap once a hold was used
 
 stt:

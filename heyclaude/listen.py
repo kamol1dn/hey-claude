@@ -340,7 +340,8 @@ def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Eve
     ends the utterance and the start timeout waits; after release the silence
     window counts from the later of release and the last speech. Once a hold
     was used the length cap is `max_utterance_s` instead of `max_seconds`,
-    and long silences are trimmed out before returning.
+    and long silences are trimmed out before returning. While `hold.muted`
+    (Ctrl+Shift) the mic's audio is replaced with silence, so it's trimmed too.
 
     `preroll`: blocks heard just before (barge-in), counted as speech already.
 
@@ -374,6 +375,8 @@ def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Eve
     for block in blocks:
         if stop_event is not None and stop_event.is_set():
             return None, None
+        if hold is not None and getattr(hold, "muted", False):
+            block = np.zeros_like(block)   # Ctrl+Shift: the mic is muted, the hold goes on
         if on_level:
             on_level(level(block))
         voiced = vad.frames(block)

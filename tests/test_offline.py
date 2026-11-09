@@ -243,7 +243,7 @@ def test_listening_toggle_and_pause():
     assert a.ui.state.calls[-1] == ("off", "listening off") and a._abort_rec.is_set()
 
 
-# -- speech-to-text device choice (CUDA mocked: nothing here touches a GPU) --
+# -- speech-to-text device choice (NVML/psutil/CUDA mocked: no GPU touched) --
 
 class _FakeModel:
     def __init__(self, device, fail=None):
@@ -255,13 +255,31 @@ class _FakeModel:
         return f"text from {self.device}"
 
 
-def _stt(cfg=None, device=None, cuda=(True, ""), premiere=False, gpu_load_error=None, gpu_fail=None):
+class _FakeLoad:
+    def __init__(self, gpu=5.0, free=5000.0, cpu=20.0):
+        self.gpu, self.free, self.cpu = gpu, free, cpu
+
+    def gpu_util(self):
+        return self.gpu
+
+    def gpu_free_mb(self):
+        return self.free
+
+    def cpu_pct(self):
+        return self.cpu
+
+
+def _stt(cfg=None, device=None, cuda=(True, ""), premiere=False, gpu_load_error=None, gpu_fail=None,
+         load=None, cached=True, gate=None):
     from heyclaude.stt import SpeechToText
-    c = {"device": "gpu", "gpu_model": "large-v3-turbo", "cpu_model": "base.en", "yield_to_premiere": True}
+    c = {"device": "gpu", "gpu_model": "large-v3-turbo", "cpu_model": "base.en", "gpu_busy_pct": 70,
+         "gpu_resume_pct": 60, "cpu_busy_pct": 85, "yield_to_premiere": False}
     c.update(cfg or {})
-    state = {"premiere": premiere, "loads": [], "cuda_checks": 0}
+    state = {"premiere": premiere, "loads": [], "cuda_checks": 0, "load": load or _FakeLoad()}
 
     def loader(dev):
+        if dev == "cuda" and gate is not None:
+            gate.wait(5)                            # a slow download
         state["loads"].append(dev)
         if dev == "cuda" and gpu_load_error:
             raise gpu_load_error
@@ -271,9 +289,37 @@ def _stt(cfg=None, device=None, cuda=(True, ""), premiere=False, gpu_load_error=
         state["cuda_checks"] += 1
         return cuda
 
-    s = SpeechToText(c, device=device, loader=loader, cuda_check=cuda_check,
-                     premiere_running=lambda: state["premiere"])
+    s = SpeechToText(c, device=device, loader=loader, cuda_check=cuda_check, monitor=state["load"],
+                     premiere_running=lambda: state["premiere"], cached=lambda m: cached)
     return s, state
+
+
+def test_stt_start_never_waits_for_a_download():
+    import threading
+    import numpy as np
+    gate = threading.Event()
+    s, st = _stt(cached=False, gate=gate)           # turbo not downloaded: start-up must not block
+    assert s.label == "cpu (downloading turbo)" and st["loads"] == ["cpu"]
+    assert s.transcribe(np.zeros(1600, np.int16)) == "text from cpu"
+    gate.set()                                      # download finishes
+    for _ in range(100):
+        if s.label == "gpu (turbo)":
+            break
+        threading.Event().wait(0.02)
+    assert s.label == "gpu (turbo)" and s.transcribe(np.zeros(1600, np.int16)) == "text from cuda"
+
+
+def test_choose_rule():
+    from heyclaude.stt import choose
+    assert choose(True, 5, 5000, 0, 20) == ("gpu", "")
+    assert choose(True, 83, 5000, 0, 20) == ("cpu", "gpu busy 83%")
+    assert choose(True, 83, 5000, 0, 90) == ("gpu", "cpu busy")          # both busy: stay on GPU
+    assert choose(True, 5, 900, 2250, 20)[0] == "cpu"                    # not enough VRAM to load
+    assert choose(True, 5, 900, 0, 20) == ("gpu", "")                    # already loaded: VRAM is ours
+    assert choose(True, 65, 5000, 0, 20) == ("gpu", "")                  # 65% < 70: stays on GPU
+    assert choose(False, 65, 5000, 0, 20)[0] == "cpu"                    # on CPU: needs < 60 to go back
+    assert choose(False, 55, 5000, 0, 20) == ("gpu", "")
+    assert choose(True, None, None, 2250, None) == ("gpu", "")           # no readings: default GPU
 
 
 def test_stt_gpu_loaded_once_and_kept():
@@ -282,7 +328,40 @@ def test_stt_gpu_loaded_once_and_kept():
     assert s.label == "gpu (turbo)" and s.device == "cuda" and st["loads"] == ["cuda"]
     for _ in range(3):
         assert s.transcribe(np.zeros(1600, np.int16)) == "text from cuda"
-    assert st["loads"] == ["cuda"]                  # no per-utterance load, CPU model never loaded
+    assert st["loads"] == ["cuda"]                  # no per-request load, CPU model never loaded
+
+
+def test_stt_switches_with_load_and_hysteresis():
+    import numpy as np
+    z = np.zeros(1600, np.int16)
+    s, st = _stt()
+    load = st["load"]
+    load.gpu = 83                                   # e.g. a Remotion render on the GPU
+    assert s.transcribe(z) == "text from cpu" and s.label == "cpu (gpu busy 83%)"
+    load.gpu = 65                                   # between resume (60) and busy (70): stay on CPU
+    assert s.transcribe(z) == "text from cpu"
+    load.gpu = 50
+    assert s.transcribe(z) == "text from cuda" and s.label == "gpu (turbo)"
+    load.gpu = 65                                   # on GPU now: 65 < 70 keeps it there
+    assert s.transcribe(z) == "text from cuda"
+    load.gpu, load.cpu = 90, 95                     # both busy: GPU
+    assert s.transcribe(z) == "text from cuda" and s.label == "gpu (cpu busy)"
+    assert st["loads"] == ["cuda", "cpu"]           # both stay loaded: switching never reloads
+
+
+def test_stt_busy_gpu_at_start_loads_it_later():
+    import numpy as np
+    s, st = _stt(load=_FakeLoad(gpu=90))
+    assert s.label == "cpu (gpu busy 90%)" and st["loads"] == ["cpu"]
+    st["load"].gpu = 10
+    s.poll(background=False)                        # GPU free again: loads it, CPU serves meanwhile
+    assert s.label == "gpu (turbo)" and st["loads"] == ["cpu", "cuda"]
+    assert s.transcribe(np.zeros(1600, np.int16)) == "text from cuda"
+
+
+def test_stt_low_vram_uses_cpu():
+    s, st = _stt(load=_FakeLoad(free=800))
+    assert s.label.startswith("cpu (low vram") and st["loads"] == ["cpu"]
 
 
 def test_stt_falls_back_without_cuda():
@@ -291,13 +370,13 @@ def test_stt_falls_back_without_cuda():
 
 
 def test_stt_falls_back_when_gpu_load_fails():
-    s, st = _stt(gpu_load_error=RuntimeError("CUDA failed with error out of memory"))
-    assert s.label == "cpu (fallback: out of memory)" and st["loads"] == ["cuda", "cpu"]
     s, st = _stt(gpu_load_error=RuntimeError("Library cublas64_12.dll is not found"))
-    assert s.label == "cpu (fallback: gpu load failed)"
+    assert s.label == "cpu (fallback: gpu load failed)" and st["loads"] == ["cuda", "cpu"]
+    s, st = _stt(gpu_load_error=RuntimeError("CUDA failed with error out of memory"))
+    assert s.label == "cpu (gpu out of memory)" and not s.gpu_failed   # retried later, not given up
 
 
-def test_stt_cuda_error_retries_the_utterance_on_cpu():
+def test_stt_cuda_error_retries_the_request_on_cpu():
     import numpy as np
     s, st = _stt(gpu_fail=RuntimeError("CUDA error: an illegal memory access"))
     assert s.transcribe(np.zeros(1600, np.int16)) == "text from cpu"
@@ -316,38 +395,17 @@ def test_stt_other_errors_are_not_swallowed():
     raise AssertionError("non-CUDA error should propagate")
 
 
-def test_stt_never_touches_gpu_while_premiere_runs():
-    import numpy as np
-    s, st = _stt(premiere=True)
-    assert s.label == "cpu (fallback: premiere)"
-    assert st["loads"] == ["cpu"] and st["cuda_checks"] == 0   # not even a CUDA probe
-    assert s.transcribe(np.zeros(1600, np.int16)) == "text from cpu"
-    st["premiere"] = False                          # Premiere closed: GPU model comes back
-    s.poll(force=True, background=False)
-    assert s.label == "gpu (turbo)" and st["loads"] == ["cpu", "cuda"]
-    st["premiere"] = True                           # Premiere opened again: unload, CPU
-    s.poll(force=True)
-    assert s.label == "cpu (fallback: premiere)" and s.gpu is None
-    assert s.transcribe(np.zeros(1600, np.int16)) == "text from cpu"
-    assert st["loads"] == ["cpu", "cuda"]           # CPU model reused, not reloaded
-
-
-def test_stt_premiere_check_is_rate_limited():
-    s, st = _stt()
-    calls = {"n": 0}
-    s._premiere = lambda: calls.__setitem__("n", calls["n"] + 1) or False
-    for _ in range(20):
-        s.poll()
-    assert calls["n"] <= 1
-
-
-def test_stt_yield_to_premiere_off_and_cpu_device():
-    s, st = _stt(cfg={"yield_to_premiere": False}, premiere=True)
+def test_stt_idle_premiere_is_fine_unless_opted_in():
+    s, st = _stt(premiere=True)                     # default: Premiere open but idle -> GPU
     assert s.label == "gpu (turbo)"
-    s, st = _stt(device="cpu", premiere=True)
+    s, st = _stt(cfg={"yield_to_premiere": True}, premiere=True)
+    assert s.label == "cpu (fallback: premiere)"
+    assert st["loads"] == ["cpu"] and st["cuda_checks"] == 0   # opt-in: not even a CUDA probe
+
+
+def test_stt_cpu_device_never_touches_cuda():
+    s, st = _stt(device="cpu")
     assert s.label == "cpu (base.en)" and st["loads"] == ["cpu"] and st["cuda_checks"] == 0
-    s, st = _stt(cfg={"device": "cpu"})
-    assert s.label == "cpu (base.en)" and st["cuda_checks"] == 0
 
 
 def test_config_migrates_v1_stt_keys(tmp_path):
@@ -357,8 +415,7 @@ def test_config_migrates_v1_stt_keys(tmp_path):
                  "app:\n  premiere_guard: false\n")
     cfg = C.load(p)
     assert cfg["stt"]["cpu_model"] == "small.en" and cfg["stt"]["device"] == "gpu"
-    assert cfg["stt"]["yield_to_premiere"] is False and "model" not in cfg["stt"]
-    assert "premiere_guard" not in cfg["app"]
+    assert "model" not in cfg["stt"] and "premiere_guard" not in cfg["app"]
 
 
 def test_assistant_thread_restarts_once_after_a_crash():

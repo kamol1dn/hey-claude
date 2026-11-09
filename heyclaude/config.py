@@ -28,7 +28,7 @@ HEADER = ("# hey-claude settings. Written by the Settings window; edit by hand i
 # without a restart. Everything else needs one.
 LIVE = (
     "wake.threshold", "wake.cooldown",
-    "stt.yield_to_premiere",         # read on every Premiere check
+    "stt.yield_to_premiere", "stt.gpu_busy_pct", "stt.gpu_resume_pct", "stt.cpu_busy_pct",  # read per request
     "listen.",                       # read on every utterance (device: next time the mic opens)
     "tasks.",                        # read when each task starts
     "projects",                      # spoken routing; whisper hints + quick-model prompt after restart
@@ -72,8 +72,8 @@ def _migrate(user: dict) -> dict:
         if str(s.get("device", "")).lower().startswith("cuda"):
             s["device"] = "gpu"
     a = user.get("app")
-    if isinstance(a, dict) and "premiere_guard" in a:
-        user.setdefault("stt", {}).setdefault("yield_to_premiere", a.pop("premiere_guard"))
+    if isinstance(a, dict):
+        a.pop("premiere_guard", None)            # replaced by the load-based choice in stt
     return user
 
 

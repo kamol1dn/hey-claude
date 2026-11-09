@@ -28,10 +28,10 @@ listen:
   max_utterance_s: 180    # safety cap once a hold was used
 
 stt:
-  # gpu: load gpu_model once into VRAM and keep it there; fall back to the CPU
-  # when CUDA/cuDNN is missing, the load fails or runs out of memory, or a
-  # transcription hits a CUDA error (that utterance is retried on the CPU).
-  # cpu: always cpu_model. --gpu / --cpu on the command line override this.
+  # gpu: the GPU by default, picked per request from actual load (see the
+  # *_pct keys below); falls back to the CPU when CUDA/cuDNN is missing, the
+  # load fails, or a transcription hits a CUDA error (that request is retried
+  # on the CPU). cpu: always cpu_model. --gpu / --cpu override this.
   device: gpu
   gpu_model: large-v3-turbo   # ~1.6 GB download, ~1.6 GB VRAM in float16
   gpu_compute_type: float16   # int8_float16 uses less VRAM
@@ -39,9 +39,15 @@ stt:
   cpu_compute_type: int8
   cpu_threads: 4
   language: en
-  # While Adobe Premiere Pro is running, never use the GPU: whisper runs on the
-  # CPU and the GPU model is unloaded; it's reloaded when Premiere closes.
-  yield_to_premiere: true
+  # Per request: use the CPU when the GPU is at least gpu_busy_pct busy (averaged
+  # over ~0.5 s) or short of VRAM, unless the CPU is at least cpu_busy_pct busy
+  # (then stay on the GPU). Back to the GPU once it's below gpu_resume_pct.
+  gpu_busy_pct: 70
+  gpu_resume_pct: 60
+  cpu_busy_pct: 85
+  # Opt-in: never use the GPU while Adobe Premiere Pro is running (an idle
+  # Premiere is fine otherwise; the load check above handles a busy one).
+  yield_to_premiere: false
 
 fast:
   # auto  = Anthropic SDK if ANTHROPIC_API_KEY is set, otherwise the claude CLI

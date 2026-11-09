@@ -7,8 +7,8 @@ and a small model answers out loud in a second or two. Say *"start a task in
 The island tracks the run, and when it finishes a one-sentence summary is read
 out.
 
-Everything runs in one Python process. Speech-to-text uses the GPU when it
-can (and the CPU whenever Premiere Pro is open, so Premiere keeps the GPU);
+Everything runs in one Python process. Speech-to-text runs on the GPU unless
+the GPU is busy (a render, say), in which case that request goes to the CPU;
 everything else runs on the CPU. Claude is driven through the `claude` CLI you're already signed in
 to. No API key is needed.
 
@@ -99,7 +99,7 @@ mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ fas
 
 | flag | what it does |
 |---|---|
-| `--gpu` / `--cpu` | whisper on the GPU / the CPU, overriding `stt.device` (the GPU still yields to Premiere). |
+| `--gpu` / `--cpu` | whisper on the GPU / the CPU, overriding `stt.device`. |
 | `--text` | type requests instead of speaking (no mic, no whisper). |
 | `--simulate x.wav` | use a 16 kHz mono wav as the microphone. Good for testing and timing. |
 | `--exit` | with `--simulate`: quit after the request (and any task it started) is done. |
@@ -152,8 +152,8 @@ or `""` to turn it off.
 **Settings window** (tray → Settings…) edits `config.yaml`, creating it from
 `config.example.yaml` the first time. Tabs: General (listening at start,
 hotkey with a Record… button, hold key, start with Windows), Voice & wake (wake model
-and threshold; whisper device, GPU and CPU models, GPU precision, Premiere
-yield; voice, rate, a test button), Models (quick-answer backend and models, the tool agent on/off,
+and threshold; whisper device, GPU and CPU models, GPU precision, busy
+thresholds, the Premiere opt-out; voice, rate, a test button), Models (quick-answer backend and models, the tool agent on/off,
 model and filler line, task model, permission mode and parallel limit),
 Projects (spoken name → folder, with a folder picker) and Permissions (the
 agent's and the tasks' `allowed_tools`, one per line). Fields tagged
@@ -162,7 +162,7 @@ now** button after saving them. Everything else applies on save:
 
 | applies on save | needs a restart |
 |---|---|
-| wake threshold and cooldown, `listen.*`, `tasks.*` (permission mode, allowed tools, model, parallel limit), projects for "start a task in …", the agent's filler line, `island.*`, hotkey, start with Windows, `stt.yield_to_premiere` | wake model, the rest of `stt.*` (device, models), `tts.*` (voice, rate, backend), `fast.*`, the agent's on/off, model and allowed tools, `claude.exe` |
+| wake threshold and cooldown, `listen.*`, `tasks.*` (permission mode, allowed tools, model, parallel limit), projects for "start a task in …", the agent's filler line, `island.*`, hotkey, start with Windows, `stt.*_busy_pct`, `stt.yield_to_premiere` | wake model, the rest of `stt.*` (device, models), `tts.*` (voice, rate, backend), `fast.*`, the agent's on/off, model and allowed tools, `claude.exe` |
 
 New project names are routed right away; whisper's spelling hints and the
 quick model's project list pick them up after a restart.
@@ -177,26 +177,36 @@ checkbox reads off next time. Turn it on from the checkout you actually run
 **One copy at a time:** a second launch (say, clicking the shortcut again)
 tells the running copy to show itself and exits.
 
-**Speech-to-text device** (`stt.device`, default `gpu`): whisper's GPU model
-(`stt.gpu_model`, `large-v3-turbo` in float16) is loaded once at start-up and
-stays in VRAM, so there's no per-request load. It drops to the CPU model
-(`stt.cpu_model`, `base.en` int8, loaded only when first needed) when:
+**Speech-to-text device** (`stt.device`, default `gpu`): the device is
+picked for each request from the actual load, read from NVML (GPU
+utilisation averaged over about 0.5 s, free VRAM) and psutil (CPU):
 
-| when | for how long | island / `[ready]` shows |
+| situation | whisper runs on | island / log says |
 |---|---|---|
-| Premiere Pro is running (`stt.yield_to_premiere`, on by default) | until it closes; the GPU model is unloaded so Premiere gets the VRAM back, and reloaded in the background when it closes | `cpu (fallback: premiere)` |
-| CUDA isn't available | this session | `cpu (fallback: no cuda)` |
-| the GPU model fails to load (missing cuBLAS/cuDNN, ...) or runs out of memory | this session | `cpu (fallback: gpu load failed)` / `out of memory` |
-| a transcription raises a CUDA error | this session; that utterance is retried on the CPU | `cpu (fallback: cuda error)` |
+| GPU under `stt.gpu_busy_pct` (70%) | GPU (`stt.gpu_model`, `large-v3-turbo`) | `gpu (turbo)` |
+| GPU at 70% or more, or too little free VRAM to load the model | CPU (`stt.cpu_model`, `base.en`) | `cpu (gpu busy 83%)` / `cpu (low vram 0.9 GB)` |
+| GPU busy **and** CPU at `stt.cpu_busy_pct` (85%) or more | GPU anyway | `gpu (cpu busy)` |
+| back on the GPU | once it's under `stt.gpu_resume_pct` (60%), so it doesn't flip back and forth | |
 
-With Premiere already open at start-up it doesn't even probe CUDA. Premiere
-is checked before each utterance and every 10 s (one process-list scan,
-about 12 ms). The active device shows on the idle island ("hey jarvis · gpu")
-and in its right-click menu, and every switch is logged as `[stt] now …`.
-`--cpu` or `stt.device: cpu` keeps the GPU out of it entirely. GPU needs:
-an NVIDIA driver plus CUDA 12 cuBLAS (`cublas64_12.dll`) on PATH; the
-ctranslate2 wheel already ships cuDNN 9. If cuBLAS 12 is missing (a CUDA 13
-toolkit alone isn't enough), the load fails and it falls back to the CPU.
+An idle Premiere is fine; only real load counts (e.g. a Remotion render
+while Premiere sits open). Both models stay loaded once used, so switching
+is instant. The GPU model loads at start-up. If it isn't downloaded yet
+(1.6 GB the first time, about 9 minutes at 3 MB/s), start-up doesn't wait:
+the CPU model answers (`cpu (downloading turbo)`) while it downloads and
+loads in the background. Hard fallbacks to the CPU: CUDA missing or the GPU
+load failing (`cpu (fallback: no cuda)` / `gpu load failed`, for the
+session), out of memory while loading (retried a minute later), and a CUDA
+error mid-transcription (`cpu (fallback: cuda error)`; that request is
+retried on the CPU). `stt.yield_to_premiere: true` is an opt-in that keeps
+whisper off the GPU whenever Premiere Pro is running, idle or not.
+`--cpu` or `stt.device: cpu` keeps the GPU out of it entirely. The
+`[ready]` line shows the choice and the readings, e.g.
+`stt: cpu (downloading turbo) [gpu 7%, vram free 6.8 GB, cpu 62%]`, and
+every switch is logged as `[stt] now …`.
+
+GPU needs an NVIDIA driver plus CUDA 12 cuBLAS (`cublas64_12.dll`) on PATH;
+the ctranslate2 wheel already ships cuDNN 9. If cuBLAS 12 is missing (a
+CUDA 13 toolkit alone isn't enough), the load fails and it uses the CPU.
 
 **Logs:** everything the app prints also goes to `state\logs\app.log`
 (timestamped, rotated at 1 MB, 3 old files kept), including uncaught
@@ -416,11 +426,12 @@ heyclaude/
   hotkey.py       global push-to-talk hotkey (RegisterHotKey) and hotkey parsing
   holdkey.py      hold-to-keep-listening key (low-level hook, armed only while listening)
   settings_ui.py  the settings window
-  winsys.py       Startup shortcut, single-instance lock, "is Premiere running"
+  winsys.py       Startup shortcut, single-instance lock, "is a process running"
+  sysload.py      GPU (NVML) and CPU (psutil) load, sampled in the background
   applog.py       state/logs/app.log (rotating)
   config.py       config.yaml load/save, what applies live vs after a restart
   listen.py       mic (sounddevice), openWakeWord, webrtcvad recorder, wav simulator
-  stt.py          faster-whisper: GPU first, CPU fallback, yields to Premiere
+  stt.py          faster-whisper: GPU by default, CPU when the GPU is busy or fails
   brain.py        router, tier (a) chat (CLI or SDK), tier (b) warm tool agent, TASK/LOOKUP detection
   tasks.py        headless claude runs, stream-json parsing, logs, session ids
   tts.py          SAPI (direct COM), Piper, Kokoro; sentence streaming

@@ -91,8 +91,11 @@ TIPS = {
     "stt.gpu_compute_type": "float16, or int8_float16 for less VRAM.",
     "stt.cpu_model": "Whisper model on the CPU (fallback): tiny.en / base.en / small.en / small. "
                      "Loaded only when needed.",
-    "stt.yield_to_premiere": "While Adobe Premiere Pro is running, never use the GPU: whisper runs on the CPU and "
-                             "the GPU model is unloaded; it's reloaded when Premiere closes.",
+    "stt.yield_to_premiere": "Opt-in: never use the GPU while Adobe Premiere Pro is running, even when it's idle "
+                             "(the load check handles a busy Premiere anyway).",
+    "stt.gpu_busy_pct": "Use the CPU for a request when the GPU is at least this busy (averaged over ~0.5 s), "
+                        "unless the CPU is busier.",
+    "stt.cpu_busy_pct": "If the CPU is at least this busy too, stay on the GPU anyway.",
     "fast.backend": "auto = Anthropic SDK if ANTHROPIC_API_KEY is set, otherwise the claude CLI.\n"
                     "cli = always the claude CLI (your subscription login).\nsdk = always the Anthropic SDK.",
     "fast.cli_model": "Model for quick answers through the claude CLI.",
@@ -435,7 +438,11 @@ class SettingsWindow(QWidget):
         self._row(f, "stt.gpu_compute_type", "GPU precision", self.cmb_stt_gpu_compute)
         self.cmb_stt_model = self._combo(STT_MODELS, editable=True)
         self._row(f, "stt.cpu_model", "CPU model", self.cmb_stt_model)
-        self.cb_premiere = QCheckBox("Keep off the GPU while Premiere Pro runs")
+        self.sp_gpu_busy = QSpinBox(minimum=10, maximum=100, singleStep=5, suffix=" %")
+        self._row(f, "stt.gpu_busy_pct", "GPU busy at", self.sp_gpu_busy)
+        self.sp_cpu_busy = QSpinBox(minimum=10, maximum=100, singleStep=5, suffix=" %")
+        self._row(f, "stt.cpu_busy_pct", "CPU busy at", self.sp_cpu_busy)
+        self.cb_premiere = QCheckBox("Never use the GPU while Premiere Pro runs, even idle")
         self._row(f, "stt.yield_to_premiere", "Premiere", self.cb_premiere)
         v.addWidget(g)
 
@@ -564,7 +571,9 @@ class SettingsWindow(QWidget):
         self._set_combo(self.cmb_stt_device, "gpu" if dev in ("gpu", "cuda") else "cpu")
         self._set_combo(self.cmb_stt_gpu_model, _get(cfg, "stt.gpu_model", "large-v3-turbo"))
         self._set_combo(self.cmb_stt_gpu_compute, _get(cfg, "stt.gpu_compute_type", "float16"))
-        self.cb_premiere.setChecked(bool(_get(cfg, "stt.yield_to_premiere", True)))
+        self.cb_premiere.setChecked(bool(_get(cfg, "stt.yield_to_premiere", False)))
+        self.sp_gpu_busy.setValue(int(_get(cfg, "stt.gpu_busy_pct", 70)))
+        self.sp_cpu_busy.setValue(int(_get(cfg, "stt.cpu_busy_pct", 85)))
         self._set_combo(self.cmb_tts_backend, _get(cfg, "tts.backend", "sapi"))
         self.sp_rate.setValue(int(_get(cfg, "tts.rate", 190)))
         self._set_combo(self.cmb_voice, _get(cfg, "tts.voice"))
@@ -640,6 +649,11 @@ class SettingsWindow(QWidget):
         _set(new, "stt.gpu_compute_type", self._combo_value(self.cmb_stt_gpu_compute))
         _set(new, "stt.device", self._combo_value(self.cmb_stt_device))
         _set(new, "stt.yield_to_premiere", self.cb_premiere.isChecked())
+        _set(new, "stt.gpu_busy_pct", self.sp_gpu_busy.value())
+        _set(new, "stt.cpu_busy_pct", self.sp_cpu_busy.value())
+        # keep the resume point 10 below the busy point unless set by hand lower
+        if int(_get(new, "stt.gpu_resume_pct", 60)) >= self.sp_gpu_busy.value():
+            _set(new, "stt.gpu_resume_pct", max(5, self.sp_gpu_busy.value() - 10))
         _set(new, "tts.backend", self._combo_value(self.cmb_tts_backend))
         _set(new, "tts.rate", self.sp_rate.value())
         _set(new, "tts.voice", self._combo_value(self.cmb_voice) or None)

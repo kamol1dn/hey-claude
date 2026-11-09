@@ -150,11 +150,10 @@ class Island(QWidget):
         self.update()
 
     def _stt_short(self) -> str:
-        # "gpu (turbo)" -> "gpu"; "cpu (fallback: premiere)" -> "cpu · premiere"
-        lab = self.stt_label
-        if "fallback:" in lab:
-            return "cpu · " + lab.split("fallback:", 1)[1].strip(" )")
-        return lab.split(" ", 1)[0]
+        # "gpu (turbo)" -> "gpu"; "cpu (gpu busy 83%)" -> "cpu · gpu busy 83%"
+        dev, _, inside = self.stt_label.partition(" (")
+        inside = inside.rstrip(")").replace("fallback: ", "")
+        return f"{dev} · {inside}" if " " in inside or inside == "premiere" else dev
 
     def push_level(self, v: float):
         self.levels = self.levels[1:] + [v]

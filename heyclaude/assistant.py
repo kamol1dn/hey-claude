@@ -128,7 +128,8 @@ class Assistant:
             sig.emit(label)
 
     def _stt_poll_loop(self):
-        """Premiere check every 10 s (the per-utterance check covers the rest)."""
+        """Re-check GPU/CPU load every 10 s so the island stays current (each
+        request also re-checks right before transcribing)."""
         while not self.stopping:
             time.sleep(10)
             try:
@@ -163,10 +164,11 @@ class Assistant:
                                     on_change=self._stt_changed)
             self._stt_changed(self.stt.label)
             if self.stt.want == "gpu" and not self.stt.gpu_failed:
-                threading.Thread(target=self._stt_poll_loop, daemon=True, name="stt-premiere").start()
+                threading.Thread(target=self._stt_poll_loop, daemon=True, name="stt-load").start()
         self.ready.set()
         self.rest()
-        print(f"[ready] fast path: {self.brain.backend}; stt: {self.stt.label if self.stt else '-'}")
+        load = f" [{self.stt.readings()}]" if self.stt and self.stt.readings() else ""
+        print(f"[ready] fast path: {self.brain.backend}; stt: {self.stt.label if self.stt else '-'}{load}")
 
     # -- TTS callbacks --------------------------------------------------------
     def _tts_started(self):

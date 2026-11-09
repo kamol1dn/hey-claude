@@ -23,8 +23,8 @@ RELEASE_TAG = "wake-model-v1"
 DEFAULT_MODEL = {
     "file": "hey_claude.onnx",
     "url": f"https://github.com/kamol1dn/hey-claude/releases/download/{RELEASE_TAG}/hey_claude.onnx",
-    "sha256": "",            # filled in by tools/stage_wake_release.py when the asset is staged
-    "size": 0,
+    "sha256": "a7ccb87874720e908d89cdeeb2d40433ce8b4438d76ae54ffe94d863e181b6ad",   # filled in by tools/stage_wake_release.py when the asset is staged
+    "size": 3295990,
 }
 
 

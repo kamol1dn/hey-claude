@@ -792,6 +792,7 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
             except Exception as e:
                 self._train_fail(f"couldn't start the trainer: {e}")
                 return
+            self.bar.setValue(0)
             self.lb_train.setText("Starting…")
             self._refresh()
 
@@ -856,14 +857,16 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
                 return
             msg = on_apply(self.st.model)
             self.st.applied = True
-            self.status.setText(msg or "Applied: hey-claude listens with the new model now.")
             self._refresh()
+            self.status.setText(msg or "Applied: hey-claude listens with the new model now.")
 
         def _undo(self):
             if on_undo is not None:
                 msg = on_undo()
                 self.st.applied = False
+                self._refresh()
                 self.status.setText(msg or "")
+                return
             self._refresh()
 
         def closeEvent(self, e):

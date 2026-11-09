@@ -90,9 +90,17 @@ def logits(p: HeadParams, x: np.ndarray, batch: int = 8192) -> np.ndarray:
     return out
 
 
-def predict(p: HeadParams, x: np.ndarray) -> np.ndarray:
-    """(n, 16, 96) -> (n,) scores 0..1, what the exported ONNX model returns."""
-    return 1.0 / (1.0 + np.exp(-np.clip(logits(p, x), -40, 40)))
+def predict(p, x: np.ndarray) -> np.ndarray:
+    """(n, 16, 96) -> (n,) scores 0..1, what the exported ONNX model returns.
+    `p` is one head or a list of heads (an ensemble: their logits are averaged)."""
+    return 1.0 / (1.0 + np.exp(-np.clip(ens_logits(p, x), -40, 40)))
+
+
+def ens_logits(p, x: np.ndarray) -> np.ndarray:
+    """Logits of one head, or the mean logit of an ensemble."""
+    if isinstance(p, (list, tuple)):
+        return np.mean([logits(q, x) for q in p], axis=0)
+    return logits(p, x)
 
 
 def _step(p: HeadParams, x, y, w):
@@ -186,13 +194,29 @@ def train(pools: list[Pool], steps: int = 6000, batch: int = 512, pos_frac: floa
     return p
 
 
-def calibrate(p: HeadParams, threshold: float) -> HeadParams:
+def calibrate(p, threshold: float):
     """Shift the output bias so that a score of `threshold` becomes 0.5, so the
-    app's default threshold (0.5) is the chosen one."""
-    t = min(max(float(threshold), 1e-4), 1 - 1e-4)
-    p.b3 = (p.b3 - math.log(t / (1 - t))).astype(np.float32)
-    p.meta["calibrated_from"] = round(t, 4)
+    app's default threshold (0.5) is the chosen one. For an ensemble every
+    member is shifted, which shifts their mean logit by the same amount."""
+    t = min(max(float(threshold), 1e-6), 1 - 1e-6)
+    for q in (p if isinstance(p, (list, tuple)) else [p]):
+        q.b3 = (q.b3 - math.log(t / (1 - t))).astype(np.float32)
+        q.meta["calibrated_from"] = round(t, 6)
     return p
+
+
+def train_ensemble(pools: list[Pool], n: int = 5, seed: int = 0, progress=None, log=print, **kw) -> list[HeadParams]:
+    """n heads with different seeds; their logits are averaged. Single heads
+    vary a lot in false wakes from seed to seed, and the average is steadier
+    and better than most members. progress(step, total_steps, loss) over all."""
+    steps = kw.get("steps", 6000)
+    out = []
+    for i in range(n):
+        cb = (lambda s, t, l, i=i: progress(i * steps + s, n * steps, l)) if progress else None
+        out.append(train(pools, seed=seed + 1000 * i, progress=cb, log=log, **kw))
+        if log:
+            log(f"[head] ensemble member {i + 1}/{n} done")
+    return out
 
 
 def save(p: HeadParams, path):

@@ -98,7 +98,17 @@ training (the user runs Colab) and the ≥95% / <1 per 3 h measurement with
 **Done when:** ≥95% hit rate on the user's samples and fewer than 1 false
 wake per 3 hours of background audio.
 
-## M2a: Ship one default "hey claude" model for everyone
+## M2a: Ship one default "hey claude" model for everyone ✅ built, release staged (2026-11-09)
+
+**Status:** trained locally on synthetic voices only (`python -m
+heyclaude.wake_train default`, ~27 min on this PC): 96.5% hits on 480 clips
+of 8 held-out voices, 0.28 false wakes/h on openWakeWord's 10.7 h validation
+set (threshold chosen on that set). First-run download with SHA-256 and the
+licence check (CC BY-NC-SA 4.0, models/LICENSE) are in. The release asset is
+staged in `dist/wake-model-v1/` and **not published**: the maintainer runs
+the `gh release create` command from the PR. **Not measured yet:** real
+voices (no donated clips) and the user's lecture audio (`tools/wake_eval.py`).
+See README "Wake word".
 
 **Goal:** new users never train anything. The wake word detects the phrase,
 not the person, so one model trained once works for anyone who says "hey
@@ -123,7 +133,17 @@ claude".
 with ≥ 95% hits on the donated real clips and < 1 false wake per 3 h of
 lecture audio.
 
-## M2b: Personal tune-up and custom phrases, inside Settings, locally
+## M2b: Personal tune-up and custom phrases, inside Settings, locally ✅ built (2026-11-09)
+
+**Status:** Settings → Wake word wizard (phrase, Qt recorder with level meter
+and redo, optional room minute, Train with progress and ETA, test, apply with
+undo) and the island's "not me". An end-to-end wizard run on this PC trained
+in 6.7 min (GPU): 100% on held-out clips, 0.19 false wakes/h on the 10.7 h
+validation set (synthetic stand-in clips; a run with the user's own voice is
+still to come). Kokoro only so far: piper-tts 1.8 does install on Windows (a
+34 MB wheel), but adding it means another voice download and a retrain, and
+the targets were met without it. Its multi-speaker LibriTTS voice (~900
+speakers) is the obvious next step for robustness to real voices.
 
 **Goal:** optional. Most users keep the M2a default. The wizard is for people
 who want it tuned to **their** accent, or a **different phrase**. It runs in

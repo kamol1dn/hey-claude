@@ -315,6 +315,72 @@ its own voice can't wake it; click or use the hotkey to cut it off. Project
 names don't have to be heard perfectly: "in ha app" still matches `inha app`,
 and the names are given to whisper as a spelling hint.
 
+## Wake word
+
+**"hey claude" works out of the box.** One shared model, trained once on
+synthetic voices only, is downloaded on first start (3.2 MB, from the GitHub
+release `wake-model-v1`, kept only if its SHA-256 matches) and is the default
+`wake.model`. If it can't be downloaded, hey-claude falls back to the stock
+"hey jarvis" and says why. Details, the personal tune-up and the Colab route:
+[docs/train-hey-claude.md](docs/train-hey-claude.md).
+
+**How the shared model was made (M2a, 2026-11-09).** `python -m
+heyclaude.wake_train default`, on this PC (native Windows, no WSL, no Colab):
+
+- positives: 6,000 Kokoro clips from 46 voices (8 more held out for testing)
+  and random blends of two, speeds 0.75–1.35, pitch ±3 semitones, in 11
+  pronunciations (the M2 spellings hey claude / klod / clod / klawd / klode,
+  plus Russian/Uzbek-style ones such as a pure short "o" and a final "t"),
+  each placed in 3 differently augmented 2 s windows (synthetic room reverb,
+  noise and babble at 3–30 dB SNR, speed, gain);
+- negatives: 3,000 look-alikes ("hey cloud", "hey clyde", "claude" alone,
+  "I asked Claude"…), 3,000 ordinary sentences and word salads, 3,000
+  noise windows, and 256 spread-out slices of openWakeWord's ACAV100M feature
+  set (1.6 GB of its 17 GB, ~187 h of audio);
+- an ensemble of 8 small heads (numpy) on openWakeWord's embeddings, threshold
+  calibrated to 0.5, exported in openWakeWord's ONNX format; ~20 min of
+  synthesis on the GPU, then ~7 min of training on the CPU.
+
+| measured at threshold 0.5 | result | M2a target |
+|---|---|---|
+| hit rate, 480 clips from 8 held-out synthetic voices (never trained on) | **96.5%** | ≥ 95% |
+| false wakes, openWakeWord's 10.7 h validation set (dinner parties, conversations, music) | **3 (0.28 / h)** | < 0.33 / h |
+| `--simulate` with a Windows SAPI voice saying "Hey Claude, what is the capital of France?" | wakes and answers | |
+
+Caveats, honestly: the threshold was picked on that same validation set, so
+the 0.28 / h is a little optimistic. No real person's "hey claude" has been
+measured yet, and nor has lecture audio. Both are one command each with
+`tools\wake_eval.py` (record clips with `--record-wake-samples`; they're
+only scored, never committed):
+
+```bash
+.venv\Scripts\python tools\wake_eval.py --negatives "D:\path\to\lecture" --model models\hey_claude.onnx
+```
+
+What moved the numbers: more ACAV100M data. At a 95% hit rate a single head
+made 15.4 / 11.1 / 3.7 / 1.9 false wakes per hour with 16 / 32 / 64 / 104
+slices. Single heads also vary a lot from seed to seed (1.9 to 5.5 / h), so
+averaging 5–8 of them gave the rest. A wider head, a heavier false-activation
+penalty and more steps didn't help.
+
+**Personal tune-up (M2b).** Settings → Wake word → *Tune it to my voice…*
+records ~25 clips with a level meter and redo, takes an optional minute of
+room sound, trains with a progress bar and time estimate, shows the hit rate
+on your held-out clips and the false wakes per hour, and switches models live
+with undo. On this PC a run took 6.7 min (GPU, features already downloaded):
+100% on the held-out clips and 0.19 false wakes / h, against the M2b target
+of ≤ 0.5 / h (≤ 1 per 2 h). That run used synthetic stand-in clips, since
+nobody spoke into the mic for the automated test. The first run downloads
+1.8 GB of negative features (resumable; ~15–40 min on this line). After a
+false wake, click **not me** on the island: the audio is saved and the next
+tune-up learns from it.
+
+**Licence.** The model is CC BY-NC-SA 4.0 (non-commercial, attribution,
+share-alike), because its negatives come from openWakeWord's CC BY-NC-SA
+feature dataset, the same reason openWakeWord's own models carry that
+licence. Kokoro, the feature models and the code they come from are
+Apache 2.0. See [models/LICENSE](models/LICENSE).
+
 ## Config
 
 See [config.example.yaml](config.example.yaml); every key is commented. Most
@@ -671,7 +737,13 @@ heyclaude/
                   the utterance recorder, wav simulator
   vad.py          Silero VAD (webrtcvad fallback), end of turn, transcripts at pauses / while talking
   aec.py          echo cancellation (WebRTC AEC3 via livekit) and the barge-in detector
-  wake_samples.py record your own "hey claude" clips (state/wake_samples), zip them for training
+  wake_samples.py record your own "hey claude" clips (state/wake_samples), zip them for Colab,
+                  the wizard's background recorder
+  wake_models.py  the shared model's first-run download (GitHub release, SHA-256)
+  wake_wizard.py  Settings → Wake word wizard: state machine, trainer subprocess, apply/undo, live test
+  wake_metrics.py hit rate, false wakes, threshold sweep/recommendation (shared with wake_eval.py)
+  wake_train/     local training: synth (Kokoro), augment, features (openWakeWord), head (numpy),
+                  export (ONNX), download (ranged, resumable), pipeline (stages, ETA, device choice)
   stt.py          faster-whisper: GPU by default, CPU when the GPU is busy or fails
   brain.py        router, tier (a) chat (CLI or SDK), tier (b) warm tool agent, TASK/LOOKUP detection,
                   voice task control routes, questions about a task (claude -p --resume)
@@ -683,11 +755,12 @@ heyclaude/
   claude_cli.py   finds claude.exe, launch flags
 tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
                   wake_eval.py (wake word hit rate, false wakes per hour, threshold),
+                  stage_wake_release.py (stage the shared model as a release asset; publishes nothing),
                   stt_eval.py (record your voice; whisper models' speed and word error rate)
 tests/            offline tests (python tests\test_offline.py, tests\test_wake.py, tests\test_conversation.py,
-                  tests\test_input.py, tests\test_voice.py)
-models/           the trained hey_claude.onnx goes here (git-ignored)
-docs/             training a "hey claude" wake word
+                  tests\test_input.py, tests\test_voice.py, tests\test_wake_train.py)
+models/           hey_claude.onnx (downloaded on first start, git-ignored) and its LICENSE
+docs/             the wake word: shared model, tune-up, Colab
 ```
 
 ## Notes and limits (v1)

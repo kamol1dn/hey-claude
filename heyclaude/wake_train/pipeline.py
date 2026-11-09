@@ -49,9 +49,9 @@ SIZES = {
     # synthetic clips: positives, held-out positives, look-alikes, sentences, random words;
     # windows per positive clip; ACAV slices (6.3 MB each); training steps
     "default": dict(n_pos=6000, n_held=480, n_look=3000, n_sent=1500, n_words=1500, aug_pos=3,
-                    acav=64, steps=8000, user_copies=0),
+                    acav=256, steps=8000, user_copies=0, heads=8),
     "personal": dict(n_pos=1000, n_held=0, n_look=700, n_sent=300, n_words=300, aug_pos=3,
-                     acav=32, steps=5000, user_copies=25),
+                     acav=256, steps=5000, user_copies=25, heads=3),
 }
 FRAME_S = 0.08
 REFRACTORY_FRAMES = 25          # 2 s, like tools/wake_eval.py's default
@@ -280,22 +280,32 @@ def eval_windows(clip: np.ndarray, rng: np.random.Generator, beds, noisy: bool) 
     return out
 
 
-def validation_scores(p: H.HeadParams, frames: np.ndarray, chunk: int = 40000) -> np.ndarray:
-    """Score every 80 ms frame of the validation set (16-frame windows)."""
+def validation_scores(p, frames: np.ndarray, chunk: int = 40000, logit: bool = False) -> np.ndarray:
+    """Score every 80 ms frame of the validation set (16-frame windows).
+    logit=True returns the (mean) logit instead of the 0..1 score."""
     from .features import stream_to_windows
     n = frames.shape[0]
     out = []
     for s in range(0, n - 15, chunk):
         w = stream_to_windows(np.asarray(frames[s:s + chunk + 15], np.float32))
-        out.append(H.predict(p, w))
+        out.append(H.ens_logits(p, w) if logit else H.predict(p, w))
     return np.concatenate(out) if out else np.zeros(0, np.float32)
 
 
-def choose(pos_scores: np.ndarray, val_scores: np.ndarray, hours: float, min_hit: float, max_fph: float):
-    """Sweep + recommendation (wake_metrics), on a finer grid than wake_eval's."""
-    th = [round(t, 3) for t in np.arange(0.02, 0.991, 0.01)]
+LOGIT_GRID = [round(float(t), 2) for t in np.arange(-4.0, 16.01, 0.1)]
+
+
+def choose(pos_scores: np.ndarray, val_scores: np.ndarray, hours: float, min_hit: float, max_fph: float,
+           grid=None):
+    """Sweep + recommendation (wake_metrics). Works on scores or on logits
+    (pass logits and the default logit grid, which reaches far past 0.99)."""
+    th = grid if grid is not None else LOGIT_GRID
     rows = WM.sweep(pos_scores, [val_scores], hours, REFRACTORY_FRAMES, th)
     return rows, WM.recommend(rows, min_hit, max_fph)
+
+
+def sigmoid(x):
+    return 1.0 / (1.0 + np.exp(-np.clip(np.asarray(x, np.float64), -40, 40)))
 
 
 def _windows_and_features(job, clips, user_train, user_held, room, false_w, device, nrng, prog, cancel, log):
@@ -389,7 +399,7 @@ def estimates(job: Job, device: str, have_bytes: int, rate_mb_s: float = 0.7) ->
     need = D.plan_bytes(job.size("acav")) - have_bytes
     return dict(download=max(1.0, need / (rate_mb_s * 2 ** 20)), voices=n_clips / synth_rate,
                 features=n_win * 0.004 + n_win / (700 if device == "cuda" else 220),
-                train=job.size("steps") * 0.012, check=25.0, export=2.0)
+                train=job.size("steps") * job.size("heads") * 0.008, check=25.0, export=2.0)
 
 
 def run(job: Job, progress_cb=None, cancel=None, log=print) -> dict:
@@ -509,23 +519,25 @@ def run(job: Job, progress_cb=None, cancel=None, log=print) -> dict:
         if x is not None and len(x):
             pools.append(H.Pool(name, x, 0, share, wgt))
     steps = job.size("steps")
-    params = H.train(pools, steps=steps, seed=job.seed, cancel=cancel, log=log,
-                     progress=lambda s, n, l: prog.update(s / n, f"Training: step {s} of {n} (loss {l:.3f})"))
+    params = H.train_ensemble(pools, n=job.size("heads"), steps=steps, seed=job.seed, cancel=cancel, log=log,
+                              progress=lambda s, n, l: prog.update(s / n, f"Training: step {s} of {n} (loss {l:.3f})"))
 
     # 6. check ------------------------------------------------------------------------------------
     prog.stage("check")
     frames = D.load_validation(val_path)
     hours = frames.shape[0] * FRAME_S / 3600
-    vs = validation_scores(params, frames)
+    vl = validation_scores(params, frames, logit=True)
     prog.update(0.7)
     src = list(eval_pos)
-    pos_scores = H.predict(params, ev.reshape(-1, 16, 96)).reshape(-1, 4).max(1) if len(ev) else np.zeros(0)
+    pos_l = H.ens_logits(params, ev.reshape(-1, 16, 96)).reshape(-1, 4).max(1) if len(ev) else np.zeros(0)
     if job.mode == "personal" and any(s == "yours" for s in src):
         sel = np.array([s == "yours" for s in src])
-        rows, rec = choose(pos_scores[sel], vs, hours, WM.TARGET_HIT, 0.5)   # personal target: <= 1 per 2 h
+        rows, rec = choose(pos_l[sel], vl, hours, WM.TARGET_HIT, 0.5)   # personal target: <= 1 per 2 h
     else:
-        rows, rec = choose(pos_scores, vs, hours, WM.TARGET_HIT, WM.TARGET_FPH)
-    thr = rec.get("threshold") or 0.5
+        rows, rec = choose(pos_l, vl, hours, WM.TARGET_HIT, WM.TARGET_FPH)
+    t_logit = rec.get("threshold")
+    t_logit = 0.0 if t_logit is None else float(t_logit)
+    thr = float(sigmoid(t_logit))
     H.calibrate(params, thr)
     vs_c = validation_scores(params, frames)
     pos_c = H.predict(params, ev.reshape(-1, 16, 96)).reshape(-1, 4).max(1) if len(ev) else np.zeros(0)
@@ -534,10 +546,14 @@ def run(job: Job, progress_cb=None, cancel=None, log=print) -> dict:
         sel = np.array([x == s for x in src])
         by_src[s] = dict(n=int(sel.sum()), hit_at_0_5=round(float(np.mean(pos_c[sel] >= 0.5)), 4))
     n_false = len(WM.count_triggers(vs_c, 0.5, REFRACTORY_FRAMES))
-    report.update(validation_hours=round(hours, 2), chosen_raw_threshold=thr, recommendation=rec,
-                  at_0_5=dict(hit=by_src, false_wakes=n_false, fph=round(n_false / hours, 3)),
-                  sweep=[r for r in rows if r["threshold"] in {round(x, 2) for x in np.arange(0.05, 0.96, 0.05)}])
-    log(f"[wake_train] threshold {thr:.2f} -> 0.5; hit {by_src}; false wakes {n_false} in {hours:.1f} h "
+    # the sweep, re-expressed as thresholds of the calibrated model (0.5 = the chosen one)
+    sweep = [dict(r, threshold=round(float(sigmoid(r["threshold"] - t_logit)), 3)) for r in rows
+             if abs(round((r["threshold"] - t_logit) * 2) / 2 - (r["threshold"] - t_logit)) < 1e-6
+             and abs(r["threshold"] - t_logit) <= 4]
+    report.update(validation_hours=round(hours, 2), chosen_raw_threshold=thr, chosen_logit=round(t_logit, 2),
+                  recommendation=rec, at_0_5=dict(hit=by_src, false_wakes=n_false, fph=round(n_false / hours, 3)),
+                  sweep=sweep, heads=len(params) if isinstance(params, list) else 1)
+    log(f"[wake_train] threshold logit {t_logit:.1f} -> 0.5; hit {by_src}; false wakes {n_false} in {hours:.1f} h "
         f"({n_false / hours:.2f}/h)")
 
     # 7. export ---------------------------------------------------------------------------------

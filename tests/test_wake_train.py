@@ -224,6 +224,32 @@ def test_onnx_export_loads_in_openwakeword_and_listen(tmp_path):
     assert np.allclose(H.predict(q, x), H.predict(p, x))
 
 
+def test_ensemble_export_averages_logits(tmp_path):
+    from openwakeword.model import Model
+
+    from heyclaude.wake_train.export import export, read_meta
+    rng = np.random.default_rng(7)
+    ens = [H.HeadParams.init(rng, 1536, 16) for _ in range(3)]
+    x = rng.standard_normal((5, 16, 96)).astype(np.float32)
+    assert np.allclose(H.ens_logits(ens, x), np.mean([H.logits(q, x) for q in ens], 0))
+    before = H.ens_logits(ens, x).copy()
+    H.calibrate(ens, 0.9)
+    assert np.allclose(H.ens_logits(ens, x), before - np.log(9), atol=1e-4)   # each member shifted
+    f = export(ens, tmp_path / "hey_claude.onnx")
+    m = Model(wakeword_models=[str(f)], inference_framework="onnx")
+    assert m.model_inputs["hey_claude"] == 16 and m.model_outputs["hey_claude"] == 1
+    out = np.array([m.model_prediction_function["hey_claude"](x[i:i + 1])[0][0][0] for i in range(5)])
+    assert np.allclose(out, H.predict(ens, x), atol=1e-5)
+    assert read_meta(f)["heads"] == "3"
+    pools = [H.Pool("pos", rng.standard_normal((50, 16, 96)) + 1, 1, 1.0),
+             H.Pool("neg", rng.standard_normal((200, 16, 96)) - 1, 0, 1.0)]
+    seen = []
+    e2 = H.train_ensemble(pools, n=2, steps=20, batch=32, hidden=8, log=None,
+                          progress=lambda s, n, l: seen.append((s, n)))
+    assert len(e2) == 2 and seen[-1] == (40, 40)
+    assert not np.allclose(e2[0].W1, e2[1].W1)                        # different seeds
+
+
 # -- threshold choice -------------------------------------------------------------------------------
 def test_threshold_choice_balances_hits_and_false_wakes():
     rng = np.random.default_rng(4)
@@ -231,11 +257,18 @@ def test_threshold_choice_balances_hits_and_false_wakes():
     val = np.clip(rng.normal(0.05, 0.05, 50000), 0, 1)                # validation stream mostly low...
     val[[1000, 9000, 20000]] = [0.62, 0.55, 0.71]                     # ...with three loud spikes
     hours = val.size * 0.08 / 3600                                    # ~1.1 h
-    rows, rec = P.choose(pos, val, hours, WM.TARGET_HIT, WM.TARGET_FPH)
+    grid = [round(t, 3) for t in np.arange(0.02, 0.991, 0.01)]
+    rows, rec = P.choose(pos, val, hours, WM.TARGET_HIT, WM.TARGET_FPH, grid=grid)
     assert rec["meets"] and 0.71 < rec["threshold"] < 0.85            # above every spike, below the clips
+    # the default grid is in logits and reaches far past a score of 0.99
+    lg = lambda x: np.log(x / (1 - x))                                # noqa: E731
+    _, rec_l = P.choose(lg(np.clip(pos, 1e-6, 1 - 1e-6)), lg(np.clip(val, 1e-6, 1 - 1e-6)), hours,
+                        WM.TARGET_HIT, WM.TARGET_FPH)
+    assert rec_l["meets"] and lg(0.71) < rec_l["threshold"] < lg(0.85)
+    assert max(P.LOGIT_GRID) > 10 and abs(P.sigmoid(0.0) - 0.5) < 1e-12
     assert rec["fph"] == 0 and rec["hit"] >= 0.95
     # nothing quiet enough: the safest threshold, flagged as not meeting the target
-    _, bad = P.choose(np.full(10, 0.3), np.full(5000, 0.99), 0.1, 0.95, 0.33)
+    _, bad = P.choose(np.full(10, 0.3), np.full(5000, 0.99), 0.1, 0.95, 0.33, grid=grid)
     assert not bad["meets"]
     # wake_eval re-exports the same math
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
@@ -565,6 +598,29 @@ def test_clip_recorder_saves_a_checked_clip(tmp_path):
                         on_fail=lambda m: (res.update(f=m), done.set()), is_speech=is_speech)
     rec2.record(tmp_path / "x.wav")
     assert done.wait(5) and "didn't hear" in res["f"]
+
+
+def test_room_recording_and_live_tester(tmp_path):
+    import threading
+
+    from heyclaude.wake_samples import record_seconds
+    from heyclaude.wake_train.export import export
+    blocks = [np.full(1280, 3000, np.int16)] * 100
+    lv = []
+    pcm = record_seconds(lambda: FakeMic(blocks), 2.0, on_level=lv.append)
+    assert len(pcm) == 25 * 1280 and len(lv) == 25                    # stops after 2 s
+    p = H.HeadParams.init(np.random.default_rng(0), 1536, 8)
+    H.calibrate(p, 1e-5)                                               # scores ~1: every block "hits"
+    f = export(p, tmp_path / "hey_claude.onnx")
+    scores, hits, done = [], [], threading.Event()
+    mic = FakeMic([np.zeros(1280, np.int16)] * 60)
+    t = W.LiveTester(f, lambda: mic, on_score=scores.append, on_hit=hits.append)
+    orig = mic.close
+    mic.close = lambda: (orig(), done.set())
+    t.start()
+    assert done.wait(20)
+    assert len(scores) == 60 and hits[:3] == [1, 2, 3]                  # one wake per 2 s (25 blocks)
+    assert t.hits == 3
 
 
 def test_reject_wake_saves_the_false_wake(tmp_path):

@@ -18,6 +18,8 @@ import threading
 
 
 def main():
+    # Hugging Face's xet transfer can stall at 0 bytes on slow lines; plain HTTP resumes.
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     ap = argparse.ArgumentParser(prog="heyclaude")
     ap.add_argument("--config", help="config file (default: config.yaml)")
     dev = ap.add_mutually_exclusive_group()
@@ -316,6 +318,13 @@ def main():
         ok = QProcess.startDetached(sys.executable, argv, str(ROOT))
         print(f"[app] restarting: {'ok' if ok else 'FAILED'}")
     print("[app] bye")
+    if getattr(asst.stt, "downloading", False) or getattr(asst.stt, "_loading", False):
+        # A whisper model is still downloading in the background: Python would
+        # wait for Hugging Face's download threads at exit. Don't.
+        print("[app] leaving a model download unfinished (it resumes next time)")
+        for h in __import__("logging").getLogger().handlers:
+            h.flush()
+        os._exit(code)
     sys.exit(code)
 
 

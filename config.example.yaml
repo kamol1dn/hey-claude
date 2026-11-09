@@ -1,4 +1,13 @@
-# Copy to config.yaml and edit. config.yaml is git-ignored.
+# Copy to config.yaml and edit (or use Settings… in the tray menu, which
+# creates it). config.yaml is git-ignored.
+
+app:
+  listening: true            # wake word on at start; off = mic closed until you turn it on
+  hotkey: ctrl+alt+space     # global push-to-talk, e.g. ctrl+shift+h, win+alt+j, f9; "" = none
+  start_with_windows: false  # Startup-folder shortcut (pythonw -m heyclaude, no console)
+  # When whisper runs on the GPU (stt.device: cuda or --gpu), drop to the CPU
+  # while Adobe Premiere Pro is running and go back when it closes.
+  premiere_guard: true
 
 wake:
   # Stock openWakeWord model until a custom "hey claude" one is trained

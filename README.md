@@ -89,15 +89,89 @@ mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ fas
    First start downloads the wake-word models (~6 MB) and whisper `base.en`
    (~140 MB). After that, startup takes about 5 s.
 
+   To run it all day without a terminal, tick **Start with Windows** in the
+   tray's Settings… (see below), or start it silently once with
+   `.venv\Scripts\pythonw.exe -m heyclaude`.
+
 ### Flags
 
 | flag | what it does |
 |---|---|
-| `--gpu` | whisper on CUDA (float16). Off by default; don't use it while Premiere is open. |
+| `--gpu` | whisper on CUDA (float16). Off by default; don't use it while Premiere is open (or keep the Premiere guard on). |
 | `--text` | type requests instead of speaking (no mic, no whisper). |
 | `--simulate x.wav` | use a 16 kHz mono wav as the microphone. Good for testing and timing. |
 | `--exit` | with `--simulate`: quit after the request (and any task it started) is done. |
-| `--no-ui` | no island. |
+| `--muted` | start with listening off (mic closed); the hotkey and "Talk now" still work. |
+| `--quit` | ask the running hey-claude to quit, then exit. |
+| `--config f.yaml` | use another config file instead of `config.yaml`. |
+| `--no-ui` / `--no-tray` | no island / no tray icon. |
+
+`--simulate` and `--text` runs are treated as tests: they skip the
+single-instance check, the global hotkey and the Startup-shortcut sync, so
+they can run next to a normal copy.
+
+## Tray, hotkey and settings
+
+hey-claude lives in the **tray** (the orange dot; grey with a slash while
+listening is off). Left-click it to talk. Right-click for:
+
+| menu item | what it does |
+|---|---|
+| **Talk now** | listen for one request without the wake word (same as clicking the island or the hotkey) |
+| **Listening** | wake word on/off. Off **closes the microphone stream**, so Windows' mic-in-use indicator goes away; the island turns into a muted grey pill |
+| **Pause for 1 hour** | listening off, back on by itself after an hour ("Resume listening" ends it early) |
+| **Settings…** | the settings window, below |
+| **Open logs** | `state\logs\` (the app log and every task's log) |
+| **Quit** | |
+
+While listening is off, **Talk now**, the hotkey and clicking the pill still
+work: the mic opens for that one request and closes again.
+
+**Push-to-talk hotkey:** `Ctrl+Alt+Space` by default (`app.hotkey`), a
+system-wide hotkey through `RegisterHotKey`, no admin rights needed. If
+another app already owns the combination, hey-claude shows a tray balloon
+and runs without one. On this machine PowerToys holds `Ctrl+Alt+Space`;
+`Ctrl+Shift+Space`, `Win+Alt+Space`, `Ctrl+Alt+H` and `F9` were free.
+
+**Settings window** (tray → Settings…) edits `config.yaml`, creating it from
+`config.example.yaml` the first time. Tabs: General (listening at start,
+hotkey with a Record… button, start with Windows, Premiere guard), Voice &
+wake (wake model and threshold, whisper model and CPU/GPU, voice, rate, a
+test button), Models (quick-answer backend and models, the tool agent on/off,
+model and filler line, task model, permission mode and parallel limit),
+Projects (spoken name → folder, with a folder picker) and Permissions (the
+agent's and the tasks' `allowed_tools`, one per line). Fields tagged
+**restart** take effect after a restart, and the window offers a **Restart
+now** button after saving them. Everything else applies on save:
+
+| applies on save | needs a restart |
+|---|---|
+| wake threshold and cooldown, `listen.*`, `tasks.*` (permission mode, allowed tools, model, parallel limit), projects for "start a task in …", the agent's filler line, `island.*`, hotkey, start with Windows, Premiere guard | wake model, `stt.*` (whisper model, CPU/GPU), `tts.*` (voice, rate, backend), `fast.*`, the agent's on/off, model and allowed tools, `claude.exe` |
+
+New project names are routed right away; whisper's spelling hints and the
+quick model's project list pick them up after a restart.
+
+**Start with Windows** puts `hey-claude.lnk` in your Startup folder
+(`shell:startup`). It runs `.venv\Scripts\pythonw.exe -m heyclaude` in the
+repo folder, so there's no console window. Turning it off deletes the
+shortcut. The setting follows the shortcut: if you delete it by hand, the
+checkbox reads off next time. Turn it on from the checkout you actually run
+(the shortcut points at whichever folder saved it).
+
+**One copy at a time:** a second launch (say, clicking the shortcut again)
+tells the running copy to show itself and exits.
+
+**Premiere guard** (`app.premiere_guard`, on by default): only matters if
+whisper is set to the GPU (`stt.device: cuda` or `--gpu`). While
+`Adobe Premiere Pro.exe` is running, whisper runs on the CPU instead,
+checked every 10 s and at start-up (so it never touches the GPU if Premiere
+is already open), and it goes back to the GPU when Premiere closes.
+
+**Logs:** everything the app prints also goes to `state\logs\app.log`
+(timestamped, rotated at 1 MB, 3 old files kept), including uncaught
+exceptions. That's where to look when it runs under `pythonw` with no
+console. If the assistant thread crashes, it restarts once by itself; a
+second crash shows the error on the island.
 
 Make a test clip with a Windows voice:
 
@@ -119,9 +193,9 @@ Make a test clip with a Windows voice:
 | *hey jarvis … who messaged me on Telegram today?* | "Let me check." → the warm tool agent answers (needs the MCP set up, see below) |
 | *hey jarvis … how are my tasks going?* | spoken status of running tasks |
 | *hey jarvis* while it's talking | cuts it off and listens again |
-| click the idle pill | talk without the wake word |
+| click the idle pill, or press the hotkey (`Ctrl+Alt+Space`) | talk without the wake word |
 | click while speaking | stop speaking |
-| right-click | menu: talk now / stop / open logs / quit |
+| right-click the island | menu: talk now / stop / open logs / quit (the tray menu has the rest) |
 
 The wake word is the stock **"hey jarvis"** model until a "hey claude" model
 is trained. See [docs/train-hey-claude.md](docs/train-hey-claude.md). Project
@@ -130,9 +204,11 @@ and the names are given to whisper as a spelling hint.
 
 ## Config
 
-See [config.example.yaml](config.example.yaml); every key is commented. The
-ones you'll touch:
+See [config.example.yaml](config.example.yaml); every key is commented. Most
+of it is also in the Settings window. The ones you'll touch:
 
+- `app.*`: listening at start, the hotkey, start with Windows, the Premiere
+  guard.
 - `projects`: spoken name → folder. Several names can point at one folder.
 - `tasks.permission_mode`, `tasks.allowed_tools`: what a voice-started run
   may do without asking. Runs are started with `--permission-prompts none`,
@@ -302,8 +378,15 @@ Where the rest of the time goes, and the knobs:
 
 ```
 heyclaude/
-  __main__.py     CLI flags, Qt app
-  assistant.py    the loop: wake → record → STT → brain → speak / spawn; latency log
+  __main__.py     CLI flags, Qt app, wiring (tray, hotkey, settings, single instance, restart)
+  assistant.py    the loop: wake → record → STT → brain → speak / spawn; listening on/off,
+                  crash restart, Premiere guard, latency log
+  tray.py         tray icon and menu
+  hotkey.py       global push-to-talk hotkey (RegisterHotKey) and hotkey parsing
+  settings_ui.py  the settings window
+  winsys.py       Startup shortcut, single-instance lock, "is Premiere running"
+  applog.py       state/logs/app.log (rotating)
+  config.py       config.yaml load/save, what applies live vs after a restart
   listen.py       mic (sounddevice), openWakeWord, webrtcvad recorder, wav simulator
   stt.py          faster-whisper (CPU default, --gpu opt-in)
   brain.py        router, tier (a) chat (CLI or SDK), tier (b) warm tool agent, TASK/LOOKUP detection
@@ -330,6 +413,9 @@ docs/             training a "hey claude" wake word
 - Started from inside a Claude Code session, hey-claude strips the
   parent-session variables (`CLAUDE_CODE_SESSION_ID` etc.) so each task is
   its own top-level session.
-- Not built yet: a global push-to-talk hotkey, a tray icon, autostart, and
-  answering follow-up questions *about* a finished task (resume it in a
-  terminal for now).
+- Not built yet: answering follow-up questions *about* a finished task
+  (resume it in a terminal for now). See [ROADMAP.md](ROADMAP.md).
+- With the default VAD, steady background sound (music, a video playing) can
+  count as speech, so a "Talk now" with nobody talking may record until
+  `listen.max_seconds` and whisper may invent a phrase. Silero VAD is planned
+  in M4.

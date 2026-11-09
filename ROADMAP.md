@@ -24,7 +24,18 @@ barely overlap (see "Touches"). M6 needs M5, M7 needs M3, and M8 comes last.
 
 ---
 
-## M1: Always-on shell and settings
+## M1: Always-on shell and settings ✅ done (2026-11-09)
+
+**Status:** built and verified; see README "Tray, hotkey and settings".
+19 offline tests pass (config round-trip, hotkey parsing, listening/pause,
+Premiere guard, crash restart). `--simulate samples\question.wav --exit`
+still answers. Scripted live checks: listening off closes the WASAPI capture
+session (no mic in use) and "talk now" reopens it for one request; a second
+launch exits and pokes the first; the hotkey opens the mic; settings save to
+`config.yaml`; Restart now relaunches; `pythonw` runs with output in
+`state\logs\app.log`. The Startup shortcut was created and removed again
+during testing, and autostart is left **off** until you turn it on. Not
+tested: an actual reboot.
 
 **Goal:** it runs all day without a terminal and is easy to switch off.
 

@@ -144,6 +144,163 @@ def test_task_command_flags():
     assert "--permission-prompts" in c
 
 
+# -- M1: config round-trip, hotkey parsing, listening state, Premiere guard ----
+
+def test_config_round_trip(tmp_path):
+    from heyclaude import config as C
+    cfg = C.load(tmp_path / "missing.yaml")          # no user file: pure defaults
+    assert cfg["app"]["hotkey"] == "ctrl+alt+space" and cfg["app"]["listening"] is True
+    new = json.loads(json.dumps(cfg))
+    new["wake"]["threshold"] = 0.6
+    new["projects"]["My  New App"] = "C:/x"
+    new["tasks"]["allowed_tools"] = ["Read"]
+    new["tts"]["voice"] = None
+    path = C.save(new, tmp_path / "config.yaml")
+    back = C.load(path)
+    assert back["wake"]["threshold"] == 0.6
+    assert back["projects"]["my new app"] == "C:/x"
+    assert back["tasks"]["allowed_tools"] == ["Read"]
+    assert back["tts"]["voice"] is None
+    assert back["listen"] == cfg["listen"] and back["claude"] == cfg["claude"]
+    changed = C.diff(cfg, back)
+    assert set(changed) == {"wake.threshold", "projects", "tasks.allowed_tools"}
+    assert C.needs_restart(changed) == []
+    assert C.needs_restart(["stt.model", "app.hotkey", "agent.model", "agent.filler"]) == ["stt.model", "agent.model"]
+
+
+def test_config_apply_in_place_keeps_sections(tmp_path):
+    from heyclaude import config as C
+    cfg = C.load(tmp_path / "missing.yaml")
+    tasks_ref, listen_ref = cfg["tasks"], cfg["listen"]
+    new = json.loads(json.dumps(cfg))
+    new["tasks"]["permission_mode"] = "plan"
+    new["listen"]["end_silence_ms"] = 500
+    changed = C.apply_in_place(cfg, new)
+    assert cfg["tasks"] is tasks_ref and tasks_ref["permission_mode"] == "plan"
+    assert listen_ref["end_silence_ms"] == 500
+    assert set(changed) == {"tasks.permission_mode", "listen.end_silence_ms"}
+
+
+def test_ensure_user_config_copies_example(tmp_path):
+    from heyclaude import config as C
+    p = C.ensure_user_config(tmp_path / "config.yaml")
+    assert p.read_text(encoding="utf-8") == C.EXAMPLE.read_text(encoding="utf-8")
+
+
+def test_hotkey_parsing():
+    from heyclaude import hotkey as H
+    assert H.parse("ctrl+alt+space") == (H.MOD_CONTROL | H.MOD_ALT, 0x20)
+    assert H.parse("Win + Shift + H") == (H.MOD_WIN | H.MOD_SHIFT, ord("H"))
+    assert H.parse("f9") == (0, 0x78)
+    assert H.parse("ctrl+num5") == (H.MOD_CONTROL, 0x65)
+    assert H.normalize("Alt + CTRL+Space") == "ctrl+alt+space"
+    assert H.normalize("control+escape") == "ctrl+esc"
+    for bad in ("", "ctrl+alt", "ctrl+banana", "a+b", "ctrl++"):
+        try:
+            H.parse(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} should not parse")
+
+
+class _Sig:
+    def __init__(self):
+        self.calls = []
+
+    def emit(self, *a):
+        self.calls.append(a)
+
+
+class _Bridge:
+    def __init__(self):
+        self.state, self.level, self.tasks, self.quit = _Sig(), _Sig(), _Sig(), _Sig()
+
+
+def _assistant(cfg_over=None, **kw):
+    from heyclaude import config as C
+    from heyclaude.assistant import Assistant
+    cfg = C.load(os.devnull + ".missing")
+    for k, v in (cfg_over or {}).items():
+        cfg[k].update(v)
+    return Assistant(cfg, _Bridge(), **kw)
+
+
+def test_listening_toggle_and_pause():
+    a = _assistant({"app": {"listening": False}})
+    assert not a.listening.is_set()
+    a.ready.set()
+    a.mode = "idle"
+    seen = []
+    a.on_listening = lambda on, until: seen.append((on, until))
+    a.set_listening(False, pause_seconds=3600)
+    assert a.paused_until and a._pause_timer is not None
+    assert a.ui.state.calls[-1][0] == "off" and "paused until" in a.ui.state.calls[-1][1]
+    a.set_listening(True)                       # cancels the pause timer
+    assert a.listening.is_set() and a.paused_until is None and a._pause_timer is None
+    assert a.ui.state.calls[-1] == ("idle", "")
+    assert seen[0][0] is False and seen[1] == (True, None)
+    a.set_listening(False)
+    assert a.ui.state.calls[-1] == ("off", "listening off") and a._abort_rec.is_set()
+
+
+def test_premiere_guard_switches_whisper():
+    a = _assistant({"stt": {"device": "cuda"}})
+    made = []
+
+    class FakeStt:
+        def __init__(self, gpu):
+            self.device = "cuda" if gpu else "cpu"
+
+    a._make_stt = lambda gpu: made.append(gpu) or FakeStt(gpu)
+    running = {"v": True}
+    a._premiere_running = lambda: running["v"]
+    a.stt = FakeStt(True)
+    assert a.guard_check() == "cpu" and a.stt.device == "cpu"
+    assert a.guard_check() is None                  # still running: stay on CPU
+    running["v"] = False
+    assert a.guard_check() == "gpu" and a.stt.device == "cuda"
+    a.cfg["app"]["premiere_guard"] = False
+    running["v"] = True
+    assert a.guard_check() is None and a.stt.device == "cuda"
+    assert made == [False, True]
+    cpu = _assistant()                              # default cpu config: guard never acts
+    cpu.stt, cpu._premiere_running = FakeStt(False), (lambda: True)
+    assert cpu.guard_check() is None
+
+
+def test_assistant_thread_restarts_once_after_a_crash():
+    import heyclaude.assistant as A
+    sleep, A.time.sleep = A.time.sleep, lambda s: None
+    try:
+        a = _assistant()
+        a.ready.set()
+        calls = []
+
+        def crash_once():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("boom")
+        a._run = crash_once
+        a.run()
+        assert len(calls) == 2 and a.ui.state.calls[-1][0] == "loading"
+
+        b = _assistant()
+        b.ready.set()
+        b._run = lambda: (_ for _ in ()).throw(RuntimeError("boom again"))
+        b.run()                                     # second crash: gives up, shows the error
+        assert b.ui.state.calls[-1][0] == "error" and "boom again" in b.ui.state.calls[-1][1]
+    finally:
+        A.time.sleep = sleep
+
+
+def test_record_utterance_ends_when_source_closes():
+    import numpy as np
+    from heyclaude.listen import record_utterance
+    blocks = iter([np.zeros(1280, np.int16)] * 3)   # silence, then the source ends
+    cfg = {"vad_aggressiveness": 2, "end_silence_ms": 700, "start_timeout": 5, "max_seconds": 20}
+    assert record_utterance(blocks, cfg) == (None, None)
+
+
 if __name__ == "__main__":
     import pathlib
     import tempfile

@@ -7,7 +7,6 @@ GPU, models or network.
 """
 import os
 import sys
-import threading
 import time
 
 import numpy as np
@@ -259,36 +258,6 @@ def test_player_hands_played_audio_to_the_echo_canceller():
     assert abs(int(np.median(got)) - 16383) < 200
 
 
-def test_conv_stft_rewrite_matches_onnx_stft(tmp_path):
-    try:
-        import onnx
-        import onnxruntime as ort
-        from onnx import TensorProto, helper, numpy_helper
-    except ImportError:
-        print("  (skipped: no onnx package)")
-        return
-    win = (0.5 - 0.5 * np.cos(2 * np.pi * np.arange(20) / 20)).astype(np.float32)   # Kokoro's STFT
-    g = helper.make_graph(
-        [helper.make_node("STFT", ["x", "step", "win", "len"], ["y"], onesided=1)], "g",
-        [helper.make_tensor_value_info("x", TensorProto.FLOAT, ["B", "L"])],
-        [helper.make_tensor_value_info("y", TensorProto.FLOAT, None)],
-        [numpy_helper.from_array(np.array(5, np.int64), "step"), numpy_helper.from_array(win, "win"),
-         numpy_helper.from_array(np.array(20, np.int64), "len")])
-    m = helper.make_model(g, opset_imports=[helper.make_opsetid("", 20)])
-    m.ir_version = 9
-    src, dst = str(tmp_path / "stft.onnx"), str(tmp_path / "conv.onnx")
-    onnx.save(m, src)
-    T.conv_stft_model(src, dst)
-    assert [n.op_type for n in onnx.load(dst).graph.node] == ["Reshape", "Conv", "Reshape", "Transpose"]
-    x = np.random.default_rng(0).normal(size=(2, 4005)).astype(np.float32)
-    so = ort.SessionOptions()
-    so.log_severity_level = 3
-    a = ort.InferenceSession(src, so, providers=["CPUExecutionProvider"]).run(None, {"x": x})[0]
-    b = ort.InferenceSession(dst, so, providers=["CPUExecutionProvider"]).run(None, {"x": x})[0]
-    assert a.shape == b.shape == (2, 798, 11, 2)
-    assert np.abs(a - b).max() < 1e-4 * np.abs(a).max()
-
-
 def test_config_migrates_pre_m4_tts_keys(tmp_path):
     from heyclaude import config as C
     p = tmp_path / "config.yaml"
@@ -298,6 +267,36 @@ def test_config_migrates_pre_m4_tts_keys(tmp_path):
     assert c["tts"]["voice"] == "bf_emma" and c["tts"]["rate"] == 200 and "backend" not in c["tts"]
     p.write_text("tts:\n  backend: piper\n  piper_model: x.onnx\n", encoding="utf-8")
     assert C.load(p)["tts"]["engine"] == "piper"
+
+
+def test_own_gpu_work_does_not_count_as_busy():
+    from heyclaude.sysload import LoadMonitor
+    t = [0.0]
+    util = [10]
+
+    class Nvml:
+        @staticmethod
+        def nvmlDeviceGetUtilizationRates(h):
+            return type("U", (), {"gpu": util[0]})()
+
+        @staticmethod
+        def nvmlDeviceGetMemoryInfo(h):
+            return type("M", (), {"free": 4 * 2 ** 30})()
+    m = LoadMonitor(nvml=Nvml, handle=1, psutil_mod=None, clock=lambda: t[0], start=False, own_tail_s=1.0)
+    for _ in range(5):
+        m._sample()
+    assert m.gpu_util() == 10
+    util[0] = 95                                     # whisper running: our own load
+    with m.own():
+        for _ in range(5):
+            m._sample()
+    t[0] = 0.5                                       # NVML's window still includes it
+    m._sample()
+    assert m.gpu_util() == 10 and m.skipped == 6
+    t[0] = 2.0                                       # someone else is now busy
+    for _ in range(5):
+        m._sample()
+    assert m.gpu_util() == 95
 
 
 # -- end of turn --------------------------------------------------------------------------

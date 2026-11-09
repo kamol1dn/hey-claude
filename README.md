@@ -7,33 +7,36 @@ and a small model answers out loud in a second or two. Say *"start a task in
 The island tracks the run, and when it finishes a one-sentence summary is read
 out.
 
-Everything runs in one Python process. Speech-to-text runs on the GPU unless
-the GPU is busy (a render, say), in which case that request goes to the CPU;
-everything else runs on the CPU. Claude is driven through the `claude` CLI you're already signed in
-to. No API key is needed.
+Everything runs in one Python process. Speech-to-text and the Kokoro voice run
+on the GPU unless the GPU is busy (a render, say), in which case that request
+goes to the CPU; everything else runs on the CPU. Claude is driven through the
+`claude` CLI you're already signed in to. No API key is needed; with one,
+quick answers can go straight to the API (faster), while lookups and tasks
+stay on your subscription.
 
 There are three tiers:
 
 | tier | what it's for | runs on |
 |---|---|---|
-| **(a) quick answers** | "what's 15% of 80", "capital of Peru" | Anthropic API (haiku) if `ANTHROPIC_API_KEY` is set, else one warm, tool-less `claude` process |
+| **(a) quick answers** | "what's 15% of 80", "capital of Peru" | the Anthropic API (haiku) if hey-claude has a key (`ANTHROPIC_API_KEY` or `state/anthropic-api-key.txt`), else one warm, tool-less `claude` process |
 | **(b) your tools** | "who messaged me on Telegram", "what's on my calendar" | **one** warm Claude Code process with tools and MCP servers, started at launch and reused |
 | **(c) real work** | "start a task in inha app: fix the login screen" | a **new** headless Claude Code session in that folder, per task |
 
 ```
-mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ faster-whisper (GPU, CPU fallback)
+mic ─▶ echo canceller ─▶ openWakeWord ─▶ Silero VAD + end of turn ─▶ faster-whisper (GPU, CPU fallback)
                                                                     │
                                      ┌──────────────────────────────┘
                                      ▼
                      local router ── "start a task in X: Y" ───────────▶ (c) claude -p "Y" (cwd = X) ─▶ island task list
                           │       ── "telegram / calendar / email…" ──┐       stream-json → log, session id,
                           ▼                                           │       SUMMARY line → spoken when done
-     (a) haiku: SDK, or a warm tool-less `claude` process             │
+     (a) haiku: the API, or a warm tool-less `claude` process         │
               │  answer │ "TASK <project> :: <task>" │ "LOOKUP" ──────┤
               │                                                       ▼
               │                         (b) warm Claude Code agent: tools + MCP + claude.ai connectors
               ▼                                                       │  final answer only
-        sentence splitter ─▶ Windows SAPI voice ◀─────────────────────┘
+        sentence splitter ─▶ Kokoro (GPU → CPU → SAPI) ◀──────────────┘
+                                   └─▶ what it plays feeds the echo canceller (barge-in)
 ```
 
 ## Setup
@@ -78,18 +81,48 @@ mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ fas
    assistant answers every question with "run claude auth login". If you'd
    rather not touch PATH, set `claude.exe` in `config.yaml`.
 
-3. **Config:** copy `config.example.yaml` to `config.yaml` and fill in
+3. **The Kokoro voice** (optional; without it, Windows voices speak). Model
+   files, ~350 MB, into `state\models\kokoro\`:
+
+   ```bash
+   mkdir state\models\kokoro
+   curl -L -o state\models\kokoro\kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+   curl -L -o state\models\kokoro\voices-v1.0.bin https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+   ```
+
+   That's enough for Kokoro on the CPU. For the GPU, add onnxruntime-gpu and
+   cuDNN 9 (~550 MB). It replaces the CPU onnxruntime's files, so run this after
+   `requirements.txt`, and again after any later `pip install -r`:
+
+   ```bash
+   .venv\Scripts\python -m pip install "onnxruntime-gpu[cudnn]>=1.31"
+   ```
+
+   ```bash
+   .venv\Scripts\python -m pip install --force-reinstall --no-deps "onnxruntime-gpu>=1.31"
+   ```
+
+   `[cudnn]` assumes the CUDA 13 toolkit is installed (it is on this PC);
+   otherwise use `[cuda,cudnn]`. espeak-ng comes bundled with kokoro-onnx.
+   The island's tooltip and right-click menu say
+   which voice is active ("kokoro gpu", "kokoro cpu (fallback: no cuda)",
+   "sapi (kokoro: model missing)").
+
+4. **Config:** copy `config.example.yaml` to `config.yaml` and fill in
    `projects:` (spoken name → folder). Everything else has working defaults.
 
-4. **Run:**
+5. **Run:**
 
    ```bash
    run.cmd
    ```
 
    First start downloads the wake-word models (~6 MB) and whisper
-   `large-v3` for the GPU (~3 GB, already there if another app on this PC
-   uses faster-whisper) and `base.en` for the CPU (~140 MB).
+   `large-v3-turbo` for the GPU (~1.6 GB, already there if another app on
+   this PC uses faster-whisper) and `base.en` for the CPU (~140 MB). On a
+   slow line, set `HF_HUB_DISABLE_XET=1` first (Hugging Face's xet transfer
+   can stall at 0 bytes) or put a downloaded copy in a folder and point
+   `stt.gpu_model` at it.
    After that, startup takes about 5 s.
 
    To run it all day without a terminal, tick **Start with Windows** in the
@@ -200,11 +233,12 @@ tells the running copy to show itself and exits.
 
 **Speech-to-text device** (`stt.device`, default `gpu`): the device is
 picked for each request from the actual load, read from NVML (GPU
-utilisation averaged over about 0.5 s, free VRAM) and psutil (CPU):
+utilisation averaged over about 0.5 s, free VRAM) and psutil (CPU).
+hey-claude's own whisper and Kokoro work is left out of the GPU reading:
 
 | situation | whisper runs on | island / log says |
 |---|---|---|
-| GPU under `stt.gpu_busy_pct` (70%) | GPU (`stt.gpu_model`, `large-v3` int8_float16, ~0.5 s per request on an RTX 4060) | `gpu (large-v3)` |
+| GPU under `stt.gpu_busy_pct` (70%) | GPU (`stt.gpu_model`, `large-v3-turbo` int8_float16, ~0.25 s per request on an RTX 4060) | `gpu (turbo)` |
 | GPU at 70% or more, or too little free VRAM to load the model | CPU (`stt.cpu_model`, `base.en`) | `cpu (gpu busy 83%)` / `cpu (low vram 0.9 GB)` |
 | GPU busy **and** CPU at `stt.cpu_busy_pct` (85%) or more | GPU anyway | `gpu (cpu busy)` |
 | back on the GPU | once it's under `stt.gpu_resume_pct` (60%), so it doesn't flip back and forth | |
@@ -213,10 +247,9 @@ An idle Premiere is fine; only real load counts (e.g. a Remotion render
 while Premiere sits open). Both models stay loaded once used, so switching
 is instant. The GPU model loads at start-up. If it isn't downloaded yet
 (1.6–3 GB the first time), start-up doesn't wait: the CPU model answers
-(`cpu (downloading large-v3)`) while it downloads and loads in the
-background. `large-v3-turbo` is faster on the GPU; set `stt.gpu_model` to it
-once it's downloaded (a stalled Hugging Face download leaves it on the CPU
-model meanwhile, it doesn't block anything). Hard fallbacks to the CPU: CUDA missing or the GPU
+(`cpu (downloading turbo)`) while it downloads and loads in the
+background (a stalled Hugging Face download leaves it on the CPU model
+meanwhile; it doesn't block anything). Hard fallbacks to the CPU: CUDA missing or the GPU
 load failing (`cpu (fallback: no cuda)` / `gpu load failed`, for the
 session), out of memory while loading (retried a minute later), and a CUDA
 error mid-transcription (`cpu (fallback: cuda error)`; that request is
@@ -296,14 +329,26 @@ of it is also in the Settings window. The ones you'll touch:
   read-only git; no other shell commands.
 - `agent.*`: the warm tool agent (model, allowed tools, which desktop MCP
   servers to import). Set `agent.enabled: false` to drop tier (b).
-- `fast.backend`: `auto` uses the Anthropic SDK (`claude-haiku-5-5`) when
-  `ANTHROPIC_API_KEY` is set, and the CLI otherwise. Set `sdk_model:
-  claude-sonnet-5-5` for smarter, slower answers.
+- `fast.backend`: `auto` uses the Anthropic API directly (`claude-haiku-5-5`)
+  when hey-claude has a key, and the CLI otherwise. The key is
+  `ANTHROPIC_API_KEY` in hey-claude's own environment, or the first line of
+  `state\anthropic-api-key.txt` (`fast.api_key_file`, git-ignored). The file is
+  the better place: a user-wide environment variable would also switch every
+  `claude` you run yourself to API billing. Every `claude` process hey-claude
+  starts (quick answers on the CLI path, the tool agent, tasks, task
+  questions, "resume in a terminal") has `ANTHROPIC_API_KEY` and
+  `ANTHROPIC_AUTH_TOKEN` removed from its environment, so lookups and tasks
+  always run on your subscription login. Set `sdk_model: claude-sonnet-5-5`
+  for smarter, slower answers.
 - `stt.device`, `stt.gpu_model`, `stt.cpu_model`: see "Speech-to-text
   device" above. On the CPU, `base.en` is the default (≈0.6 s per request).
   `small.en` is more accurate and slower; `tiny.en` is faster and sloppier.
-- `tts.backend`: `sapi` (default), `piper` or `kokoro`. Piper and Kokoro
-  are wired in but untested. If one fails to load, it falls back to SAPI.
+- `tts.*`: `engine` (`kokoro` default, `sapi`, `piper`), `device`, `voice`,
+  `speed`; see "Voice" below. A `config.yaml` from before M4 (`tts.backend`)
+  is moved to Kokoro, since the settings window used to write the old `sapi`
+  default into every config; set `tts.engine: sapi` to keep Windows voices.
+- `listen.*`: Silero VAD, the end-of-turn windows, partial transcripts, echo
+  cancellation and barge-in; see "Voice" below.
 
 ## Tasks
 
@@ -403,7 +448,143 @@ and editing files are denied unless you add them. To see every tool name, run
   always their own saved sessions. Questions about a task use a forked,
   unsaved copy of its session, so the task's own session is left as it was.
 
+## Voice: Kokoro, end of turn, barge-in
+
+**Kokoro** (`tts.engine: kokoro`, the default) speaks through kokoro-onnx.
+With `tts.device: gpu` it follows the same per-request rule as speech-to-text:
+the GPU unless it's at least `stt.gpu_busy_pct` (70%) busy or short of VRAM,
+decided once per reply. hey-claude's own whisper and Kokoro work doesn't count
+as "busy" (it's left out of the load reading; without that, every
+transcription pushed the next reply onto the CPU). The fallback chain is
+Kokoro on the GPU → Kokoro on the CPU → Windows SAPI, with the reason in the
+log and in the island's tooltip/menu:
+
+| situation | voice |
+|---|---|
+| onnxruntime-gpu + cuDNN present, GPU not busy | `kokoro gpu` |
+| GPU busy (another program) | `kokoro cpu (gpu busy 83%)` for that reply |
+| no CUDA provider in onnxruntime, cuDNN missing | `kokoro cpu (fallback: no cuda)` for the session |
+| a CUDA error while speaking | that sentence is redone on the CPU; GPU off for the session |
+| `stt.yield_to_premiere: true` and Premiere open | `kokoro cpu (fallback: premiere)` |
+| model files missing, or Kokoro failing on the CPU too | `sapi (kokoro: model missing)` |
+
+Measured on the RTX 4060 laptop (time to synthesise one sentence, after
+warm-up): **GPU 0.25–0.39 s**, CPU (8 threads) 0.5–0.8 s for a 6-word
+sentence. In the latency runs, first text → first audio was 0.47 s median
+(that includes waiting for the first sentence to finish arriving). Sentence N+1 is synthesised while sentence N plays, and a long first
+sentence is cut at a comma once it has 9 words (`tts.first_chunk_words`), so
+the first audio doesn't wait for all of it. Kokoro's STFT step has no CUDA
+kernel in onnxruntime and runs on the CPU (~0.1 s of each sentence). An exact
+GPU rewrite of it was tried and dropped: the model is sensitive to the FFT's
+rounding, and the voice came out with a metallic buzz.
+
+The output stream opens when a reply starts and closes 4 s after the voice
+stops (`tts.idle_close_s`), so an idle hey-claude doesn't keep Windows awake.
+
+**End of turn.** Silero VAD (the model faster-whisper ships, on the CPU)
+replaces webrtcvad. When you pause for 160 ms (`listen.pause_probe_ms`), the
+audio so far is transcribed in the background:
+
+- a finished sentence ("…capital of Australia?") ends the turn after
+  `short_silence_ms` (300 ms);
+- one that trails off ("…in Tashkent and", "the", "um", a trailing comma)
+  waits `long_silence_ms` (1200 ms);
+- anything else `end_silence_ms` (700 ms).
+
+If you don't speak again, that transcript is the one used, so speech-to-text
+costs nothing after you stop (`stt=0.0` in the latency log, "[transcribed at
+the pause]" in app.log). In practice the turn ends about 0.5 s after the last
+word with turbo (160 ms pause + ~0.25 s transcription + the short window
+overlapping it), 0.6 s with large-v3.
+
+**Partial transcripts.** While you talk, the island's listening pill shows
+what it has heard so far, refreshed every 0.8 s (`listen.partials: auto` =
+only while whisper is on the GPU).
+
+**Echo cancellation and barge-in.** Everything the Kokoro (or Piper) player
+outputs is handed, at 16 kHz, to WebRTC's AEC3 (the echo canceller in the
+`livekit` package's prebuilt binary; no compiler needed). Every mic block
+goes through it before the wake word, the VAD and whisper see it. On a
+synthetic test (Kokoro speech through a 120 ms, reverberant echo path, plus
+noise) it removed 36 dB of echo, and Silero heard no speech left in the echo
+alone. While it speaks, `listen.barge_in` watches the cleaned audio: 200 ms of
+your speech (`barge_in_ms`, after a 400 ms grace period at the start of a
+reply while the filter settles) stops the voice, and what you say is taken as
+the next request without the wake word. Saying "stop" just stops it. With
+SAPI there's no reference signal, so barge-in is off. The 200 ms is
+deliberately short: in the synthetic double-talk tests AEC3 let the first
+250–350 ms of the user's voice through and then partly suppressed it while
+the voice kept playing. **Not checked with a real mic and speakers yet.**
+
+**Speech-to-text models.** `tools\stt_eval.py` measures speed and word error
+rate per model. On 45 Kokoro-spoken clips (three voices, 15 assistant-style
+requests, 2–5 s each; native accents, so this is the speed check, not the
+accent check). Most "errors" are number formatting ("7 30" for "seven
+thirty"), the same for every model:
+
+| model | WER | median per clip | p90 | load |
+|---|---|---|---|---|
+| large-v3, GPU int8_float16 | 6.4% | 0.41 s | 0.47 s | 12 s |
+| large-v3-turbo, GPU int8_float16 | 6.9% | 0.25 s | 0.28 s | 3 s |
+| base.en, CPU int8 (the fallback) | 7.9% | 0.36 s | 0.38 s | 1 s |
+| small, CPU int8 | 6.4% | 1.13 s | 1.45 s | 2 s |
+| medium, CPU int8 | 6.4% | 3.06 s | 4.18 s | 4 s |
+
+turbo is 40% faster than large-v3 at the same accuracy here, and that speed
+shortens the end of turn, so it's now the default `stt.gpu_model`. On the CPU, base.en stays the fallback: small is
+no more accurate on these clips and three times slower. base.en is the one
+that mangles names ("an inha app", "Tashkint"). **Your accent** (the point of
+the comparison) needs your voice: record the 15 prompts once (~2 min, saved
+in git-ignored `state\stt_eval\`), then compare:
+
+```bash
+.venv\Scripts\python tools\stt_eval.py --record
+```
+
+```bash
+.venv\Scripts\python tools\stt_eval.py
+```
+
 ## Measured latency
+
+### M4 (2026-11-09): speech end → first word, quick questions
+
+`--simulate` with a nine-clip conversation (a Windows voice saying "Hey
+Jarvis, what is the capital of Australia?", then seven follow-up questions
+and "thanks, that's all"), default config: haiku over the warm CLI process
+(no API key), whisper and Kokoro on the RTX 4060 laptop GPU, Silero VAD,
+echo canceller on. Every request is in `state/latency.csv`.
+
+| setup | requests | median | p90 |
+|---|---|---|---|
+| **large-v3-turbo** (the new default) | 18 | **2.36 s** | 3.08 s |
+| large-v3 | 8 | 2.62 s | 4.33 s |
+| v1 (CPU whisper, webrtcvad 0.7 s, SAPI) | 4 | 3.7–4.8 s (range) | |
+
+Where the 2.36 s goes (medians, turbo):
+
+| stage | time |
+|---|---|
+| you stop talking → turn over (pause probe + transcription at the pause + short window) | 0.53 s |
+| speech-to-text after that | 0.0 s (the pause transcript is reused) |
+| haiku via the warm CLI: request → first text | 1.33 s |
+| first text → Kokoro audible (GPU) | 0.47 s |
+
+The slow tail is the first question after start-up (the CLI's first real
+turn: 1.9–3.0 s to first text, even after the warm-up turn) and an
+occasional 1.25 s end of turn when the pause transcript isn't back in time.
+The model step is now most of it; the direct API path (`fast.api_key_file`)
+skips the CLI and is the next lever. **With your current config**
+(`stt.gpu_model: large-v3`, `fast.cli_model: sonnet`) expect more: large-v3
+adds ~0.25 s, and sonnet's first token is typically 1–2 s slower than
+haiku's. Not measured with a real mic and room yet.
+
+Two problems found while measuring, both fixed: hey-claude's own whisper
+runs pushed NVML's utilisation to 77–100%, so the per-request rule sent the
+next transcription and the voice to the CPU (median 3.4 s before the fix);
+and a GPU rewrite of Kokoro's STFT made the voice buzz (removed, see "Voice").
+
+### v1 (2026-11-09)
 
 Measured on 2026-11-09 with `--simulate` on this laptop, **on slow Wi-Fi**.
 Everything ran on the CPU; the RTX 4060 laptop GPU was unused. Each test clip
@@ -486,19 +667,24 @@ heyclaude/
   applog.py       state/logs/app.log (rotating)
   config.py       config.yaml load/save, what applies live vs after a restart
   listen.py       mic (sounddevice), openWakeWord (+ hey_jarvis fallback, quiet while speaking),
-                  webrtcvad recorder, wav simulator
+                  the utterance recorder, wav simulator
+  vad.py          Silero VAD (webrtcvad fallback), end of turn, transcripts at pauses / while talking
+  aec.py          echo cancellation (WebRTC AEC3 via livekit) and the barge-in detector
   wake_samples.py record your own "hey claude" clips (state/wake_samples), zip them for training
   stt.py          faster-whisper: GPU by default, CPU when the GPU is busy or fails
   brain.py        router, tier (a) chat (CLI or SDK), tier (b) warm tool agent, TASK/LOOKUP detection,
                   voice task control routes, questions about a task (claude -p --resume)
   conversation.py the shared transcript (what each tier is told), follow-up window, end phrases
   tasks.py        headless claude runs, stream-json parsing, logs, session ids
-  tts.py          SAPI (direct COM), Piper, Kokoro; sentence streaming
+  tts.py          Kokoro (GPU → CPU → SAPI chain, per-reply device choice), SAPI (direct COM), Piper;
+                  sentence streaming, the output stream that feeds the echo canceller
   island.py       the pill, task list, log window
   claude_cli.py   finds claude.exe, launch flags
 tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
-                  wake_eval.py (wake word hit rate, false wakes per hour, threshold)
-tests/            offline tests (python tests\test_offline.py, tests\test_wake.py, tests\test_conversation.py)
+                  wake_eval.py (wake word hit rate, false wakes per hour, threshold),
+                  stt_eval.py (record your voice; whisper models' speed and word error rate)
+tests/            offline tests (python tests\test_offline.py, tests\test_wake.py, tests\test_conversation.py,
+                  tests\test_input.py, tests\test_voice.py)
 models/           the trained hey_claude.onnx goes here (git-ignored)
 docs/             training a "hey claude" wake word
 ```

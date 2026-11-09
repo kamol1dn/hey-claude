@@ -141,7 +141,31 @@ reading (a WebSearch result issue, not context).
 **Done when:** a 5-turn mixed conversation (quick → lookup → quick → task →
 question about the task) keeps context, verified with simulated clips.
 
-## M4: Voice quality and speed
+## M4: Voice quality and speed ✅ built (2026-11-09)
+
+**Status:** built and measured with simulated clips; see README "Voice" and
+"Measured latency". **Quick question, speech end → first word: median
+2.36 s** over 18 requests (p90 3.08 s) with large-v3-turbo, haiku on the warm
+CLI, Kokoro on the GPU (target 2.5 s). With large-v3 it's 2.62 s, so turbo is
+now the default `stt.gpu_model`. Kokoro (kokoro-onnx + onnxruntime-gpu 1.31,
+CUDA 13 + cuDNN 9 from the `nvidia-cudnn-cu13` wheel; espeak-ng comes bundled,
+no system install) runs on the GPU with the per-reply load rule shared with
+whisper, falling back to the CPU and then SAPI, with the reason on the island.
+hey-claude's own GPU work no longer counts as "GPU busy" (it pushed requests to
+the CPU). Silero VAD with an end of turn that transcribes at each pause: a
+finished sentence ends the turn after 300 ms, a trailing "and/the/um" waits
+1.2 s, and the pause transcript is reused, so speech-to-text costs ~0 after you
+stop. Partial transcripts on the island while you talk. WebRTC AEC3 (livekit)
+cancels the voice from the mic (36 dB on a synthetic echo path) and barge-in
+stops the voice after 200 ms of your speech. The direct API path reads its key
+from `ANTHROPIC_API_KEY` or `state/anthropic-api-key.txt`; every `claude`
+process gets `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` stripped. 35 new
+offline tests (`tests/test_voice.py`); the 101 existing ones still pass.
+openWakeWord still loads and fires (score 0.998) on onnxruntime-gpu.
+Dropped: a GPU rewrite of Kokoro's STFT (~0.1 s/sentence faster) made the
+voice buzz. **Not done:** the accent comparison of turbo vs large-v3 needs the
+user's recordings (`tools/stt_eval.py --record`; the numbers so far are on
+native-accent Kokoro clips); barge-in and AEC with a real mic and speakers.
 
 **Goal:** sounds good and answers in about 2.5 s after you stop talking.
 

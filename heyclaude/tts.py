@@ -108,7 +108,13 @@ def ort_cuda_available() -> tuple[bool, str]:
     except Exception as e:
         return False, f"no onnxruntime ({e})"[:120]
     if "CUDAExecutionProvider" not in ort.get_available_providers():
-        return False, "no cuda in onnxruntime"
+        import importlib.metadata as md
+        try:
+            md.distribution("onnxruntime-gpu")
+            hint = " (onnxruntime-gpu is installed but the CPU package overwrote it: "                    "pip install --force-reinstall --no-deps onnxruntime-gpu)"
+        except md.PackageNotFoundError:
+            hint = " (pip install onnxruntime-gpu; README \"Kokoro voice\")"
+        return False, "no cuda in onnxruntime" + hint
     add_ort_cuda_dirs()
     return True, ""
 
@@ -199,77 +205,6 @@ class _Piper:
         return np.frombuffer(out, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def conv_stft_model(src: str, dst: str) -> str:
-    """Write a copy of the Kokoro graph with its STFT node replaced by a Conv.
-
-    onnxruntime has no CUDA kernel for STFT, so on the GPU that one node runs
-    on the CPU, with copies both ways: ~110 ms of a ~200 ms sentence on an RTX
-    4060. Kokoro's STFT is tiny (20-sample window, hop 5, 11 bins), so a
-    strided Conv1d whose 22 kernels are the windowed DFT basis (real and
-    imaginary parts) computes exactly the same thing on the GPU.
-    Needs the `onnx` package; returns dst.
-    """
-    import onnx
-    from onnx import helper, numpy_helper
-
-    m = onnx.load(src)
-    g = m.graph
-    inits = {i.name: i for i in g.initializer}
-    nodes = [n for n in g.node if n.op_type == "STFT"]
-    if not nodes:
-        raise ValueError("no STFT node in this Kokoro model")
-    for k, n in enumerate(nodes):
-        sig, step, win, length = (list(n.input) + [""] * 4)[:4]
-        hop = int(numpy_helper.to_array(inits[step]))
-        window = numpy_helper.to_array(inits[win]).astype(np.float64)
-        n_fft = int(numpy_helper.to_array(inits[length])) if length in inits else len(window)
-        onesided = next((helper.get_attribute_value(a) for a in n.attribute if a.name == "onesided"), 1)
-        bins = n_fft // 2 + 1 if onesided else n_fft
-        t = np.arange(n_fft)
-        f = np.arange(bins)[:, None]
-        real = window * np.cos(2 * np.pi * f * t / n_fft)
-        imag = -window * np.sin(2 * np.pi * f * t / n_fft)
-        w = np.concatenate([real, imag])[:, None, :].astype(np.float32)     # [2*bins, 1, n_fft]
-        p = f"/conv_stft{k}"
-        g.initializer.extend([numpy_helper.from_array(w, p + "/W"),
-                              numpy_helper.from_array(np.array([0, 1, -1], np.int64), p + "/in_shape"),
-                              numpy_helper.from_array(np.array([0, 2, bins, -1], np.int64), p + "/shape")])
-        new = [   # the signal is [B, L] or [B, L, 1]
-            helper.make_node("Reshape", [sig, p + "/in_shape"], [p + "/x"], name=p + "/Reshape_in"),       # [B,1,L]
-            helper.make_node("Conv", [p + "/x", p + "/W"], [p + "/y"], strides=[hop], name=p + "/Conv"),  # [B,2K,F]
-            helper.make_node("Reshape", [p + "/y", p + "/shape"], [p + "/r"], name=p + "/Reshape"),       # [B,2,K,F]
-            helper.make_node("Transpose", [p + "/r"], [n.output[0]], perm=[0, 3, 2, 1], name=p + "/Transpose_out"),
-        ]
-        i = list(g.node).index(n)
-        g.node.remove(n)
-        for j, nn in enumerate(new):
-            g.node.insert(i + j, nn)
-    used = {i for n in g.node for i in n.input}
-    for init in [i for i in g.initializer if i.name not in used]:
-        g.initializer.remove(init)
-    tmp = dst + ".tmp"
-    onnx.save(m, tmp)
-    os.replace(tmp, dst)
-    return dst
-
-
-def gpu_model_path(model: str) -> str:
-    """The conv-STFT copy of `model` for the GPU (made once, next to it), or
-    `model` itself if it can't be made (no `onnx` package)."""
-    root, ext = os.path.splitext(model)
-    dst = root + ".gpu" + ext
-    if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(model):
-        return dst
-    try:
-        t = time.perf_counter()
-        conv_stft_model(model, dst)
-        print(f"[tts] made {os.path.basename(dst)} (STFT as a GPU conv) in {time.perf_counter() - t:.1f}s")
-        return dst
-    except Exception as e:
-        print(f"[tts] using {os.path.basename(model)} as is on the GPU (STFT stays on the CPU): {e}")
-        return model
-
-
 class KokoroVoice:
     """kokoro-onnx on one device ("cuda" | "cpu"), warmed up at load."""
 
@@ -290,7 +225,6 @@ class KokoroVoice:
             ok, why = ort_cuda_available()
             if not ok:
                 raise RuntimeError(why)
-            model = gpu_model_path(model)
             # HEURISTIC: no exhaustive cuDNN search for every new sentence length
             # (that alone costs seconds per new shape).
             providers = [("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC",
@@ -473,6 +407,10 @@ class VoiceEngine:
             eng.voice = str(self.cfg.get("voice") or "af_heart")
             eng.speed = float(self.cfg.get("speed") or 1.0)
         try:
+            if eng is self.gpu and eng is not None:
+                from .stt import own_gpu
+                with own_gpu(self.monitor):     # our own work doesn't make the GPU "busy"
+                    return eng.synth(text), eng.rate
             return eng.synth(text), eng.rate
         except Exception as e:
             if eng is self.gpu and eng is not None:
@@ -580,7 +518,11 @@ class Player:
         with self._lock:
             self._chunks.clear()
 
+    underflows = 0                               # output underruns (crackles), logged per reply
+
     def _cb(self, out, frames, t, status):
+        if status and getattr(status, "output_underflow", False):
+            self.underflows += 1
         out.fill(0)
         filled = 0
         fire = False
@@ -731,6 +673,10 @@ class Speaker:
 
     def _maybe_idle(self):
         if self.q.empty() and not self.player.active:
+            n = getattr(self.player, "underflows", 0)
+            if n:
+                print(f"[tts] {n} audio underrun(s) in that reply (crackle); the output stream was starved")
+                self.player.underflows = 0
             self.busy = False
             self.on_idle()
 

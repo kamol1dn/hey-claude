@@ -291,9 +291,9 @@ class Island(QWidget):
         self._tooltip()
 
     def _tooltip(self):
-        self.setToolTip("
-".join(x for x in (f"speech-to-text: {self.stt_label}" if self.stt_label else "",
-                                               f"voice: {self.voice_label}" if self.voice_label else "") if x))
+        lines = (f"speech-to-text: {self.stt_label}" if self.stt_label else "",
+                 f"voice: {self.voice_label}" if self.voice_label else "")
+        self.setToolTip("\n".join(x for x in lines if x))
 
     def set_partial(self, text: str):
         """Live transcript while listening (M4 hook; drawn after the level meter)."""

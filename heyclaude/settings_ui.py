@@ -89,8 +89,9 @@ TIPS = {
     "stt.device": "GPU: the GPU model is loaded once and kept in VRAM; falls back to the CPU when CUDA is "
                   "missing, the load fails or runs out of memory, or a transcription hits a CUDA error.\n"
                   "--gpu / --cpu on the command line override this.",
-    "stt.gpu_model": "Whisper model on the GPU. large-v3: ~0.5 s per request, ~2 GB VRAM in int8_float16. "
-                     "large-v3-turbo is faster (~1.6 GB download).",
+    "stt.gpu_model": "Whisper model on the GPU. large-v3-turbo (default): ~0.25 s per request, ~1.6 GB "
+                     "download. large-v3: ~0.4 s, ~2 GB VRAM in int8_float16. tools/stt_eval.py compares "
+                     "them on your voice.",
     "stt.gpu_compute_type": "int8_float16 (less VRAM) or float16.",
     "stt.cpu_model": "Whisper model on the CPU (fallback): tiny.en / base.en / small.en / small. "
                      "Loaded only when needed.",
@@ -600,7 +601,7 @@ class SettingsWindow(QWidget):
         self._set_combo(self.cmb_stt_model, _get(cfg, "stt.cpu_model", "base.en"))
         dev = str(_get(cfg, "stt.device", "gpu")).lower()
         self._set_combo(self.cmb_stt_device, "gpu" if dev in ("gpu", "cuda") else "cpu")
-        self._set_combo(self.cmb_stt_gpu_model, _get(cfg, "stt.gpu_model", "large-v3"))
+        self._set_combo(self.cmb_stt_gpu_model, _get(cfg, "stt.gpu_model", "large-v3-turbo"))
         self._set_combo(self.cmb_stt_gpu_compute, _get(cfg, "stt.gpu_compute_type", "int8_float16"))
         self.cb_premiere.setChecked(bool(_get(cfg, "stt.yield_to_premiere", False)))
         self.sp_gpu_busy.setValue(int(_get(cfg, "stt.gpu_busy_pct", 70)))

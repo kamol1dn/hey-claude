@@ -298,6 +298,7 @@ class Assistant:
             threading.Timer(0.5, self.ui.quit.emit).start()
 
     _sim_done = False
+    _sim_idle_end = False                       # --simulate: last utterance asked for nothing
 
     # -- task callbacks -------------------------------------------------------
     def _task_finished(self, t):
@@ -405,6 +406,12 @@ class Assistant:
             if self.stopping:
                 return
             recent.append(block)
+            if self._sim_idle_end and getattr(src, "finished", False):
+                # --simulate: the last clip ended without a request (an end phrase,
+                # silence) before its trailing silence had been fed; exit now.
+                self._sim_idle_end = False
+                self._sim_done = True
+                self._maybe_exit()
             barged = self._barge_check(block)
             if one_shot and first and not self.manual.is_set():
                 return                          # the request was cancelled before the mic opened
@@ -499,6 +506,7 @@ class Assistant:
                 if text.strip():
                     print(f"[followup] ended by {text!r}")
                 self.rest()
+                self._sim_idle_end = bool(self.simulate)
                 self._maybe_exit()
                 if one_shot:
                     return

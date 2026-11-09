@@ -70,10 +70,12 @@ stt:
   # load fails, or a transcription hits a CUDA error (that request is retried
   # on the CPU). cpu: always cpu_model. --gpu / --cpu override this.
   device: gpu
-  # large-v3 or large-v3-turbo (a name, or a folder with a converted model, e.g.
-  # state/models/faster-whisper-large-v3-turbo). README "Speech-to-text models"
-  # has the measured speed and accuracy of each.
-  gpu_model: large-v3
+  # large-v3-turbo (default: ~0.25 s per request on an RTX 4060, which also
+  # makes the end of turn quicker) or large-v3 (~0.4 s). A name, or a folder
+  # with a converted model, e.g. state/models/faster-whisper-large-v3-turbo.
+  # README "Voice" has the measured speed and accuracy of each, and how to
+  # compare them on your own voice (tools/stt_eval.py).
+  gpu_model: large-v3-turbo
   gpu_compute_type: int8_float16   # or float16 (more VRAM)
   cpu_model: base.en          # tiny.en / base.en / small.en / small: loaded only when needed
   cpu_compute_type: int8

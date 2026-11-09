@@ -17,7 +17,6 @@ with Kokoro voices instead (native accents: a speed check, not an accent check).
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import statistics
 import sys

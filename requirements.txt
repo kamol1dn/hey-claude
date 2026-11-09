@@ -1,14 +1,21 @@
 openwakeword>=0.6
-faster-whisper>=1.2
+faster-whisper>=1.2  # also ships the Silero VAD model (listen.vad: silero)
 sounddevice>=0.5
 webrtcvad-wheels>=2.0
 pyttsx3>=2.99        # pulls in pywin32, which the SAPI backend uses directly
 PySide6>=6.8
 numpy
+scipy                # resampling the voice for the echo canceller
 pyyaml
-nvidia-ml-py>=12     # GPU load for picking the speech-to-text device (NVML)
+nvidia-ml-py>=12     # GPU load for picking the speech-to-text / voice device (NVML)
 psutil>=5.9          # CPU load, same
-anthropic>=0.40      # only used when ANTHROPIC_API_KEY is set
-# optional TTS backends:
-# kokoro-onnx        # tts.backend: kokoro
+anthropic>=0.40      # the direct API path for quick answers (only with an API key)
+kokoro-onnx>=0.6     # tts.engine: kokoro (bundles espeak-ng; no system install)
+livekit>=1.2         # WebRTC echo cancellation (AEC3) for barge-in
+# Kokoro on the GPU needs onnxruntime-gpu. It installs the same `onnxruntime`
+# module as the CPU package (which openWakeWord and kokoro-onnx pull in), so
+# install it after this file, and again after any later `pip install -r`:
+#   pip install "onnxruntime-gpu[cudnn]>=1.31"          # (with the CUDA 13 toolkit; else [cuda,cudnn])
+#   pip install --force-reinstall --no-deps "onnxruntime-gpu>=1.31"
+# Without it Kokoro runs on the CPU (the island says "kokoro cpu (fallback: no cuda)").
 # (piper is a separate executable: https://github.com/rhasspy/piper/releases)

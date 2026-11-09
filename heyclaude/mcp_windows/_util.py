@@ -34,12 +34,14 @@ def com_init() -> None:
     _local.com = True
 
 
-def run_async(coro):
-    """Run a WinRT coroutine to completion from sync code (any thread)."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
+def run_async(coro, timeout: float = 6.0):
+    """Run a WinRT coroutine to completion from sync code.
+
+    Always on a fresh thread: WinRT completions are delivered to the calling
+    apartment, and a thread that pycaw/comtypes made single-threaded (STA)
+    never pumps messages inside asyncio.run, so an await there can hang for
+    good. The new thread starts in the multithreaded apartment. A call that
+    doesn't finish within `timeout` raises ToolError instead of hanging."""
     box: dict = {}
 
     def runner():
@@ -47,9 +49,11 @@ def run_async(coro):
             box["v"] = asyncio.run(coro)
         except BaseException as e:      # noqa: BLE001 - re-raised below
             box["e"] = e
-    t = threading.Thread(target=runner, daemon=True)
+    t = threading.Thread(target=runner, daemon=True, name="winrt")
     t.start()
-    t.join()
+    t.join(timeout)
+    if t.is_alive():
+        raise ToolError("Windows didn't answer in time")
     if "e" in box:
         raise box["e"]
     return box.get("v")

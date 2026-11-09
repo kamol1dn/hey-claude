@@ -33,7 +33,12 @@ def _os_panel_set(level: int) -> None:
     import win32com.client
     wmi = win32com.client.GetObject(r"winmgmts:\\.\root\WMI")
     for m in wmi.InstancesOf("WmiMonitorBrightnessMethods"):
-        m.WmiSetBrightness(1, int(level))
+        # A dynamic m.WmiSetBrightness(...) call is rejected ("Invalid parameter"):
+        # the in-parameters must be typed, so fill an instance of them.
+        params = m.Methods_("WmiSetBrightness").InParameters.SpawnInstance_()
+        params.Properties_.Item("Timeout").Value = 1
+        params.Properties_.Item("Brightness").Value = int(level)
+        m.ExecMethod_("WmiSetBrightness", params)
 
 
 def _os_ddc_monitors() -> list:
@@ -148,12 +153,21 @@ def _os_reg_set(name: str, value: int) -> None:
 
 
 def _os_broadcast_theme() -> None:
-    """Tell running apps (Explorer, the taskbar, UWP) the colour set changed."""
+    """Tell running apps (Explorer, the taskbar, UWP) the colour set changed.
+
+    The broadcast waits on every top-level window (up to 200 ms each for a
+    slow one) and took ~2 s here, so it runs on its own thread: the tool
+    answers at once and the windows repaint as the message reaches them.
+    (The async SendNotifyMessage can't carry the string to other processes.)"""
     import ctypes
+    import threading
     from ctypes import wintypes
-    res = wintypes.DWORD()
-    ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 200,
-                                             ctypes.byref(res))
+
+    def send():
+        res = wintypes.DWORD()
+        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 200,
+                                                 ctypes.byref(res))
+    threading.Thread(target=send, daemon=False, name="theme-broadcast").start()
 
 
 def _mode(v: int | None) -> str:

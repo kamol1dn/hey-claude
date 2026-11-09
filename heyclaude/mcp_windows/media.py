@@ -74,6 +74,13 @@ def _os_control(action: str) -> bool:
         s = await _session()
         if s is None:
             raise ToolError("nothing is playing media right now")
+        c = s.get_playback_info().controls
+        able = {"play": c.is_play_enabled, "pause": c.is_pause_enabled or c.is_play_pause_toggle_enabled,
+                "play_pause": c.is_play_pause_toggle_enabled, "next": c.is_next_enabled,
+                "previous": c.is_previous_enabled}
+        if not able[action]:
+            what = {"next": "skip to the next track", "previous": "go back a track"}.get(action, action.replace("_", "/"))
+            raise ToolError(f"{s.source_app_user_model_id or 'the player'} can't {what} right now")
         call = {"play": s.try_play_async, "pause": s.try_pause_async, "play_pause": s.try_toggle_play_pause_async,
                 "next": s.try_skip_next_async, "previous": s.try_skip_previous_async}[action]
         return bool(await call())

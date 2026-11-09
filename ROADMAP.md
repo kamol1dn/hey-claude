@@ -269,6 +269,38 @@ VRAM (verified with NVML) and reloads on the next wake; switching backends
 from the tray works without a restart; offline tests cover backend selection
 and fallback with every backend mocked.
 
+## M4d: Dictate anywhere
+
+**Goal:** hold a key, speak, and let go: the words are typed wherever the cursor
+is, in any app. Same idea as Coucou's "Flow" dictation (Mac only there), built
+on the mic, Whisper and hold-key code hey-claude already has. Build it after
+M4, which changes `stt.py`/`listen.py`.
+
+- **Key:** `dictate.key`, a hold key separate from the hold-to-keep-listening
+  Ctrl, e.g. `right alt` or `capslock`. A double tap means hands-free until the
+  next tap; Esc cancels. It never swallows the key outside dictation.
+- **Paste:** put the text on the clipboard, send Ctrl+V to the focused window,
+  then put the user's clipboard back. A "paste last dictation again" hotkey.
+  Skip password fields where Windows says so (UI Automation `IsPassword`).
+- **Personal dictionary:** names, course names and words Whisper gets wrong
+  (Phoenix, eClass, classmates' names), used as Whisper's initial prompt.
+  Also replacements ("hey cloud" → "hey Claude") and snippets (a short
+  spoken phrase → a saved text). The same dictionary helps the assistant's
+  own speech-to-text. Optional `stt.languages` limit (e.g. en/ru/uz) for
+  language detection.
+- **Optional clean-up by Claude** on the user's subscription via the CLI:
+  "as said", "natural" or "polished", chosen per app (e.g. polished in
+  Outlook, as said in the terminal). Off by default: it adds latency.
+- The island shows a small "dictating" state with the live level. Local
+  stats only (words, time saved).
+
+**Touches:** new `dictate.py`, `holdkey.py`, `stt.py` (initial prompt /
+languages), settings, island state.
+**Done when:** dictation pastes into Notepad, a browser text box and a
+terminal; the clipboard is restored; it measures ≤ 1 s from releasing the key
+to the text appearing for a 5 s sentence on turbo; and the dictionary fixes
+the user's top misheard words in a simulated test.
+
 ## M5: Island v2: animation, transitions, response widgets
 
 **Goal:** the island looks and moves like a product, and can show more than text.
@@ -282,6 +314,19 @@ and fallback with every backend mocked.
   link/file card, short code snippet, image. Unknown widgets fall back to text.
 - The widget contract (JSON schema) lives in one file, and both tiers are
   prompted with it.
+- **Motion:** implement `docs/island-motion.md` (state-by-state motion spec
+  with springs, timings, reduced motion and perf budget; approved through the
+  preview page `docs/island-motion-preview.html`).
+- Ideas taken from Coucou (ideas only; no names, character, icons or sounds,
+  which their `LICENSE-ASSETS.md` keeps):
+  - **Drop a file on the island** to ask about it. The file goes to the tool
+    agent as an attachment or path.
+  - **Hide when idle**, as an option: nothing on screen in `ready`. It peeks out
+    when the pointer touches the top-centre edge, and always shows for
+    listening, answers and tasks.
+  - **Plan-usage pill:** the 5-hour and weekly Claude plan limits. Only from a
+    supported source, such as what Claude Code itself reports; skip it if it
+    would need private endpoints.
 
 **Touches:** `island.py` → `ui/` (QML), `brain.py` prompts (widget field).
 **Done when:** each widget type renders from a simulated reply; 60 fps
@@ -308,9 +353,34 @@ switch from model output.
 
 **Goal:** voice-started work you can supervise and trust.
 
-- Permission requests surfaced on the island: route prompts via
-  `--permission-prompt-tool` (a tiny MCP server inside hey-claude), approve
-  or deny by click or voice ("yes, allow that").
+- **Watch every Claude Code session on this PC through hooks**, not just the
+  ones hey-claude starts. This is the approach of [Coucou](https://github.com/Louis-CFM/coucou)
+  (MIT code; read `windows/hook` and `docs/AGENTS.md`, and keep their MIT
+  notice on any code copied).
+  - Plumbing: Claude Code hooks in the user's global `~/.claude/settings.json`
+    call a tiny relay (`heyclaude-hook`), which forwards the hook JSON to
+    hey-claude over a per-user named pipe (`\\.\pipe\hey-claude-<user SID>`, only
+    that user can connect).
+  - Events: SessionStart, UserPromptSubmit, PreToolUse/PostToolUse, Stop,
+    Notification. The island ticker shows what each session is doing (tool,
+    file, +N −M lines for edits; click for the diff), with a one-shot "done"
+    moment when a session stops.
+  - Check whether the Claude desktop app's sessions fire the same user hooks.
+    If they do, they show up too.
+  - Installing the hooks is a persistent change to the user's settings: ask
+    first, merge into the existing hooks (never overwrite), and give an
+    uninstall in Settings.
+- **Approve from the island:** the `PermissionRequest` hook blocks while the
+  island shows **Allow / Deny / Always** (click or voice: "yes, allow that").
+  - It times out after a configurable wait and falls back to the terminal's own
+    prompt, so nothing hangs while the user is away.
+  - `AskUserQuestion` choices show on the island too.
+  - Keep `--permission-prompt-tool` (a tiny MCP server) only as a fallback for
+    headless tasks if hooks can't cover them.
+  - Voice approvals are a convenience: any command flagged as dangerous needs a
+    click, never voice alone.
+- **Jump to the session:** open the terminal window or the desktop-app session
+  the event came from.
 - Optional git worktree per task, so tasks never touch your working tree;
   "merge it" by voice after review.
 - Windows toast notifications, and an optional Telegram message when a task
@@ -318,9 +388,15 @@ switch from model output.
 - Task dashboard window: history, cost, diff preview, open in terminal, and
   try "open in the Claude desktop app" (`claude --resume <id> --desktop`).
 
-**Touches:** `tasks.py`, new `permissions_mcp.py`, `ui/`.
-**Done when:** a task that needs a non-allowed tool pauses, asks on the
-island, and continues after a spoken "yes".
+**Touches:** `tasks.py`, new `hookrelay/` (relay + pipe server),
+`permissions_mcp.py` (fallback only), `ui/`.
+**Done when:**
+- a task that needs a non-allowed tool pauses, asks on the island, and
+  continues after a spoken "yes";
+- a Claude Code session the user started in a terminal shows live on the
+  island and can be approved from it;
+- removing the hooks from Settings leaves `~/.claude/settings.json` exactly as
+  it was before.
 
 ## M8: Package and ship
 

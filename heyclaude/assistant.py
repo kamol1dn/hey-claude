@@ -88,6 +88,9 @@ class Assistant:
         self.barge_vad = None                  # for barge-in (its own state)
         self.monitor = None                    # sysload.LoadMonitor shared by STT and TTS
         self.turn: TurnListener | None = None  # the utterance being recorded
+        # M9: Windows settings changes -> island effects, undo, click-to-confirm power actions.
+        self.undo_stack = None                 # undo.UndoStack, made in load()
+        self._pending_power: dict[str, tuple[str, float]] = {}   # effect id -> (action, expires)
 
     # -- UI helpers -----------------------------------------------------------
     def set_mode(self, mode, text=""):
@@ -270,6 +273,13 @@ class Assistant:
         self.push_tasks()
         self.set_mode("loading", "loading brain…")
         self.brain = Brain(c)
+        try:
+            from .undo import UndoStack
+            self.undo_stack = UndoStack()
+        except Exception as e:                  # the settings tools' modules failed to import
+            print(f"[undo] off: {e}")
+        if self.brain.agent is not None:
+            self.brain.agent.on_tool_result = self._on_tool_result
         if not self.text_mode:
             self.set_mode("loading", "loading wake word…")
             self.wake = WakeWord(c["wake"]["model"], float(c["wake"]["threshold"]), gate=self.wake_gate)
@@ -309,6 +319,95 @@ class Assistant:
 
     _sim_done = False
     _sim_idle_end = False                       # --simulate: last utterance asked for nothing
+
+    # -- M9: effects, undo, confirmations ----------------------------------------
+    def _emit_effect(self, ev: dict):
+        sig = getattr(self.ui, "effect", None)
+        if sig is not None:
+            sig.emit(ev)
+
+    def _on_tool_result(self, name: str, args: dict, result, is_error: bool):
+        """The agent ran a tool (its process's thread): show the effect, remember the undo."""
+        if is_error:
+            return
+        from . import effects
+        undoable = self.undo_stack is not None and self.undo_stack.can_undo(name, args, result)
+        try:
+            ev = effects.build(name, args, result, undoable=undoable)
+        except Exception as e:
+            print(f"[effects] {name}: {e}")
+            return
+        if ev is None:
+            return
+        if undoable:
+            self.undo_stack.record(name, args, result, effect=ev)
+        if ev["effect"] == "confirm" and ev["extra"].get("action"):
+            self._pending_power[ev["id"]] = (ev["extra"]["action"], time.time() + ev["ttl_s"])
+        print(f"[effect] {ev['effect']} {ev['label']}: {ev['text_from']} -> {ev['text_to']}"
+              + (" (undo)" if undoable else ""))
+        self._emit_effect(ev)
+        if ev["effect"] == "media":
+            self._fetch_art(ev["id"])
+
+    def _fetch_art(self, effect_id: str):
+        """Album art for the media card, read here (it never goes to the model)."""
+        def go():
+            try:
+                from .mcp_windows import media
+                from .mcp_windows._util import com_init
+                com_init()
+                art = media.album_art()
+            except Exception as e:
+                print(f"[effects] no album art: {e}")
+                return
+            sig = getattr(self.ui, "effect_art", None)
+            if art and sig is not None:
+                sig.emit(effect_id, art)
+        threading.Thread(target=go, daemon=True, name="album-art").start()
+
+    def undo(self, effect_id: str | None = None, note: bool = False) -> str:
+        """Undo a change (the newest, or the one whose Undo button was clicked).
+        Returns what to say. Any thread. `note`: add it to the conversation
+        (a click; a spoken "undo that" is recorded as its own turn)."""
+        if self.undo_stack is None:
+            return "Undo isn't available."
+        try:
+            done = self.undo_stack.undo(effect_id)
+        except Exception as e:
+            traceback.print_exc()
+            return f"I couldn't undo that: {str(e)[:80]}."
+        if done is None:
+            return "There's nothing to undo." if effect_id is None else "That can't be undone any more."
+        ch, res = done
+        from . import effects
+        from .undo import describe
+        print(f"[undo] {ch.tool} {ch.args} -> {ch.calls}")
+        if ch.effect:
+            ev = effects.reversed_event(ch.effect, res)
+            self._emit_effect(ev)
+            if ev["effect"] == "media":
+                self._fetch_art(ev["id"])
+        if note and self.brain.convo is not None:
+            self.brain.convo.add("", f"(Undid a change from the island: {describe(ch)})", "local")
+        return describe(ch)
+
+    def undo_clicked(self, effect_id: str):
+        """The island's Undo button (UI thread): undo off the UI thread, no speech."""
+        threading.Thread(target=self.undo, args=(effect_id, True), daemon=True, name="undo").start()
+
+    def confirm_clicked(self, effect_id: str):
+        """The island's Confirm button: the only way a sleep/restart/shutdown runs."""
+        action, until = self._pending_power.pop(effect_id, (None, 0))
+        if not action or time.time() > until + 1:
+            print("[power] confirmation expired")
+            return
+        print(f"[power] confirmed by click: {action}")
+        from .mcp_windows import power
+        threading.Thread(target=power.perform_power_action, args=(action,), daemon=True).start()
+
+    def cancel_clicked(self, effect_id: str):
+        if self._pending_power.pop(effect_id, None):
+            print("[power] cancelled")
 
     # -- task callbacks -------------------------------------------------------
     def _task_finished(self, t):
@@ -620,6 +719,13 @@ class Assistant:
                     self.set_mode("thinking", "checking with your tools… " + text)
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
+                elif kind == "control":
+                    # "volume 30": straight to the agent and its Windows tools, no filler.
+                    tier = "agent"
+                    self._stream(self.brain.lookup(ev[1]), gen, timing)
+                elif kind == "undo":
+                    tier = "local"
+                    self._say(self.undo())
                 elif kind == "task":
                     tier = "task"
                     task_id = self._start_task(ev[1], ev[2])

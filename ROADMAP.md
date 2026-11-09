@@ -317,6 +317,25 @@ the user's top misheard words in a simulated test.
 - **Motion:** implement `docs/island-motion.md` (state-by-state motion spec
   with springs, timings, reduced motion and perf budget; approved through the
   preview page `docs/island-motion-preview.html`).
+- **Telegram widgets and motion** (the Telegram MCP is connected to the tool
+  agent from 2026-11-09, read-only):
+  - `telegram_chats`: the chats that need attention, with avatar or initials,
+    unread badge, last-message snippet and time. Rows slide in one by one;
+    unread badges pop.
+  - `telegram_message`: one message or a short thread, with the sender and text,
+    and replies indented. Long text is clamped, and a click opens the chat in
+    Telegram Desktop (`tg://` link).
+  - `telegram_draft` + **sending with confirmation**: the agent drafts a reply,
+    the island shows it with **Send / Edit / Cancel**, and only a click or a
+    clear spoken "send it" makes the call. Then a paper-plane fly-out
+    animation and a ✓. Send/forward/edit/delete stay off the agent's allowed
+    tools until this approval exists (M7's approval plumbing).
+  - Reading animation: while it scans chats, a quick shuffle of chat bubbles
+    behind the Telegram icon.
+  - Avatars come through `telegram_download_media` (profile photos), cached in
+    `state/icons/telegram/` (git-ignored, never committed).
+  - Privacy: message text is shown only while it's the answer, and fades
+    after the island collapses. Nothing goes into logs beyond the tool name.
 - **Show the app or service being used, with its icon.** While the tool agent
   (or a watched session, M7) calls a tool, the island shows e.g. "Google
   Calendar · checking today" with the Calendar icon.

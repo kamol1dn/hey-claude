@@ -287,3 +287,72 @@ def process_running(exe_name: str) -> bool:
         return False
     finally:
         _kernel32.CloseHandle(snap)
+
+
+# --- foreground window (for the hotkey's input field) ---------------------------
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_user32.GetForegroundWindow.restype = wintypes.HWND
+_user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+_user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+_user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+_user32.AttachThreadInput.restype = wintypes.BOOL
+_user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+_user32.SetForegroundWindow.restype = wintypes.BOOL
+_user32.BringWindowToTop.argtypes = [wintypes.HWND]
+_user32.SetFocus.argtypes = [wintypes.HWND]
+_user32.SetActiveWindow.argtypes = [wintypes.HWND]
+_user32.IsWindow.argtypes = [wintypes.HWND]
+_user32.IsWindow.restype = wintypes.BOOL
+_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+
+def foreground_window() -> int:
+    return int(_user32.GetForegroundWindow() or 0)
+
+
+def force_foreground(hwnd: int) -> bool:
+    """Bring our window to the front with keyboard focus, even though another
+    app is in front. Windows' foreground lock refuses a plain
+    SetForegroundWindow from a background process; attaching our input queue
+    to the foreground window's thread for the call is the usual way round it
+    (we were just sent a hotkey, so the user asked for this)."""
+    if not hwnd:
+        return False
+    fg = _user32.GetForegroundWindow()
+    if fg and int(fg) == int(hwnd):
+        return True
+    me = _kernel32.GetCurrentThreadId()
+    fg_tid = _user32.GetWindowThreadProcessId(fg, None) if fg else 0
+    attached = bool(fg_tid and fg_tid != me and _user32.AttachThreadInput(fg_tid, me, True))
+    try:
+        _user32.BringWindowToTop(hwnd)
+        ok = bool(_user32.SetForegroundWindow(hwnd))
+        _user32.SetActiveWindow(hwnd)
+        _user32.SetFocus(hwnd)
+    finally:
+        if attached:
+            _user32.AttachThreadInput(fg_tid, me, False)
+    return ok or foreground_window() == int(hwnd)
+
+
+def restore_foreground(hwnd: int) -> bool:
+    """Give focus back to the window that had it before the input field opened."""
+    if not hwnd or not _user32.IsWindow(hwnd):
+        return False
+    return force_foreground(hwnd)
+
+
+def foreground_is_ours() -> bool:
+    """Is the foreground window one of this process's windows?"""
+    fg = _user32.GetForegroundWindow()
+    if not fg:
+        return False
+    pid = wintypes.DWORD()
+    _user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+    return pid.value == os.getpid()
+
+
+def window_title(hwnd: int) -> str:
+    buf = ctypes.create_unicode_buffer(256)
+    ctypes.windll.user32.GetWindowTextW(wintypes.HWND(hwnd), buf, 256)
+    return buf.value

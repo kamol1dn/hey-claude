@@ -150,7 +150,8 @@ def main():
         if err:
             print(f"[hotkey] not registered: {err if str(spec) in err else f'{spec}: {err}'}")
             if tray:
-                tray.notify("Hotkey not registered", f"{spec}: {err}")
+                tray.notify_action("Hotkey not registered",
+                                   f"{err}. Click here to choose another key in Settings.", open_settings)
         else:
             print(f"[hotkey] {spec or 'none'}")
         if tray:
@@ -200,6 +201,7 @@ def main():
         from .listen import resolve_wake_model, wake_label
         island = Island(bridge, cfg["island"], wake_label=wake_label(resolve_wake_model(cfg["wake"]["model"])[0]))
         island.activate.connect(asst.talk_now)
+        island.attach_input(asst.begin_input, asst.cancel_input_mic, asst.submit_text, closed=asst.end_input)
         island.stop_speaking.connect(lambda: asst.speaker.stop())
         island.quit_requested.connect(app.quit)
 
@@ -225,7 +227,8 @@ def main():
         bridge.listening.connect(lambda on, until: tray.set_listening(on, until or None))
         tray.set_listening(asst.listening.is_set())
 
-    bridge.talk.connect(asst.talk_now)
+    # The hotkey opens the island ready to talk or type (toggle); without an island, it just listens.
+    bridge.talk.connect(lambda: island.toggle_input() if island and island.session else asst.talk_now())
 
     if interactive:
         from .hotkey import GlobalHotkey

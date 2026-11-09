@@ -121,7 +121,7 @@ listening is off). Left-click it to talk. Right-click for:
 
 | menu item | what it does |
 |---|---|
-| **Talk now** | listen for one request without the wake word (same as clicking the island or the hotkey) |
+| **Talk now** | listen for one request without the wake word (same as clicking the island) |
 | **Listening** | wake word on/off. Off **closes the microphone stream**, so Windows' mic-in-use indicator goes away; the island turns into a muted grey pill |
 | **Pause for 1 hour** | listening off, back on by itself after an hour ("Resume listening" ends it early) |
 | **Settings…** | the settings window, below |
@@ -132,11 +132,28 @@ listening is off). Left-click it to talk. Right-click for:
 While listening is off, **Talk now**, the hotkey and clicking the pill still
 work: the mic opens for that one request and closes again.
 
-**Push-to-talk hotkey:** `Ctrl+Alt+Space` by default (`app.hotkey`), a
-system-wide hotkey through `RegisterHotKey`, no admin rights needed. If
-another app already owns the combination, hey-claude shows a tray balloon
-and runs without one. On this machine PowerToys holds `Ctrl+Alt+Space`;
-`Ctrl+Shift+Space`, `Win+Alt+Space`, `Ctrl+Alt+H` and `F9` were free.
+**Hotkey: talk or type.** `Ctrl+Alt+Space` by default (`app.hotkey`), a
+system-wide hotkey through `RegisterHotKey`, no admin rights needed.
+Pressing it opens the island as an input field, focused, with the mic on:
+
+- **just talk:** it works like the wake word (end-of-speech detection,
+  hold Ctrl to keep going). What it heard shows in the field and is sent.
+- **or type:** the first keystroke turns the mic off. **Enter** sends,
+  **Shift+Enter** adds a line, **Esc** cancels.
+- **press the hotkey again** (or click somewhere else) to close it.
+
+Typed requests go through the same router and tiers as spoken ones (quick
+answer, tool agent, "start a task in …"). The island takes keyboard focus
+even when another app is in front (it attaches to the foreground window's
+input queue for the switch), and gives focus back to that app when it
+closes. The wake word is ignored while the field is open. If nothing is
+said within `listen.start_timeout`, the mic turns off and the field stays
+open for typing.
+
+If another app already owns the key, a tray balloon says so; click it to
+open Settings and pick another. On this machine PowerToys holds
+`Ctrl+Alt+Space`; `Ctrl+Shift+Space`, `Win+Alt+Space`, `Ctrl+Alt+H` and `F9`
+were free.
 
 **Hold to keep listening** (`listen.hold_key`, default `ctrl`): if you
 pause to think mid-sentence, hold Ctrl while you talk. While it's down the
@@ -243,7 +260,8 @@ Make a test clip with a Windows voice:
 | *hey claude … in the inha app, find why login is slow* | the model notices it's real work and turns it into a task |
 | *hey claude … who messaged me on Telegram today?* | "Let me check." → the warm tool agent answers (needs the MCP set up, see below) |
 | *hey claude … how are my tasks going?* | spoken status of running tasks |
-| click the idle pill, or press the hotkey (`Ctrl+Alt+Space`) | talk without the wake word |
+| click the idle pill | talk without the wake word |
+| press the hotkey (`Ctrl+Alt+Space`) | talk, or type into the field that opens (Enter sends) |
 | click while speaking, or the hotkey | stop speaking (and, with the hotkey, listen again) |
 | right-click the island | menu: talk now / stop / open logs / quit (the tray menu has the rest) |
 
@@ -439,6 +457,7 @@ heyclaude/
   tray.py         tray icon and menu
   hotkey.py       global push-to-talk hotkey (RegisterHotKey) and hotkey parsing
   holdkey.py      hold-to-keep-listening key (low-level hook, armed only while listening)
+  inputbox.py     the hotkey's talk-or-type session (state machine; the island draws it)
   settings_ui.py  the settings window
   winsys.py       Startup shortcut, single-instance lock, "is a process running"
   sysload.py      GPU (NVML) and CPU (psutil) load, sampled in the background

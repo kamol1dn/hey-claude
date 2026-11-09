@@ -106,10 +106,20 @@ class Assistant:
         if sig is not None:
             sig.emit(label)
 
-    def announce(self, text: str):
-        """Say something that isn't an answer (a timer ended), from any thread."""
-        self._speaking_text = text
-        self.speaker.announce(text)
+    def announce(self, text: str, about: str = ""):
+        """Say something that isn't an answer (a timer ended, a task finished), from any
+        thread. It waits for the answer in progress to finish, then gets a turn of its own
+        on the island (`about` is shown as what it answers), so it is never spliced into
+        another answer's line."""
+        def go():
+            end = time.time() + 90
+            while self._busy() and time.time() < end and not self.stopping:
+                time.sleep(0.1)
+            self._filler = ""
+            self._speaking_text = text
+            self._ui_emit("turn", {"question": about or "announcement"})
+            self.speaker.announce(text)
+        threading.Thread(target=go, daemon=True, name="announce").start()
 
     def _ui_emit(self, name: str, *args):
         """Emit an optional Bridge signal (newer islands have more of them)."""
@@ -542,8 +552,7 @@ class Assistant:
             return
         verb = {"done": "is done", "failed": "failed", "stopped": "was stopped"}.get(t.status, "ended")
         msg = f"Your {t.project} task {verb}. {t.summary}"
-        self._speaking_text = msg
-        self.speaker.announce(msg)
+        self.announce(msg, about=f"{t.project} task: {t.prompt}"[:160])
         if self.brain.convo is not None:
             self.brain.convo.add("", msg, "local", task_id=t.id)
         self._arm_followup()     # "what did it change?" works without the wake word
@@ -732,7 +741,9 @@ class Assistant:
                     return
                 continue
             t_rec = time.perf_counter()
-            self.set_mode("thinking", self.turn.partial_text if self.turn and self.turn.partial_text else "…")
+            partial = self.turn.partial_text if self.turn and self.turn.partial_text else ""
+            if not (partial.strip() and not strip_wake(partial).strip()):    # (a bare wake word: no flash of "thinking")
+                self.set_mode("thinking", partial or "…")
             text = self.turn.final() if self.turn is not None else None
             reused = text is not None
             if text is None:
@@ -743,7 +754,14 @@ class Assistant:
             if from_input:
                 self._heard(text)
             cooldown_until = time.perf_counter() + float(self.cfg["wake"]["cooldown"])
-            if followup:
+            if text.strip() and not strip_wake(text).strip() and not from_input:
+                # Only the wake word again ("hey claude... hey claude"): it's still waiting
+                # for the request. Keep listening; no panel for a bare wake word.
+                print(f"[heard] only the wake word ({text!r}): listening again")
+                cooldown_until = 0.0
+                self.talk_now()
+                continue
+            if followup or by_wake:
                 text = strip_wake(text)
             if self.simulate:
                 self._sim_done = getattr(src, "finished", True)
@@ -759,7 +777,16 @@ class Assistant:
             timing = dict(wake=t_wake, speech_end=t_end or t_rec, vad_done=t_rec, stt_done=t_stt,
                           audio_s=len(audio) / 16000, text=text, stt_reused=reused,
                           stt_device=getattr(self.stt, "label", ""))
-            self.request(text, timing, source="barge-in" if barged else "followup" if followup else "voice")
+            source = "barge-in" if barged else "followup" if followup else "voice"
+            prev = self._last_said
+            if barged and prev is not None and t_wake - prev[1] < self.CONTINUE_S:
+                # The user paused mid-sentence, it answered, and they talked on: one request.
+                text = f"{prev[0].rstrip()} {text.lstrip()}"
+                source = "continuation"
+                self._withdraw_spawn(prev[2])
+                print(f"[continuation] joined to the previous request: {text!r}")
+            self._last_said = (text, t_end or t_rec, self.gen + 1)
+            self.request(text, timing, source=source)
             if one_shot:
                 return
 
@@ -960,6 +987,22 @@ class Assistant:
             self._speaking_text = "".join(self._reply).strip()
             self.speaker.feed(chunk)
 
+    CONTINUE_S = 3.0          # talking over the answer this soon after your request ended continues it
+    _last_said = None         # (text, perf time its speech ended, the gen its request runs as)
+    _last_spawn = None        # (task id, gen) of the newest task started
+
+    def _withdraw_spawn(self, gen):
+        """A task started by the first half of a sentence that went on: stop it quietly."""
+        sp = self._last_spawn
+        if sp and sp[1] == gen and self.tasks is not None:
+            self._user_stopped.add(sp[0])
+            try:
+                self.tasks.stop(sp[0])
+                print(f"[continuation] withdrew task {sp[0]} (the request went on)")
+            except Exception as e:
+                print(f"[continuation] couldn't stop task {sp[0]}: {e}")
+            self._last_spawn = None
+
     def _start_task(self, project, task):
         if not project:
             names = ", ".join(self.cfg["projects"]) or "none yet"
@@ -973,6 +1016,7 @@ class Assistant:
             self._say(f"I couldn't start it: {e}.")
             return None
         self.pending_tasks += 1
+        self._last_spawn = (t.id, self.gen)
         print(f"[task {t.id}] started in {path}: {task}")
         self._say(f"Okay, starting that in {project}. I'll tell you when it's done.")
         self.push_tasks()
@@ -998,8 +1042,9 @@ class Assistant:
             self._say(f"The {t.project} task never got started, so there's nothing to ask it.")
             return t.id
         print(f"[task {t.id}] asking its session {t.session_id}: {question}")
-        self._say(self.cfg["agent"].get("filler") or "Let me check.")
         self.set_mode("thinking", f"asking the {t.project} task… {question}")
+        self._filler = self.cfg["agent"].get("filler") or "Let me check."
+        self.speaker.feed(self._filler + " ")
         self._stream(self.brain.ask_task(t, question), gen, timing)
         return t.id
 

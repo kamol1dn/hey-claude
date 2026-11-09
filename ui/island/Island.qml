@@ -179,6 +179,7 @@ Item {
             root.rowKey = R.key
             extras.rowLines = R.lines.slice(0, R.n)
             if (extras.rowN !== R.n) extras.rowN = R.n
+            if (extras.rowTop !== R.top) extras.rowTop = R.top
         }
     }
     function escapeHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
@@ -476,15 +477,20 @@ Item {
             visible: extras.flash > 0.005
             color: "white"; opacity: extras.flash
         }
-        // quiet followup (a card or the turn is open): a hairline along the panel's
-        // bottom edge, centred, shrinking as the followup window runs out
-        Rectangle {
+        // followup: the window's countdown, a ring around the ember draining clockwise
+        // from 12 o'clock (the paused arc's look); nothing sweeps across the pill
+        Shape {
+            id: followupDrain
             objectName: "followupDrain"
-            readonly property real span: Math.max(0, o.w - 2 * Math.max(o.rad, 14))
             visible: (o.drainA || 0) > 0.01
-            x: (o.w - width) / 2; y: o.h - 3
-            width: span * (o.drainU || 0); height: 1.5; radius: 0.75
-            color: root.cLive; opacity: 0.85 * (o.drainA || 0)
+            anchors.fill: parent
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath { strokeColor: Qt.rgba(92 / 255, 86 / 255, 82 / 255, 0.35 * (o.drainA || 0)); strokeWidth: 1; fillColor: "transparent"
+                PathAngleArc { centerX: o.ex; centerY: o.cy; radiusX: 9.5; radiusY: 9.5; startAngle: 0; sweepAngle: 360 } }
+            ShapePath { strokeColor: Qt.rgba(217 / 255, 119 / 255, 87 / 255, 0.9 * (o.drainA || 0)); strokeWidth: 1.4
+                capStyle: ShapePath.RoundCap; fillColor: "transparent"
+                PathAngleArc { centerX: o.ex; centerY: o.cy; radiusX: 9.5; radiusY: 9.5; startAngle: -90
+                    sweepAngle: 360 * Math.max(0.001, o.drainU || 0) } }
         }
 
         // ---- tools in use (thinking): service icons, stacked for parallel calls --------

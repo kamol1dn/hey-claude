@@ -143,7 +143,7 @@ def test_room_mixes_speech_noise_and_echo_in_real_time():
     pcm = np.full(BLOCK * 2, 1000, np.int16)
     t0, t1 = room.say(pcm, label="hello")
     assert abs((t1 - t0) - 2 * BLOCK / RATE) < 1e-9
-    n0 = int((t0 - room.t0) * RATE / BLOCK)
+    n0 = round((t0 - room.t0) * RATE / BLOCK)
     assert room.block(n0 - 1).max() == 0 and room.block(n0).max() == 1000 and room.block(n0 + 2).max() == 0
     clock[0] = room.block_time(n0 + 5)
     room.echo_push(np.full(BLOCK, 2000, np.int16))

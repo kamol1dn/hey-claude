@@ -274,6 +274,7 @@ def load_timeline(path: str | os.PathLike) -> list[dict]:
 # =============================================================================== detectors
 # Thresholds (seconds unless noted). Kept here so the report and the tests agree.
 DEAD_AIR_S = 1.5
+CARD_READ_S = 4.0              # a response card that just appeared is something to look at
 SYNC_START_S = 0.35            # first word of a sentence vs its audio
 SYNC_END_EARLY_S = 1.0         # last word may come this much before its audio ends (reading ahead is fine)
 SYNC_END_LATE_S = 0.4          # ...but not this much after it
@@ -296,7 +297,8 @@ def turns(events: list[dict]) -> list[dict]:
     Each turn: {t0, t1, question, audio: [{t0, t1, text}], speech_end, end}."""
     ev = sorted(events, key=lambda e: e["t"])
     starts = [e for e in ev if e["k"] == "turn"]
-    t_end = ev[-1]["t"] if ev else 0.0
+    # the end of the last thing in the timeline (a sentence ends after it starts)
+    t_end = max([e["t"] + float(e.get("secs", 0) or 0) for e in ev] + [e.get("t1", 0) for e in ev] + [0.0]) + 0.5
     out = []
     stops = [e["t"] for e in ev if e["k"] == "audio_stop"]
     for i, s in enumerate(starts):
@@ -510,6 +512,8 @@ def _dead_air(ev, tr, ss, end):
     if b - a < DEAD_AIR_S:
         return out
     ts = [a] + _progress_times(ev, a, b) + [b]
+    # a card that just appeared is something to read: ~4 s of it is not dead air
+    cards = [e["t"] for e in ev if e["k"] == "w_shown" and a <= e["t"] <= b]
     playing = [(x["t0"], x["t1"]) for x in tr["audio"]]
     gaps = []
     for x, y in zip(ts, ts[1:]):
@@ -518,6 +522,9 @@ def _dead_air(ev, tr, ss, end):
         for p0, p1 in playing:
             if p0 <= silent_from < p1:
                 silent_from = p1
+        for c in cards:
+            if c <= silent_from < c + CARD_READ_S:
+                silent_from = min(y, c + CARD_READ_S)
         if y - silent_from > DEAD_AIR_S:
             gaps.append((silent_from, y))
     if gaps:

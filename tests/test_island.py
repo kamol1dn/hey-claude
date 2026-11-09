@@ -11,6 +11,7 @@ import faulthandler
 import json
 import os
 import random
+import re
 import sys
 import tempfile
 import time
@@ -1037,7 +1038,7 @@ def test_live_cards_from_real_tool_results_match_the_preview():
 
 def test_a_long_answer_is_never_cut_and_the_followup_is_quiet_over_a_card():
     """With a card open: the whole answer is on the panel (it scrolls, no ellipsis), and
-    the followup cue is a hairline at the bottom edge, not the thread and "go on"."""
+    the followup cue is the ring around the ember, not the thread and "go on"."""
     from PySide6.QtQuick import QQuickItem
     isl = _island()
     b = isl.bridge_
@@ -1056,7 +1057,7 @@ def test_a_long_answer_is_never_cut_and_the_followup_is_quiet_over_a_card():
     assert p["thrA"] < 0.05 and p["washA"] == 0 and p["dotsA"] == 0 and "go on" not in p["labels"], p
     assert p["drainA"] > 0.5 and 0 < p["drainU"] < 1, p
     drain = isl.root.findChild(QQuickItem, "followupDrain")
-    assert drain is not None and drain.isVisible() and drain.height() <= 2 and drain.width() > 40
+    assert drain is not None and drain.isVisible()                    # the ring around the ember
     u0 = p["drainU"]
     _spin(1200)
     assert _v(isl.call("probe"))["drainU"] < u0 - 0.15                    # it drains with the window
@@ -1064,16 +1065,15 @@ def test_a_long_answer_is_never_cut_and_the_followup_is_quiet_over_a_card():
     _spin(1200)
     info = _v(isl.call("extrasInfo"))
     assert info["widget"] == "telegram_chats" and info["answer"] == long_answer, info
-    texts = [i for i in _items(isl.root) if i.objectName() == "answerText"]
-    assert texts and texts[0].isVisible()
-    t = texts[0]
-    assert t.property("text") == long_answer and not t.property("truncated"), "the answer is elided"
+    # one place for the answer: the row under the question holds every word of it, in order
+    lines = [i for i in _items(isl.root) if i.objectName() == "answerLine"]
+    said = " ".join(re.sub(r"<[^>]+>", "", str(t.property("text"))) for t in lines).split()
+    assert said == long_answer.split(), "the answer row lost or cut words"
     view = isl.root.findChild(QQuickItem, "answerView")
-    assert view.height() < t.height(), "this answer is longer than the room left: it scrolls"
+    assert view.height() < view.property("contentHeight"), "this answer is longer than the room left: it scrolls"
+    assert view.property("interactive")
     assert info["pillH"] <= 400 - 8, info
-    _spin(3200)                                                            # after a look, it drifts to the rest
-    assert view.property("contentY") > 5
-    # without a panel the followup is the usual one ("go on", the wave)
+    # without a panel the followup is the usual one ("go on", the wave, the same ring)
     isl.clear_widget()
     isl.model.questionShown.emit("")                                       # a new turn: the panel empties
     _spin(600)
@@ -1081,7 +1081,7 @@ def test_a_long_answer_is_never_cut_and_the_followup_is_quiet_over_a_card():
     b.state.emit("followup", "3")
     _spin(700)
     p = _v(isl.call("probe"))
-    assert "go on" in p["labels"] and p["drainA"] == 0, p
+    assert "go on" in p["labels"] and p["washA"] == 0 and p["drainA"] > 0.5, p   # the ring, no sweep
     b.state.emit("idle", "")
     _spin(600)
 

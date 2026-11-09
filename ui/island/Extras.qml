@@ -20,15 +20,17 @@ Item {
     // speaking, so the answer is never shown twice and never moves. It may use whatever the
     // window has left under the head (rowMax lines), then it scrolls by a line.
     property var rowLines: []
-    property int rowN: 0
+    property int rowN: 0                        // lines of the whole answer
+    property int rowTop: 0                      // the first line the voice has the view on
     readonly property int rowMax: Math.max(2, Math.min(14, Math.floor((maxHeight - ((effect.ev ? effect.height : 0)
         + approvals.height + (widget.spec ? widget.height : 0) + qrow.height) - 12) / arow.lineH)))
-    readonly property bool showAnswer: rowN > 0
+    readonly property bool showAnswer: rowN > 0 || answer !== ""
     signal turnCleared()
     readonly property real contentHeight: (effect.ev ? effect.height : 0) + approvals.height + (widget.spec ? widget.height : 0)
         + qrow.height + arow.height
     readonly property real minWidth: Math.max(effect.ev ? effect.minWidth : 0, approvals.count ? 440 : 0, widget.spec ? widget.minWidth : 0)
-    function clearTurn() { linger.stop(); question = ""; answer = ""; turnCleared() }
+    // the whole panel goes at once: card, question and answer together
+    function clearTurn() { linger.stop(); if (widget.spec) widget.clear(); question = ""; answer = ""; turnCleared() }
     // At rest: a card keeps the turn up until it goes (then all of it collapses at
     // once); without a card the turn lingers a few seconds.
     Timer { id: linger; interval: Math.max(4000, arow.readMs); onTriggered: ex.clearTurn() }
@@ -90,26 +92,56 @@ Item {
                 if (name === "dismiss" || name === "cancel") clear()
             }
             // a long answer still being read stays a little longer than its (private) card
-            onExpired: { clear(); if (ex.resting) { if (arow.readMs > 0) linger.restart(); else ex.clearTurn() } }
+            // (the card stays with it, so the panel collapses once, not card first and the rest later)
+            onExpired: { if (ex.resting && arow.readMs > 0 && !linger.running) { linger.restart(); return } clear(); if (ex.resting) ex.clearTurn() }
         }
         Item {
             id: arow
             objectName: "answerRow"
             width: ex.width
             readonly property real lineH: 18
-            height: ex.rowN > 0 ? ex.rowN * lineH + 12 : 0
+            readonly property int viewN: Math.min(ex.rowN, ex.rowMax)
+            readonly property bool overflows: ex.rowN > viewN
+            height: ex.rowN > 0 ? viewN * lineH + 12 : 0
             visible: ex.rowN > 0
             // a long answer stays up long enough to read the lines it ended on
-            readonly property real readMs: ex.rowN > 3 ? 2500 + ex.rowN * 900 : 0
-            Rectangle { x: 16; y: 10; width: 2; height: Math.max(0, ex.rowN * arow.lineH - 4); radius: 1; color: "#D97757" }
-            Repeater {
-                model: ex.rowN
-                Text {
-                    x: 26; y: 6 + index * arow.lineH; width: ex.width - 26 - 16; height: arow.lineH
-                    text: ex.rowLines[index] || ""
-                    textFormat: Text.StyledText; wrapMode: Text.NoWrap
-                    color: "#F2F2F2"; font.family: "Segoe UI Variable Text"; font.pointSize: 10
+            readonly property real readMs: ex.rowN > 3 ? 2500 + viewN * 900 : 0
+            Rectangle { x: 16; y: 10; width: 2; height: Math.max(0, arow.viewN * arow.lineH - 4); radius: 1; color: "#D97757" }
+            Flickable {
+                id: aview
+                objectName: "answerView"
+                x: 26; y: 6; width: ex.width - 26 - 16; height: arow.viewN * arow.lineH
+                contentWidth: width; contentHeight: ex.rowN * arow.lineH
+                clip: true
+                interactive: arow.overflows
+                boundsBehavior: Flickable.StopAtBounds
+                // follows the voice: the view moves a line at a time, gently
+                readonly property real follow: ex.rowTop * arow.lineH
+                onFollowChanged: if (!moving) { glide.to = follow; glide.restart() }
+                NumberAnimation { id: glide; target: aview; property: "contentY"; duration: 220; easing.type: Easing.OutCubic }
+                Column {
+                    Repeater {
+                        model: ex.rowN
+                        Text {
+                            objectName: "answerLine"
+                            width: aview.width; height: arow.lineH
+                            text: ex.rowLines[index] || ""
+                            textFormat: Text.StyledText; wrapMode: Text.NoWrap
+                            color: "#F2F2F2"; font.family: "Segoe UI Variable Text"; font.pointSize: 10
+                        }
+                    }
                 }
+            }
+            // the edges that have more: fade into the panel
+            Rectangle {
+                visible: arow.overflows && aview.contentY > 1
+                x: aview.x; y: aview.y; width: aview.width; height: 12
+                gradient: Gradient { GradientStop { position: 0; color: Qt.rgba(8 / 255, 8 / 255, 8 / 255, 0.97) } GradientStop { position: 1; color: "transparent" } }
+            }
+            Rectangle {
+                visible: arow.overflows && aview.contentY < aview.contentHeight - aview.height - 1
+                x: aview.x; y: aview.y + aview.height - 12; width: aview.width; height: 12
+                gradient: Gradient { GradientStop { position: 0; color: "transparent" } GradientStop { position: 1; color: Qt.rgba(8 / 255, 8 / 255, 8 / 255, 0.97) } }
             }
         }
     }

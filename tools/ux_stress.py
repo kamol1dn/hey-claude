@@ -498,6 +498,11 @@ class Harness:
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             traceback.print_exc()
+        # a field the scenario left open would keep the wake word off for the next one
+        isl = self.ctx["island"]
+        if isl is not None and getattr(isl, "session", None) is not None and isl.session.is_open:
+            self.gui(isl.session.cancel)
+            self.rec.mark("closed_field")
         # let the turn finish: the answer, the follow-up window, the panel's linger
         self._settle(float(sc.get("settle_s", 40)), quiet_s=float(sc.get("quiet_s", 6)))
         self.rec.mark("scenario_end", name=name)
@@ -646,10 +651,13 @@ class Harness:
         asst = self.ctx["asst"]
         end = time.time() + timeout
         start_n = len(self.rec.events)
+        was = asst.mode
         while time.time() < end and not self.stop_all.is_set():
             new = self.rec.events[start_n:]
-            p = self.rec.last_probe or {}
-            if what in ("speaking", "thinking", "listening", "followup") and (asst.mode == what or p.get("state") == what):
+            # a state counts once it is entered after this step began (still being in it
+            # from the turn before is not "the next one")
+            if what in ("speaking", "thinking", "listening", "followup") and (
+                    any(e["k"] == "state" and e.get("mode") == what for e in new) or (asst.mode == what and was != what)):
                 return True
             if what == "idle" and asst.mode in ("idle", "off") and not asst.conv_lock.locked():
                 return True
@@ -662,7 +670,7 @@ class Harness:
                 return True
             time.sleep(0.05)
         print(f"[ux] until {what}: timed out after {timeout:.0f}s")
-        self.rec.mark("timeout", what=what)
+        self.rec.mark("timeout", waited_for=what)
         return False
 
     def _type(self, text):
@@ -671,17 +679,27 @@ class Harness:
         from PySide6.QtCore import Qt
         from PySide6.QtTest import QTest
 
-        def go():
-            QTest.keyClicks(isl.view, text, Qt.NoModifier, 25)
-            return isl.call("probeUx")
-        self.gui(go, timeout=30)
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QGuiApplication, QKeyEvent
+
+        def key(ch):
+            # a real key press/release with its text, delivered to the island's window
+            # (QTest.keyClicks only takes widgets in PySide)
+            k = Qt.Key_Space if ch == " " else (Qt.Key(ord(ch.upper())) if ch.isalnum() else Qt.Key_unknown)
+            for typ in (QEvent.KeyPress, QEvent.KeyRelease):
+                QGuiApplication.sendEvent(isl.view, QKeyEvent(typ, k, Qt.NoModifier, ch))
+
+        for ch in text:
+            self.gui(lambda c=ch: key(c))
+            time.sleep(0.03)
         time.sleep(0.3)
         self.rec.mark("type_submit", text=text)
 
         def enter():
             sess = isl.session
             if sess is not None and sess.is_open and sess.state != "closed":
-                QTest.keyClick(isl.view, Qt.Key_Return)
+                for typ in (QEvent.KeyPress, QEvent.KeyRelease):
+                    QGuiApplication.sendEvent(isl.view, QKeyEvent(typ, Qt.Key_Return, Qt.NoModifier, chr(13)))
                 if sess.is_open:                          # the key didn't reach the field: same path as Enter
                     isl.model.inputEdited(text)
                     isl.model.inputEnter(text, False)
@@ -768,6 +786,25 @@ def write_summary(out: Path, results: list[dict], audit: Audit, args):
     (out / "summary.json").write_text(json.dumps(results, indent=1, default=str), encoding="utf-8")
 
 
+# =============================================================================== re-score a run
+def rescore(run_dir: Path, exclude: list[str] | None = None) -> list[dict]:
+    """Run the current detectors over a finished run's timelines (so runs made with an
+    older harness are scored the same way) and rewrite its summary.md/.json."""
+    results = []
+    for d in sorted(p for p in run_dir.iterdir() if (p / "timeline.jsonl").exists()):
+        if any(re.fullmatch(x, d.name) for x in exclude or []):
+            continue
+        ev = UX.load_timeline(d / "timeline.jsonl")
+        old = json.loads((d / "findings.json").read_text(encoding="utf-8")) if (d / "findings.json").exists() else {}
+        name = old.get("name", d.name)
+        res = UX.detect(ev, scenario=old.get("scenario", name.rsplit("-", 1)[0]))
+        res.update(name=name, scenario=old.get("scenario", name.rsplit("-", 1)[0]), t0=ev[0]["t"] if ev else 0,
+                   error=old.get("error"), expect=old.get("expect"), tools=old.get("tools"))
+        results.append(res)
+    write_summary(run_dir, results, Audit(lambda n: None), argparse.Namespace(offline="offline" in run_dir.name))
+    return results
+
+
 # =============================================================================== wake check
 def wakecheck(args):
     """Does the user's wake model fire on their clips, and on Kokoro saying "hey claude"?"""
@@ -824,11 +861,18 @@ def main(argv=None):
     w = sub.add_parser("wakecheck", help="does the wake model fire on your clips and on Kokoro?")
     w.add_argument("--noise", type=float, default=-58.0)
     sub.add_parser("list", help="list the scenarios")
+    rp = sub.add_parser("report", help="re-score a finished run with the current detectors")
+    rp.add_argument("run_dir")
+    rp.add_argument("--exclude", nargs="*", default=[], help="regexes of run names to leave out (harness artifacts)")
     args = ap.parse_args(argv)
 
     if args.cmd == "list":
         for s in load_scenarios():
             print(f"{s['name']:22s} {s.get('desc', '')}")
+        return 0
+    if args.cmd == "report":
+        res = rescore(Path(args.run_dir), args.exclude)
+        print(f"[ux] {len(res)} runs re-scored: {Path(args.run_dir) / 'summary.md'}")
         return 0
     if args.cmd == "wakecheck":
         wakecheck(args)

@@ -75,7 +75,14 @@ Spring.prototype.to = function (t, pre) {
         this.t = t; this.v = 0; return this;
     }
     if (pre === 'dir') pre = t > this.x ? 'inhale' : 'exhale';
-    var p = PRE[pre]; this.k = p.k; this.c = 2 * p.z * Math.sqrt(p.k); this.t = t; this.tw = null; this.born = NOW; return this;
+    var p = PRE[pre]; this.k = p.k; this.c = 2 * p.z * Math.sqrt(p.k); this.t = t; this.tw = null; this.born = NOW;
+    // glide never overshoots, even when retargeted mid-flight: speed carried toward the new
+    // target is capped at what a critically damped spring can absorb (|v| <= w * |x - t|)
+    if (pre === 'glide' && this.v * (t - this.x) > 0) {
+        var vmax = Math.sqrt(p.k) * Math.abs(t - this.x);
+        if (Math.abs(this.v) > vmax) this.v = this.v > 0 ? vmax : -vmax;
+    }
+    return this;
 };
 Spring.prototype.set = function (t) { this.x = this.t = t; this.v = 0; this.tw = null; wake(); return this; };
 Spring.prototype.step = function (h) { if (this.tw) return; var a = -this.k * (this.x - this.t) - this.c * this.v; this.v += a * h; this.x += this.v * h; };
@@ -391,8 +398,9 @@ function enter(st, o) {
     if (prev === 'holding' && st !== 'holding') { T(O, 'bracketOff', 6, 200, outQuad); T(O, 'bracketA', 0, 200, outQuad); TAPER.to(0.8, 0.07); T(O, 'muted', 0, 160, outQuad); }
     if (prev === 'input' && st !== 'input') T(O, 'field', 0, 120, inQuad);
     if (prev === 'speaking' && st !== 'speaking') {
-        // in a turn the row keeps exactly what was said (a stop mid-answer leaves no blank lines)
-        if (S.turn) { if (S.wordIdx < S.words.length - 1) { S.words = S.words.slice(0, S.wordIdx + 1); S.rowLines = S.words.length ? S.words[S.words.length - 1].line + 1 : 0; } }
+        // in a turn the row keeps the whole answer: what wasn't said yet (stopped, or the
+        // reveal a beat behind the voice) fades in now, nothing is ever cut
+        if (S.turn) { for (var wi = S.wordIdx + 1; wi < S.words.length; wi++) S.words[wi].t = NOW; S.wordIdx = S.words.length - 1; }
         else T(O, 'words', 0, 160, inQuad);
     }
     if (prev === 'followup' && st !== 'followup') { T(O, 'wash', 0, 200, outQuad); T(O, 'drain', 0, 200, outQuad); }
@@ -466,7 +474,7 @@ var ENTER = {
         ER.to(3.2, 'snap'); S.wokeGlow = true; GA.to(0.22, 0.05); GR.to(30, 0.06);
         if (!fl && HEAD.x <= 30) { HEAD.to(26, 'snap'); H.to(26 + S.extraH, 'snap'); }
         at(80, function () {
-            ER.to(6.5, 'snap'); W.to(S.turn ? turnW() : S.notMe ? 300 + NOTME_W : 300, S.turn ? 'glide' : 'snap'); HEAD.to(40, 'snap'); H.to(40 + S.extraH, 'snap'); EX.to(20, 'soft');
+            ER.to(6.5, 'snap'); W.to(S.turn ? turnW() : S.notMe ? 300 + NOTME_W : 300, 'glide');   // the catch bounces in the ember, not the width HEAD.to(40, 'snap'); H.to(40 + S.extraH, 'snap'); EX.to(20, 'soft');
             GA.to(0.42, 0.06); GR.to(90, 0.06);
         });
         if (!fl) at(120, function () { S.rings.push({ kind: 'ring', x: 20, y: 20, t0: NOW, d: 320, r0: 6, r1: 40, w0: 2, w1: 0.5, a0: 0.5, c: C.live }); });
@@ -509,9 +517,10 @@ var ENTER = {
     },
     followup: function (prev, o) {
         S.fuT0 = NOW; S.fuEnded = false; S.fuDur = Math.max(1000, (o.seconds || 5) * 1000); S.fuHeard = false;
-        // A card or the turn's panel is open under the head: a quiet cue. No thread
-        // over the card, no wash, no "go on": only a hairline along the panel's bottom
-        // edge that drains as the followup window runs out ("listening" when it hears you).
+        // The window's countdown is a ring around the ember that drains (Island.qml
+        // followupDrain): nothing sweeps across the pill. A card or the turn's panel is
+        // open under the head: a quiet cue, no thread, no "go on" ("listening" when it
+        // hears you); without one, "go on" and the listening wave.
         S.fuQuiet = S.extraH > 0;
         if (S.fuQuiet) {
             setGen('rest'); TA.to(0, 0.1); LB.set(null); O.wash = 0; T(O, 'drain', 1, 220, outCubic);
@@ -519,8 +528,7 @@ var ENTER = {
             return;
         }
         TX0.to(40); TX1.to(208); setGen('wave'); TC.to(C.user, 0.07); TA.to(1, 0.06); TW.to(1.75); TAPER.to(0.8); AMPK.to(0.7, 0.15);
-        if (O.wash < 0.01) { O.washReveal = 0; O.wash = 1; } else T(O, 'wash', 1, 120, outCubic);
-        T(O, 'washReveal', 1, 260, outCubic);
+        O.wash = 0; T(O, 'drain', 1, 220, outCubic);
         RIMC.to(C.live, 0.1); RIMA.to(0.22, 0.1); T(O, 'satVis', 0, 150, outQuad);
         LB.set({ text: 'go on', x: 216, color: C.fg });
     },
@@ -1162,23 +1170,24 @@ function setTurn(on) {
 }
 // The answer row under the question: words revealed in step with the voice (the ones not said
 // yet are laid out but clear, so the row's height only changes when more text arrives), the
-// newest word warm, as many lines as the window has room for (setRowMax); past that it
-// scrolls by a line, never per word.
-var ROW_OUT = { lines: [], n: 0, key: '' };
+// newest word warm. All its lines are handed over; the view shows as many as the window has
+// room for (setRowMax) and follows the newest line (top), so it scrolls by a line, never per
+// word, and the whole answer stays there to scroll back through.
+var ROW_OUT = { lines: [], n: 0, top: 0, key: '' };
 function setRowMax(n) { n = Math.max(2, Math.round(n || 3)); if (n !== S.rowMax) { S.rowMax = n; wake(); } }
 function renderRow() {
     var R0 = ROW_OUT, M = S.rowMax;
-    if (!S.turn || !S.words.length) { if (R0.n) { R0.n = 0; R0.lines = []; R0.key = ''; } out.row = R0; return; }
+    if (!S.turn || !S.words.length) { if (R0.n) { R0.n = 0; R0.top = 0; R0.lines = []; R0.key = ''; } out.row = R0; return; }
     var last = 0;
     for (var i = 0; i <= S.wordIdx && i < S.words.length; i++) last = S.words[i].line;
     S.rowTop = Math.max(S.rowTop, last - (M - 1));
-    var top = S.rowTop, total = S.words[S.words.length - 1].line + 1;
-    R0.n = Math.max(0, Math.min(M, total - top));
+    var total = S.words[S.words.length - 1].line + 1;
+    S.rowTop = Math.min(S.rowTop, Math.max(0, total - M));
+    R0.n = total; R0.top = S.rowTop;
     var L = [], cal = MOTION !== 'full';
-    for (var q = 0; q < R0.n; q++) L.push('');
+    for (var q = 0; q < total; q++) L.push('');
     for (var z = 0; z < S.words.length; z++) {
-        var wd = S.words[z], k = wd.line - top;
-        if (k < 0 || k >= R0.n) continue;
+        var wd = S.words[z], k = wd.line;
         var a = 0, col = C.fg;
         if (wd.t !== null && z <= S.wordIdx) {
             var age = NOW - wd.t;
@@ -1187,7 +1196,7 @@ function renderRow() {
         }
         L[k] += (L[k] ? ' ' : '') + '<font color="' + hexa(col, a) + '">' + escHtml(wd.w) + '</font>';
     }
-    R0.lines = L; R0.key = R0.n + '|' + L.join('\n');
+    R0.lines = L; R0.key = R0.n + '|' + R0.top + '|' + L.join('\n');
     out.row = R0;
 }
 function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }

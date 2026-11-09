@@ -98,25 +98,25 @@ training (the user runs Colab) and the ≥95% / <1 per 3 h measurement with
 **Done when:** ≥95% hit rate on the user's samples and fewer than 1 false
 wake per 3 hours of background audio.
 
-## M2a: Ship one default "hey claude" model for everyone ✅ built, release staged (2026-11-09)
+## M2a: Ship one default "hey claude" model for everyone ✅ shipped as wake-model-v2 (2026-11-09)
 
-**Status:** trained locally on synthetic voices only (`python -m
+**Status:** v1 was trained locally on synthetic voices only (`python -m
 heyclaude.wake_train default`, ~27 min on this PC): 96.5% hits on 480 clips
 of 8 held-out voices, 0.28 false wakes/h on openWakeWord's 10.7 h validation
 set (threshold chosen on that set). First-run download with SHA-256 and the
-licence check (CC BY-NC-SA 4.0, models/LICENSE) are in. The release asset is
-staged in `dist/wake-model-v1/` and **not published**: the maintainer runs
-the `gh release create` command from the PR. **Not measured yet:** real
-voices (no donated clips) and the user's lecture audio (`tools/wake_eval.py`).
-See README "Wake word".
+licence check (CC BY-NC-SA 4.0, models/LICENSE) are in. v1 was never
+published: on real recordings it caught only half of them, so v2 replaced it
+before release. See README "Wake word".
 
 **v2 (2026-11-09):** Piper's multi-speaker LibriTTS-R voice (904 audiobook
 readers, `piper-tts` 1.8) is now a second voice source next to Kokoro (half
 of every synthetic set; 45 speakers held out). On the same held-out data:
 Kokoro voices 96.5% → 95.2%, Piper speakers 77.5% → 97.5%, 24 real
 recordings of one person 50% → 87.5%, false wakes unchanged at 0.28/h.
-Staged in `dist/wake-model-v2/`, **not published**. Still to do: real clips
-from more people, lecture audio.
+**Published** as the GitHub release
+[wake-model-v2](https://github.com/kamol1dn/hey-claude/releases/tag/wake-model-v2);
+the app's first-run download fetches it and checks its SHA-256. Still to do:
+real clips from more people, lecture audio.
 
 **Goal:** new users never train anything. The wake word detects the phrase,
 not the person, so one model trained once works for anyone who says "hey

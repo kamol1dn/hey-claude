@@ -911,8 +911,10 @@ Where the rest of the time goes, and the knobs:
   and publishes a GitHub release. It attaches a source zip and
   `SHA256SUMS.txt`, with notes generated from the merged PRs. A tag with a
   hyphen (`v0.5.0-rc1`) makes a pre-release.
-- **Later assets:** the default wake-word model (M2a) and the Windows
-  installer (M8) are attached to the same releases when those milestones land.
+- **Wake-word model:** the shared "hey claude" model has its own release,
+  [wake-model-v2](https://github.com/kamol1dn/hey-claude/releases/tag/wake-model-v2),
+  which the app downloads on first start (SHA-256 checked). The Windows
+  installer (M8) will be attached to the version releases when it lands.
 - Dependabot keeps the workflow actions up to date. Python packages are
   pinned by hand because of the GPU stack.
 

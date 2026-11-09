@@ -807,7 +807,9 @@ function logic(dt) {
                 for (var pi = 0; pi < S.plans.length; pi++) {
                     var pl = S.plans[pi];
                     if (NOW < pl.t0) continue;
-                    var frac = clamp((NOW - pl.t0) / pl.d * 1.1), want = pl.a + Math.ceil((pl.b - pl.a) * frac) - 1;
+                    // a word shows just before it is heard: a lead of 10% of the sentence, at most 0.35 s
+                    // (a flat 10% put the last words of a long sentence a second ahead of the voice)
+                    var frac = clamp((NOW - pl.t0 + Math.min(350, 0.1 * pl.d)) / pl.d), want = pl.a + Math.ceil((pl.b - pl.a) * frac) - 1;
                     while (S.wordIdx < Math.min(want, S.words.length - 1)) { S.wordIdx++; S.words[S.wordIdx].t = NOW; }
                 }
             } else if (S.wordIdx < S.words.length - 1) {

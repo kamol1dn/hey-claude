@@ -13,7 +13,7 @@ Item {
         anchors.fill: parent
         visible: si.url !== "" && status === Image.Ready
         source: si.url
-        sourceSize: Qt.size(si.size * 2, si.size * 2)
+        sourceSize: Qt.size(si.size * 4, si.size * 4)       // rasterised big enough for island.scale up to 2
         smooth: true; asynchronous: true; fillMode: Image.PreserveAspectFit
     }
     Glyph {

@@ -66,7 +66,7 @@ class Lab(QObject):
         from heyclaude.island_qml import QmlIsland
         self.args = args
         self.b = Bridge()
-        cfg = {"screen": "primary", "top_margin": "auto" if args.top else 8, "motion": args.motion,
+        cfg = {"screen": "primary", "top_margin": "auto" if args.top else 8, "motion": args.motion, "scale": args.scale,
                "window_y": 0 if args.top else args.window_y, "hide_when_idle": args.hide_idle}
         self.isl = QmlIsland(self.b, cfg, wake_label="hey claude", software=args.software)
         self.isl.attach_input(lambda: None, lambda: None, lambda t: self.b.state.emit("thinking", t))
@@ -389,6 +389,7 @@ def main(argv=None):
     ap.add_argument("--window-y", type=int, default=300)
     ap.add_argument("--motion", default="full")
     ap.add_argument("--hide-idle", action="store_true")
+    ap.add_argument("--scale", default="1.0", help="island.scale (0.8-2.0 or auto)")
     ap.add_argument("--shots", metavar="DIR")
     ap.add_argument("--measure", action="store_true")
     ap.add_argument("--quick", action="store_true", help="shorter measurement windows")

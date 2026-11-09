@@ -89,6 +89,40 @@ def route(mode: str, text: str, ctx: dict) -> list[tuple[str, list]]:
     return [("go", ["thinking", {"text": text or mode}])]
 
 
+SCALE_MIN, SCALE_MAX = 0.8, 2.0
+
+
+def resolve_scale(setting, screen=None) -> float:
+    """island.scale: a number (0.8-2.0, rounded to 0.05) or "auto". Auto is 1.0,
+    or 1.25 on a large screen (27" and up, seen from further away) when Windows
+    reports its physical size."""
+    s = str(setting if setting is not None else "auto").strip().lower().rstrip("%x")
+    if s not in ("", "auto"):
+        try:
+            v = float(s)
+            if v > 4:                      # "125" meaning 125 %
+                v /= 100.0
+            return round(max(SCALE_MIN, min(SCALE_MAX, v)) * 20) / 20
+        except ValueError:
+            pass
+    try:
+        if screen is not None:
+            mm = screen.physicalSize()
+            diag_in = (mm.width() ** 2 + mm.height() ** 2) ** 0.5 / 25.4
+            if diag_in >= 26.5 and screen.devicePixelRatio() <= 1.0:
+                return 1.25
+    except Exception:
+        pass
+    return 1.0
+
+
+def text_render_type(scale: float):
+    """Native (hinted) text is the sharpest at exactly 1.0; scaled, it would be a
+    blown-up bitmap, so any other scale uses Qt's distance-field text, which stays
+    sharp at any size (measured on a 96 DPI screen)."""
+    return QQuickWindow.NativeTextRendering if abs(scale - 1.0) < 1e-6 else QQuickWindow.QtTextRendering
+
+
 def stt_short(label: str) -> str:
     """"gpu (turbo)" -> "gpu"; "cpu (gpu busy 83%)" -> "cpu · gpu busy 83%"."""
     dev, _, inside = (label or "").partition(" (")
@@ -168,6 +202,7 @@ class IslandModel(QObject):
         self._top_margin = -1
         self._software = False
         self._usage_on = True
+        self._scale = 1.0
 
     # properties -------------------------------------------------------------
     def _get_band(self):
@@ -189,6 +224,11 @@ class IslandModel(QObject):
         return "real"
 
     clockMode = Property(str, _get_clock, constant=True)
+
+    def _get_scale(self):
+        return self._scale
+
+    uiScale = Property(float, _get_scale, notify=configChanged)
 
     def _get_usage(self):
         return self._usage
@@ -354,6 +394,10 @@ class QmlIsland(QObject):
             QQuickWindow.setGraphicsApi(QSGRendererInterface.Software)
         self.model._software = bool(software)
         QQuickWindow.setDefaultAlphaBuffer(True)
+        self.scale = resolve_scale(cfg.get("scale", "auto"), self._screen())
+        self.model._scale = self.scale
+        QQuickWindow.setTextRenderType(text_render_type(self.scale))
+        self._reloading = False
 
         self.view = QQuickView()
         self.view.setColor(Qt.transparent)
@@ -370,7 +414,7 @@ class QmlIsland(QObject):
             errs = "; ".join(e.toString() for e in self.view.errors())
             raise RuntimeError(f"island QML failed to load: {errs}")
         self.root = self.view.rootObject()
-        self.view.resize(WIN_W, WIN_H)
+        self.view.resize(round(WIN_W * self.scale), round(WIN_H * self.scale))
         self.apply_config()
         self.view.sceneGraphError.connect(lambda err, msg: print(f"[island] scene graph error: {msg}"))
 
@@ -418,6 +462,7 @@ class QmlIsland(QObject):
     def apply_config(self):
         """Position, top margin, motion, hide-when-idle: re-read from cfg (Settings changes apply live)."""
         s = self._screen()
+        self.set_scale(resolve_scale(self.cfg.get("scale", "auto"), s))
         g, ag = s.geometry(), s.availableGeometry()
         band = max(0, ag.y() - g.y())
         m = self.cfg.get("top_margin", "auto")
@@ -426,7 +471,8 @@ class QmlIsland(QObject):
         self.model.configChanged.emit()
         self.view.setScreen(s)
         # `window_y` moves the whole window down (the motion lab, so it never sits on a running island)
-        self.view.setPosition(g.x() + (g.width() - WIN_W) // 2, g.y() + int(self.cfg.get("window_y", 0) or 0))
+        w = round(WIN_W * self.scale)
+        self.view.setPosition(g.x() + (g.width() - w) // 2, g.y() + int(self.cfg.get("window_y", 0) or 0))
         self.motion = resolve_motion(self.cfg.get("motion", "auto"))
         self._send("setMotion", [self.motion])
         self._send("setHideIdle", [bool(self.cfg.get("hide_when_idle", False))])
@@ -435,6 +481,49 @@ class QmlIsland(QObject):
         self._send("setUsageRow", [self.model._usage_on and bool(self.model._usage)])
 
     _place = apply_config           # island.Island's name for it (__main__ calls it on Settings changes)
+
+    def set_scale(self, scale: float):
+        """Resize everything (live). Crossing 1.0 reloads the QML so text switches
+        between native and distance-field rendering (see text_render_type)."""
+        scale = round(max(SCALE_MIN, min(SCALE_MAX, float(scale))) * 20) / 20
+        if abs(scale - self.scale) < 1e-6 and abs(self.model._scale - scale) < 1e-6:
+            return
+        reload = text_render_type(scale) != text_render_type(self.scale)
+        self.scale = scale
+        self.model._scale = scale
+        self.view.resize(round(WIN_W * scale), round(WIN_H * scale))
+        g = self._screen().geometry()
+        self.view.setPosition(g.x() + (g.width() - round(WIN_W * scale)) // 2, self.view.y())
+        if reload:
+            self._reload()
+        else:
+            self.model.configChanged.emit()
+
+    def preview_scale(self, scale):
+        """Settings' slider: show a scale now, without saving it (None = back to the config)."""
+        self.set_scale(resolve_scale(self.cfg.get("scale", "auto") if scale is None else scale, self._screen()))
+
+    def _reload(self):
+        """Load Island.qml again (text render type changed) and replay what it shows."""
+        QQuickWindow.setTextRenderType(text_render_type(self.scale))
+        self._ready = False
+        self._reloading = True
+        self.view.setSource(QUrl())
+        self.view.engine().clearComponentCache()
+        self.view.setSource(QUrl.fromLocalFile(str(QML_DIR / "Island.qml")))
+        self.root = self.view.rootObject()
+
+    def _replay(self):
+        self._reloading = False
+        self.engine_state = "ready"
+        self._send("setMotion", [self.motion])
+        self._send("setHideIdle", [bool(self.cfg.get("hide_when_idle", False))])
+        if self.stt_label:
+            self._send("setBadge", [stt_short(self.stt_label), 0])
+        self._send("setWakeLabel", [self._wake_label])
+        self._send("setTasks", [task_rows(self.task_rows)])
+        self._send("setUsageRow", [self.model._usage_on and bool(self.model._usage)])
+        self.set_state(self.mode, self.text)
 
     def show(self):
         from .winsys import set_no_activate
@@ -468,6 +557,8 @@ class QmlIsland(QObject):
         q, self._queue = self._queue, []
         for fn, args in q:
             self.model.cmd.emit(fn, args)
+        if self._reloading:
+            self._replay()
 
     def _check_env(self):
         """Every 5 s: suspend in full-screen apps / when the screen is locked; 30 fps on battery."""
@@ -807,6 +898,7 @@ class QmlIsland(QObject):
     def _approval_decided(self, ap_id: str, action: str):
         if self.approvals.pop(ap_id, None) is None:
             return
+        self.model.approvalCleared.emit(ap_id)          # however it was answered, the card goes
         print(f"[approval] {ap_id}: {action}")
         self.approval_decided.emit(ap_id, action)
 

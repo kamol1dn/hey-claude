@@ -15,8 +15,8 @@ from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
                                QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-                               QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem,
-                               QTabWidget, QVBoxLayout, QWidget)
+                               QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox, QTableWidget,
+                               QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from . import config, holdkey, hotkey
 
@@ -74,6 +74,14 @@ PERMISSION_MODES = ["acceptEdits", "auto", "dontAsk", "plan", "bypassPermissions
 
 # Tooltips, taken from the comments in config.example.yaml.
 TIPS = {
+    "island.scale": "How big the island is: the pill, the panel, cards, text and icons together. Everything is "
+                    "vector, so it stays sharp at any size. Auto = 100 %, or 125 % on a screen of 27\" or more.",
+    "island.motion": "Auto follows Windows' Animation effects. Calm keeps what carries information and drops "
+                     "decoration; off is instant.",
+    "island.hide_when_idle": "Nothing on screen while it waits for the wake word. Touch the top-centre edge "
+                             "with the pointer to peek.",
+    "weather.location": "Your home place for \"what's the weather?\" (a city, optionally \", country\"). "
+                        "Open-Meteo, no key.",
     "app.listening": "Wake word on at start. Off = the mic stays closed until you turn listening on.",
     "app.hotkey": "Global push-to-talk, e.g. ctrl+alt+space, ctrl+shift+h, win+alt+j, f9. Empty = no hotkey.",
     "app.start_with_windows": "Adds a Startup-folder shortcut (pythonw -m heyclaude, no console window).",
@@ -256,6 +264,7 @@ class _HotkeyRecorder(QObject):
 
 class SettingsWindow(QWidget):
     saved = Signal(dict, list)       # (new full config, changed dotted keys)
+    island_preview = Signal(object)  # a scale to show on the island now (float), or None = back to the saved one
     restart_requested = Signal()
 
     def __init__(self, cfg: dict, config_path=None, parent=None, wake_hooks=None):
@@ -426,6 +435,26 @@ class SettingsWindow(QWidget):
         self.ed_hold = QLineEdit()
         self.ed_hold.setPlaceholderText("e.g. ctrl, right ctrl, caps lock (empty = off)")
         self._row(f, "listen.hold_key", "Hold to keep listening", self.ed_hold)
+        v.addWidget(g)
+        g = QGroupBox("Island")
+        f = self._form(g)
+        self.sl_scale = QSlider(Qt.Horizontal)
+        self.sl_scale.setRange(16, 40)                 # x5 %: 80 % .. 200 %
+        self.sl_scale.setPageStep(1)
+        self.sl_scale.setFixedWidth(220)
+        self.lb_scale = QLabel("100 %")
+        self.lb_scale.setMinimumWidth(44)
+        self.cb_scale_auto = QCheckBox("Auto")
+        self.sl_scale.valueChanged.connect(self._scale_changed)
+        self.cb_scale_auto.toggled.connect(self._scale_changed)
+        self._row(f, "island.scale", "Size", self.sl_scale, self.lb_scale, self.cb_scale_auto)
+        self.cmb_motion = self._combo(["auto", "full", "calm", "off"])
+        self._row(f, "island.motion", "Motion", self.cmb_motion)
+        self.cb_hide_idle = QCheckBox("Hide when idle")
+        self._row(f, "island.hide_when_idle", "At rest", self.cb_hide_idle)
+        self.ed_weather = QLineEdit()
+        self.ed_weather.setPlaceholderText("e.g. Tashkent (empty = say a place when you ask)")
+        self._row(f, "weather.location", "Weather place", self.ed_weather)
         v.addWidget(g)
         v.addWidget(self._help("Settings marked <span style='color:%s'>restart</span> take effect the next time "
                                "hey-claude starts; everything else applies as soon as you save. "
@@ -625,6 +654,20 @@ class SettingsWindow(QWidget):
         self.cb_listening.setChecked(bool(_get(cfg, "app.listening", True)))
         self.ed_hotkey.setText(str(_get(cfg, "app.hotkey") or ""))
         self.cb_autostart.setChecked(bool(_get(cfg, "app.start_with_windows", False)))
+        sc = str(_get(cfg, "island.scale", "auto")).strip().lower()
+        self._filling_scale = True
+        self.cb_scale_auto.setChecked(sc in ("", "auto"))
+        try:
+            v = float(sc.rstrip("%")) if sc not in ("", "auto") else 1.0
+            v = v / 100 if v > 4 else v
+        except ValueError:
+            v = 1.0
+        self.sl_scale.setValue(round(max(0.8, min(2.0, v)) * 20))
+        self._filling_scale = False
+        self._scale_changed()
+        self._set_combo(self.cmb_motion, str(_get(cfg, "island.motion", "auto")))
+        self.cb_hide_idle.setChecked(bool(_get(cfg, "island.hide_when_idle", False)))
+        self.ed_weather.setText(str(_get(cfg, "weather.location", "") or ""))
 
         self._set_combo(self.cmb_wake, _get(cfg, "wake.model", "hey_jarvis"))
         self.sp_threshold.setValue(float(_get(cfg, "wake.threshold", 0.5)))
@@ -696,6 +739,10 @@ class SettingsWindow(QWidget):
                 errors.append(f"Hotkey: {e}")
         _set(new, "app.hotkey", hk)
         _set(new, "app.start_with_windows", self.cb_autostart.isChecked())
+        _set(new, "island.scale", "auto" if self.cb_scale_auto.isChecked() else self.sl_scale.value() * 5 / 100)
+        _set(new, "island.motion", self.cmb_motion.currentText())
+        _set(new, "island.hide_when_idle", self.cb_hide_idle.isChecked())
+        _set(new, "weather.location", self.ed_weather.text().strip())
         hold = " ".join(self.ed_hold.text().lower().split())
         if hold:
             try:
@@ -842,6 +889,15 @@ class SettingsWindow(QWidget):
         self.btn_restart.show()
 
     # -- slots ------------------------------------------------------------------------
+    _filling_scale = False
+
+    def _scale_changed(self, *_):
+        """The island size slider: shown on the running island as you drag (saved on Save)."""
+        auto = self.cb_scale_auto.isChecked()
+        self.sl_scale.setEnabled(not auto)
+        self.lb_scale.setText("auto" if auto else f"{self.sl_scale.value() * 5} %")
+        if not self._filling_scale:
+            self.island_preview.emit("auto" if auto else self.sl_scale.value() * 5 / 100)
     def _hotkey_changed(self, *_):
         if self._recorder.active:
             return
@@ -1031,4 +1087,5 @@ class SettingsWindow(QWidget):
                 return
             if ans == QMessageBox.Discard:
                 self._fill(self._orig)
+        self.island_preview.emit(None)               # drop an unsaved size preview
         e.accept()

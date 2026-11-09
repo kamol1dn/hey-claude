@@ -902,7 +902,9 @@ function render() {
     out.caretA = S.state === 'input' ? (MOTION === 'full' ? 0.675 + 0.325 * Math.cos(2 * Math.PI * since) : 1) : 0;
     out.ghost = O.ghost; out.ghostX = O.ghostX; out.ghostText = S.ghost;
     // mic + stop buttons, not-me chip
-    S.ctlCy = Math.min(h, 60) / 2;
+    // the head as drawn: 40, or 60 while a two-line answer is up; cards sit below it
+    out.headFull = Math.min(h, HEAD.x + (S.state === 'speaking' && S.lines > 1 ? 20 : 0));
+    S.ctlCy = Math.min(out.headFull, 60) / 2;
     out.ctl = O.ctl; out.ctlCy = S.ctlCy; out.ctlScale = MOTION === 'full' ? 0.85 + 0.15 * O.ctl : 1;
     out.hm = HM.x; out.hs = HS.x; out.pressM = O.pressM; out.pressS = O.pressS;
     out.notme = O.notme; out.hn = HN.x;

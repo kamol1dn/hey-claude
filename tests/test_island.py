@@ -558,6 +558,8 @@ def test_approval_cards_answer_only_by_click():
     isl.model.approvalDecided("ap1", "allow")
     isl.model.approvalDecided("ap1", "allow")                       # a second click does nothing
     assert got == [("ap1", "allow")]
+    _spin(300)
+    assert _v(isl.call("extrasInfo"))["approvals"] == 0               # and the card is gone
     b.approval.emit({"id": "ap2", "title": "x"})
     b.approval_withdrawn.emit("ap2")
     _spin(400)
@@ -661,6 +663,65 @@ def test_rest_invariant_in_ready_and_off():
     rc = _v(isl.call("restCheck"))
     assert not rc["frameAnimation"] and not rc["timer"], rc
     isl._send("setMotion", ["full"])
+
+
+def test_scale_setting_resolves_and_picks_crisp_text():
+    from heyclaude.island_qml import resolve_scale, text_render_type
+    from PySide6.QtQuick import QQuickWindow
+    assert resolve_scale("auto") == 1.0 and resolve_scale(None) == 1.0
+    assert resolve_scale(1.5) == 1.5 and resolve_scale("125%") == 1.25 and resolve_scale("1.33") == 1.35
+    assert resolve_scale(150) == 1.5 and resolve_scale(9.0) == 0.8              # over 4 = a percentage
+    assert resolve_scale(0.1) == 0.8 and resolve_scale(3.0) == 2.0               # clamped to 0.8-2.0
+    assert text_render_type(1.0) == QQuickWindow.NativeTextRendering             # hinted: sharpest at 1:1
+    assert text_render_type(1.5) == QQuickWindow.QtTextRendering                 # distance field: sharp scaled
+
+
+def test_scale_is_proportional_unclipped_and_keeps_the_idle_budget():
+    isl = _island()
+    b = isl.bridge_
+    b.listening.emit(True, 0.0)
+    base = None
+    for sc in (1.0, 1.5, 2.0):
+        isl.preview_scale(sc)
+        _spin(700)
+        assert isl.view.width() == round(600 * sc) and isl.view.height() == round(400 * sc)
+        b.state.emit("speaking", "You have two meetings tomorrow.")
+        isl.show_widget({"widget": "calendar_list", "data": W.registry()["calendar_list"]["example"]})
+        _spin(3000)                                                                 # settled: the mask is exact
+        m, p = isl._mask, _v(isl.call("probe"))
+        assert m[0] >= 0 and m[1] >= 0 and m[0] + m[2] <= isl.view.width() + 1 and m[1] + m[3] <= isl.view.height() + 1, (sc, m)
+        if base is None:
+            base = (p["w"], p["h"])
+        else:   # the same island in island units, drawn sc times bigger
+            assert abs(p["w"] - base[0]) <= 1 and abs(p["h"] - base[1]) <= 1, (sc, p, base)
+        assert abs(m[2] - (p["w"] + 4) * sc) <= 4 and abs(m[3] - (p["h"] + 4) * sc) <= 4, (sc, m, p)
+        isl.clear_widget()
+        b.state.emit("idle", "")
+        _spin(1800)
+        rc = _v(isl.call("restCheck"))
+        assert not rc["frameAnimation"] and rc["interval"] >= 100, (sc, rc)          # the 8 fps rest tick, any scale
+    isl.preview_scale(1.0)
+    _spin(500)
+    assert isl.view.width() == 600 and _state(isl) == "ready"                      # back to 1:1 (a QML reload)
+
+
+def test_settings_slider_previews_the_size_live():
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from heyclaude import config
+    from heyclaude.settings_ui import SettingsWindow
+    w = SettingsWindow(config.defaults())
+    got = []
+    w.island_preview.connect(got.append)
+    w.cb_scale_auto.setChecked(False)
+    w.sl_scale.setValue(30)
+    new, errors, _ = w._collect()
+    assert not errors and new["island"]["scale"] == 1.5 and got[-1] == 1.5
+    w.cb_scale_auto.setChecked(True)
+    assert w._collect()[0]["island"]["scale"] == "auto" and got[-1] == "auto"
+    assert config.needs_restart(["island.scale"]) == []                           # applied live
+    w.hide()
+    w.deleteLater()
 
 
 def test_qsb_is_built_from_the_current_shader():

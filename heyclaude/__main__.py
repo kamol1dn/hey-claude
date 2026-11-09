@@ -161,6 +161,8 @@ def main():
         if w is None:
             w = SettingsWindow(cfg, config_path=args.config, wake_hooks=wake_hooks)
             w.saved.connect(on_saved)
+            if island is not None and hasattr(island, "preview_scale"):
+                w.island_preview.connect(island.preview_scale)          # M5: live size preview
             w.restart_requested.connect(restart)
             settings["win"] = w
         else:

@@ -15,7 +15,7 @@ Item {
         visible: lab.icon !== ""
         source: lab.icon
         x: -20; y: (t.height - 14) / 2 + 1; width: 14; height: 14
-        sourceSize: Qt.size(28, 28)
+        sourceSize: Qt.size(56, 56)
         smooth: true; asynchronous: true
     }
     Item {

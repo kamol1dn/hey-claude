@@ -814,4 +814,5 @@ All of M5a–M5e shipped in one change. Where the build differs from the plan ab
 - **Nib reveal.** A clip edge instead of the slanted `ShaderEffect`, so no `layer.enabled` appears anywhere.
 - **Hot word.** One `StyledText` per line (newest two lines) with the newest word's colour cooling. There are no TTS word timings, so words appear about 3.3 per second while the voice sounds, and all at once when the text is complete.
 - **Holding-muted (Ctrl+Shift).** The brackets turn dim, the ember turns ash with the slash, and the thread lies flat.
+- **Scale.** `island.scale` (0.8–2.0) scales one 600 × 400 stage; the window is 600·s × 400·s, the mask and the top-bar centring are converted, and shader anti-aliasing is in device pixels (0.6 / (dpr · s)). Native text at 1.0, distance-field text otherwise.
 - **Window.** 600 × 400, so cards fit under the head. The click-through mask is the pill + 2 px, grown to the union while it morphs. When hidden-when-idle, the mask is a 220 × 4 px strip at the top centre.

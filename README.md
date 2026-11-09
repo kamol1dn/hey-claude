@@ -624,6 +624,11 @@ line: white is you, terracotta is Claude).
 - **Motion** (`island.motion`): `auto` is calm when Windows' "Animation
   effects" is off. `calm` keeps information and drops decoration. `off` is
   instant.
+- **Size** (`island.scale`, Settings → General → Island): 80–200 %, previewed
+  live while you drag. Everything is vector or scene graph (text, shapes,
+  shaders, SVG icons rasterised at the final size), so it stays sharp at any
+  size. At exactly 100 % text is drawn natively (hinted, the sharpest on a
+  96 DPI screen); scaled, it switches to distance-field text.
 - `island.engine: classic` brings back the QPainter island. The QML one also
   falls back to it if Qt Quick can't start.
 

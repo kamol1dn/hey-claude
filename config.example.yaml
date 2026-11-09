@@ -309,6 +309,10 @@ island:
   top_margin: auto        # px, or auto = centred in a bar docked at the top of the screen (else 8)
   # M5: the island is Qt Quick ("Ember & Thread", docs/island-motion.md). classic = the old QPainter one.
   engine: qml
+  # Size of the whole island (pill, panel, cards, text, icons): 0.8-2.0, or auto
+  # (1.0; 1.25 on a screen of 27" or more). Vector all the way, so it stays sharp.
+  # Settings > General > Island has a slider that previews it live.
+  scale: auto
   # Motion: auto (calm when Windows "Animation effects" is off), full, calm (no decoration), off (instant).
   motion: auto
   renderer: auto          # auto (GPU: D3D11) or software (no GPU; live states at 30 fps)

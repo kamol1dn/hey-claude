@@ -20,6 +20,12 @@ Item {
 
     property var o: ({ w: 150, h: 28, head: 28, cy: 14, ex: 18, er: 4, rad: 14, hide: 1, lb: [], suf: [], rows: [], words: [], sats: [], sparks: [], dots: [0, 0, 0] })
     property real band: model ? model.band : 0
+    // island.scale: everything is laid out in island units on a 600 x 400 stage and
+    // the stage is scaled (vector / scene graph all the way: text, Shapes, shaders)
+    property real uiScale: model ? model.uiScale : 1
+    readonly property real stageW: 600
+    readonly property real stageH: 400
+    onUiScaleChanged: { maskSent = { x: -1, y: -1, w: -1, h: -1 }; kick() }
     property int topMargin: model ? model.topMargin : -1
     property bool software: model ? model.software : false
     property real fps: 0
@@ -31,8 +37,10 @@ Item {
 
     // Where the pill sits in the window: centred, and vertically centred in a
     // bar docked at the top of the screen (top_margin: auto), else 8 px.
-    readonly property real pillX: Math.round((width - o.w) / 2)
-    readonly property real pillY: topMargin >= 0 ? topMargin : (band >= 20 ? Math.max(0, Math.round((band - o.head) / 2)) : 8)
+    readonly property real pillX: Math.round((stageW - o.w) / 2)
+    // centred in a bar docked at the top (band is in screen px, the pill in island units)
+    readonly property real pillY: topMargin >= 0 ? topMargin / uiScale
+        : (band >= 20 ? Math.max(0, (band / uiScale - o.head) / 2) : 8)
 
     FontMetrics { id: fm9; font.family: root.family; font.pointSize: 9 }
     FontMetrics { id: fm10; font.family: root.family; font.pointSize: 10 }
@@ -116,10 +124,10 @@ Item {
         if (!model) return
         var m = E.maskRect(), x, y, w, h
         if (o.hide < 0.02 && !inputOpen) {               // hidden when idle: a thin strip to peek from
-            w = 220; h = 4; x = Math.round((width - w) / 2); y = 0
+            w = 220; h = 4; x = Math.round((stageW - w) / 2); y = 0
         } else {
             w = Math.ceil(m.w); h = Math.ceil(m.h) + 2
-            x = Math.floor((width - w) / 2); y = Math.max(0, Math.floor(pillY - 2))
+            x = Math.floor((stageW - w) / 2); y = Math.max(0, Math.floor(pillY - 2))
             var s = maskSent
             if (!m.settled && s.w >= 0) {                // grow-only while it moves
                 var x2 = Math.max(x + w, s.x + s.w), y2 = Math.max(y + h, s.y + s.h)
@@ -129,7 +137,8 @@ Item {
         var s2 = maskSent
         if (x !== s2.x || y !== s2.y || w !== s2.w || h !== s2.h) {
             maskSent = { x: x, y: y, w: w, h: h }
-            model.setMask(x, y, w, h)
+            var S = uiScale                          // island units -> window pixels
+            model.setMask(Math.floor(x * S), Math.floor(y * S), Math.ceil(w * S) + 1, Math.ceil(h * S) + 1)
         }
     }
 
@@ -167,6 +176,11 @@ Item {
         item.icon = l.icon || ""
     }
 
+    Item {
+    id: stage
+    width: root.stageW; height: root.stageH
+    scale: root.uiScale
+    transformOrigin: Item.TopLeft
     // ==================================================================== the pill
     Item {
         id: pill
@@ -180,7 +194,7 @@ Item {
             objectName: "body"
             x: -1; y: -1; width: parent.width + 2; height: parent.height + 2
             software: root.software
-            aa: 0.6 / Math.max(1, Screen.devicePixelRatio)
+            aa: 0.6 / (Math.max(1, Screen.devicePixelRatio) * root.uiScale)   // AA in device pixels
         }
 
         // ---- small vector bits on top of the body --------------------------------
@@ -410,7 +424,7 @@ Item {
         // ---- under the head: effects, approvals, response widgets ----------------
         Extras {
             id: extras
-            x: 0; y: o.head
+            x: 0; y: o.headFull || o.head
             width: o.w
             visible: !o.listGeom && contentHeight > 0
             resting: o.state === "ready" || o.state === "off" || o.state === "paused"
@@ -502,12 +516,13 @@ Item {
     // hidden when idle: the pointer touching the top-centre strip peeks it out
     MouseArea {
         visible: o.hide < 0.02 && !root.inputOpen
-        x: (root.width - 220) / 2; y: 0; width: 220; height: 4
+        x: (root.stageW - 220) / 2; y: 0; width: 220; height: 4
         hoverEnabled: true
         onEntered: { E.setPeek(true); root.kick(); peekTimer.stop() }
     }
     Timer { id: peekTimer; interval: 900; onTriggered: { E.setPeek(false); root.kick() } }
     Connections { target: mouse; function onExited() { peekTimer.restart() } function onEntered() { peekTimer.stop() } }
+    }   // stage
 
     function hitCtl(x, y) {
         if ((o.ctl || 0) > 0.5 && (o.state === "thinking" || o.state === "speaking")) {

@@ -116,6 +116,7 @@ TIPS = {
                      "go to ONE warm Claude Code process, started at launch and reused.",
     "agent.model": "Model for the tool agent; sonnet for harder lookups, at some latency cost.",
     "agent.filler": "Spoken right away while the agent looks things up.",
+    "agent.filler_min_words": "Only say the filler when the request has at least this many words (0 = always).",
     "conversation.followup_s": "After an answer, keep listening this long without the wake word, once its own "
                                "voice has finished. \"Thanks\" or silence ends it. 0 = off.",
     "conversation.save": "Save the conversation: turns go to state/conversations/<date>.jsonl and come back "
@@ -563,7 +564,8 @@ class SettingsWindow(QWidget):
         self.cmb_agent_model = self._combo(CLI_MODELS, editable=True)
         self._row(f, "agent.model", "Model", self.cmb_agent_model)
         self.ed_filler = QLineEdit()
-        self._row(f, "agent.filler", "Filler phrase", self.ed_filler)
+        self.sp_filler_words = QSpinBox(minimum=0, maximum=40, suffix=" words")
+        self._row(f, "agent.filler", "Filler phrase", self.ed_filler, QLabel("for requests of"), self.sp_filler_words)
         v.addWidget(g)
 
         g = QGroupBox("Conversation")
@@ -694,6 +696,7 @@ class SettingsWindow(QWidget):
         self.cb_agent.setChecked(bool(_get(cfg, "agent.enabled", True)))
         self._set_combo(self.cmb_agent_model, _get(cfg, "agent.model", "haiku"))
         self.ed_filler.setText(str(_get(cfg, "agent.filler") or ""))
+        self.sp_filler_words.setValue(int(_get(cfg, "agent.filler_min_words", 8) or 0))
         self.sp_followup.setValue(float(_get(cfg, "conversation.followup_s", 5) or 0))
         self.sp_idle_reset.setValue(int(_get(cfg, "conversation.idle_reset_s", 600) or 600))
         self.cb_save_conv.setChecked(bool(_get(cfg, "conversation.save", False)))
@@ -784,6 +787,7 @@ class SettingsWindow(QWidget):
         _set(new, "agent.enabled", self.cb_agent.isChecked())
         _set(new, "agent.model", self._combo_value(self.cmb_agent_model))
         _set(new, "agent.filler", self._text(self.ed_filler, "agent.filler"))
+        _set(new, "agent.filler_min_words", int(self.sp_filler_words.value()))
         _set(new, "conversation.followup_s", self.sp_followup.value())
         _set(new, "conversation.idle_reset_s", self.sp_idle_reset.value())
         _set(new, "conversation.save", self.cb_save_conv.isChecked())

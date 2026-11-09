@@ -479,6 +479,7 @@ class Player:
         self._idle_since = time.monotonic()
         self.on_start = None
         self.on_level = None                     # M5: loudness 0..1 of what's playing, ~30 Hz
+        self.on_chunk = None                     # M5: callback(tag, seconds) when a tagged chunk starts
         self._level_t = 0.0
         self._started_chunk = False
         self._closer = threading.Thread(target=self._close_when_idle, daemon=True, name="tts-player-idle")
@@ -505,11 +506,12 @@ class Player:
             self._stream, self._rate = s, rate
             self._idle_since = time.monotonic()
 
-    def play(self, samples: np.ndarray, rate: int):
+    def play(self, samples: np.ndarray, rate: int, tag=None):
+        """Queue audio. `tag` (the sentence) is handed to on_chunk when it starts playing."""
         self._open(rate)
         far = to_far(samples, rate) if self.far_tap else None
         with self._lock:
-            self._chunks.append([np.asarray(samples, np.float32), 0, far, 0, rate])
+            self._chunks.append([np.asarray(samples, np.float32), 0, far, 0, rate, tag])
 
     @property
     def active(self) -> bool:
@@ -528,12 +530,15 @@ class Player:
         out.fill(0)
         filled = 0
         fire = False
+        started = []                             # (tag, seconds) of chunks that begin in this block
         with self._lock:
             while filled < frames and self._chunks:
                 c = self._chunks[0]
                 samples, pos = c[0], c[1]
                 if pos == 0:
                     fire = True
+                    if len(c) > 5 and c[5] is not None:
+                        started.append((c[5], len(samples) / float(c[4])))
                 n = min(frames - filled, len(samples) - pos)
                 out[filled:filled + n, 0] = samples[pos:pos + n]
                 if c[2] is not None and self.far_tap:
@@ -550,6 +555,12 @@ class Player:
                 self._idle_since = time.monotonic()
         if fire and self.on_start:
             self.on_start()
+        if started and self.on_chunk is not None:
+            for tag, secs in started:
+                try:
+                    self.on_chunk(tag, secs)
+                except Exception:
+                    pass
         if self.on_level is not None and filled:
             now = time.monotonic()
             if now - self._level_t >= 0.03:
@@ -619,6 +630,9 @@ class Speaker:
         self.player = player if player is not None else Player(far_tap=far_tap,
                                                                idle_close_s=float(cfg.get("idle_close_s", 4.0)))
         self.player.on_start = self._started
+        self.on_sentence = None           # M5: callback(text, seconds) as each sentence starts playing
+        if hasattr(self.player, "on_chunk"):
+            self.player.on_chunk = self._sentence
         self.synth_ms: list[float] = []   # per sentence, for the log
         self._ready = threading.Event()
         threading.Thread(target=self._run, daemon=True, name="tts").start()
@@ -667,15 +681,30 @@ class Speaker:
                 self.synth_ms.append((time.perf_counter() - t) * 1000)
                 if gen != self._gen:
                     return
-                self.player.play(samples, rate)
+                if hasattr(self.player, "on_chunk"):
+                    self.player.play(samples, rate, tag=text)     # on_chunk reports when it starts
+                else:
+                    self.player.play(samples, rate)
                 # Wait for playback, unless another sentence arrives to synthesise meanwhile.
                 self.player.wait(lambda: gen == self._gen, more=lambda: not self.q.empty())
                 return
         sapi = self.voice._ensure_sapi()
-        sapi.on_start = self._started
+
+        def started(t=text):
+            self._started()
+            self._sentence(t, max(0.6, len(t) / 14.0))      # SAPI: no timing, ~14 chars a second
+        sapi.on_start = started
         self.player.wait(lambda: gen == self._gen)   # finish any PCM still playing first
         if gen == self._gen:
             sapi.speak(text)
+
+    def _sentence(self, text, secs):
+        cb = self.on_sentence
+        if cb is not None:
+            try:
+                cb(text, float(secs))
+            except Exception as e:
+                print(f"[tts] on_sentence: {e}")
 
     def _started(self):
         if self.first_audio_t is None:

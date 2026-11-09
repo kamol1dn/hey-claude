@@ -169,7 +169,7 @@ function makeModel() {
         silentFor: 0, penTheta: 0, phi: 0, sparks: [], nextSpark: 0, rings: [], partial: '', notMe: false,
         flash: '', flashUntil: 0, extraH: 0, extraW: 0, hideIdle: false, peek: false, lastU: 0, pend: null,
         inputLines: 1, ctlCy: 20, enteredRestAt: 0, slowSince: 0, readyFastSince: 0, toolLabel: '', drop: false,
-        lastFrameAt: 0, emaFt: 0, slowFrames: 0, calmByGpu: false };
+        lastFrameAt: 0, emaFt: 0, slowFrames: 0, calmByGpu: false, sync: false, plans: [], sentEnd: 0 };
     AU = { L: 0, A: 0, micRaw: 0, ttsRaw: 0, hist: [], aHist: [], micOpen: false, ttsT: -1e9, micT: -1e9 };
     TASKS = [];
 }
@@ -510,7 +510,7 @@ var ENTER = {
         thinkLabel();
     },
     speaking: function (prev, o) {
-        S.speakText = ''; S.wordIdx = -1; S.revealAcc = 0; S.speakTop = 0;
+        S.speakText = ''; S.wordIdx = -1; S.revealAcc = 0; S.speakTop = 0; S.plans = []; S.sentEnd = 0;
         layoutWords(o.text || '');
         S.speakT0 = NOW; O.words = 1; LB.set(null);
         TX0.to(34); TX1.to(74); setGen('speak'); TC.to(C.live, 0.07); TA.to(1, 0.06); TW.to(2.0);
@@ -760,10 +760,19 @@ function logic(dt) {
             S.phi = S.phi + dt * 0.9 * (1 + 1.5 * A);
             if (calm) { rAdd = 1 * A; ga = 0.08 + 0.08 * A; gr = 24; }
             else { rAdd = 3 * A; ga = 0.08 + 0.18 * A; gr = 24 + 30 * A; if (A < 0.05) rAdd += 0.25 * Math.sin(2 * Math.PI * 0.5 * t); }
-            // Word reveal: about 3.3 words a second while the voice is sounding
-            // (there are no word timings), everything once the text is complete.
+            // Word reveal in step with the voice: each sentence's words appear over the
+            // time its audio plays (spoken(); the TTS says when a sentence starts and how
+            // long it is). Without those events (an old backend): ~3.3 words a second
+            // while the voice is sounding.
             var voiced = NOW - AU.ttsT < 300 && AU.A > 0.04;
-            if (S.wordIdx < S.words.length - 1) {
+            if (S.sync && (S.plans.length || NOW - S.speakT0 < 2500)) {
+                for (var pi = 0; pi < S.plans.length; pi++) {
+                    var pl = S.plans[pi];
+                    if (NOW < pl.t0) continue;
+                    var frac = clamp((NOW - pl.t0) / pl.d * 1.1), want = pl.a + Math.ceil((pl.b - pl.a) * frac) - 1;
+                    while (S.wordIdx < Math.min(want, S.words.length - 1)) { S.wordIdx++; S.words[S.wordIdx].t = NOW; }
+                }
+            } else if (S.wordIdx < S.words.length - 1) {
                 S.revealAcc += dt * (voiced ? 3.3 : (NOW - S.speakT0 > 1500 && NOW - AU.ttsT > 1500 ? 6 : 0.9));
                 while (S.revealAcc >= 1 && S.wordIdx < S.words.length - 1) { S.revealAcc -= 1; S.wordIdx++; S.words[S.wordIdx].t = NOW; }
             }
@@ -1075,6 +1084,18 @@ function setTool(label, icon) {
     NOW = env.now();
     S.toolLabel = label || ''; S.toolIcon = icon || '';
     if (S.state === 'thinking') { thinkLabel(); resize('soft'); }
+}
+// A sentence of the answer starts playing (text, ms): its words are revealed over its audio.
+function spoken(text, ms) {
+    NOW = env.now();
+    S.sync = true;
+    var n = String(text || "").split(/\s+/).filter(function (w) { return w.length; }).length;
+    if (!n) return;
+    var a = Math.max(S.sentEnd, S.wordIdx + 1);
+    S.plans.push({ a: a, b: a + n, t0: NOW, d: Math.max(200, ms) });
+    S.sentEnd = a + n;
+    while (S.plans.length > 8) S.plans.shift();
+    wake();
 }
 function setSpeakText(text) {
     NOW = env.now();

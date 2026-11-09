@@ -220,6 +220,7 @@ agent:
   max_turns: 30                # recycle the process after this many questions
   timeout: 180                 # seconds to wait for one answer
   filler: "Let me check."      # spoken right away while it looks things up
+  filler_min_words: 8          # ...but only for requests of at least this many words (0 = always)
   extra_args: []
 
 conversation:

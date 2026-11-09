@@ -727,6 +727,142 @@ def test_settings_slider_previews_the_size_live():
     w.deleteLater()
 
 
+class _VoiceSpeaker:
+    """A speaker that plays what it's fed on a thread and fires the callbacks the
+    real one does: on_start per sentence, a sentence event, on_idle when done."""
+
+    def __init__(self, a, secs=0.5):
+        import queue
+        import threading
+        self.a, self.secs = a, secs
+        self.q = queue.Queue()
+        self.busy, self.first_audio_t, self.fed = False, None, []
+        self._t = None
+        self._threading = threading
+
+    def begin(self):
+        self.first_audio_t = None
+
+    def feed(self, text):
+        if text.strip():
+            self.fed.append(text)
+            self.q.put(text.strip())
+            if self._t is None or not self._t.is_alive():
+                self._t = self._threading.Thread(target=self._play, daemon=True)
+                self._t.start()
+
+    def _play(self):
+        while not self.q.empty():
+            sent = self.q.get()
+            self.busy = True
+            self.first_audio_t = self.first_audio_t or time.perf_counter()
+            self.a._tts_started()
+            self.a._sentence_started(sent, self.secs)
+            time.sleep(self.secs)
+        self.busy = False
+        self.a._tts_idle()
+
+    def flush(self):
+        pass
+
+    def stop(self):
+        while not self.q.empty():
+            self.q.get()
+
+    def announce(self, text):
+        self.feed(text)
+
+
+def test_one_request_is_one_open_panel():
+    """heard -> filler speaking -> weather widget -> answer speaking -> followup -> close.
+    One expand and one collapse, the card on screen while the answer plays, and the
+    filler shown once (never re-animated, never part of the answer)."""
+    from test_input import _assistant
+    isl = _island()
+    b = isl.bridge_
+    b.listening.emit(True, 0.0)
+    isl.clear_widget()
+    b.state.emit("idle", "")
+    _spin(1500)
+    a = _assistant()
+    a.ui = b                                      # the real Bridge: the assistant drives the real island
+    a.listening.set()
+    a.cfg["agent"]["filler"] = "Let me check."
+    a.cfg["agent"]["filler_min_words"] = 0              # this test wants the filler on a short question
+    a.speaker = _VoiceSpeaker(a)
+    from heyclaude import weather as WX
+    card = WX.to_widget(_FC, "Tashkent, Uzbekistan")
+
+    def lookup(text):
+        time.sleep(0.9)                              # the tool runs while the filler plays
+        a._on_tool_result("mcp__weather__get_weather", {}, card, False)
+        time.sleep(1.2)
+        yield "It's fifteen degrees and clear. "
+        yield "Rain is likely after midnight."
+    a.brain.lookup = lookup
+
+    sent = []
+    orig = isl._send
+    isl._send = lambda fn, args: (sent.append((fn, list(args))), orig(fn, args))[1]
+    seen = {"card_at_answer": None, "speaking_texts": []}
+    try:
+        a.set_mode("listening")
+        _spin(500)
+        a.request("what's the weather today?", source="voice")
+        t_end = time.time() + 15
+        while time.time() < t_end:
+            _spin(100)
+            if isl.mode == "speaking":
+                info = _v(isl.call("extrasInfo"))
+                if seen["card_at_answer"] is None and info["widget"]:
+                    seen["card_at_answer"] = info
+                seen["speaking_texts"].append(isl.text)
+            if isl.mode == "speaking" and not a.speaker.busy and a.speaker.q.empty() and not a.conv_lock.locked():
+                break
+        assert a.followup.state == "armed" and isl.mode == "speaking"   # no drop to idle before "go on"
+        a.followup.state = "open"                                        # what the listen loop does next
+        a.set_mode("followup", "1")
+        _spin(1200)
+        a.followup.close()
+        a.rest()
+        _spin(1500)
+        mid = _v(isl.call("extrasInfo"))
+        assert mid["widget"] == "weather" and mid["question"] == "what's the weather today?" and mid["answer"], mid
+        _spin(13000)                                                     # the card's linger, then one collapse
+        end = _v(isl.call("extrasInfo"))
+    finally:
+        isl._send = orig
+    rest = {"ready", "off", "paused"}
+    gos = [args[0] for fn, args in sent if fn == "go"]
+    expands = sum(1 for p, q in zip(["ready"] + gos, gos) if p in rest and q not in rest)
+    collapses = sum(1 for p, q in zip(["ready"] + gos, gos) if p not in rest and q in rest)
+    assert expands == 1 and collapses == 1, gos
+    assert seen["card_at_answer"] and seen["card_at_answer"]["widget"] == "weather" and not seen["card_at_answer"]["pending"]
+    filler_shows = [args for fn, args in sent if (fn == "go" and args[0] == "thinking" and args[1].get("text") == "Let me check.")
+                    or (fn == "setThinkText" and args[0] == "Let me check.")]
+    assert len(filler_shows) == 1, filler_shows
+    assert all("Let me check" not in t for t in seen["speaking_texts"]), seen["speaking_texts"][:3]
+    assert any(fn == "spoken" and "fifteen" in args[0] for fn, args in sent)       # text follows the voice
+    assert not any(fn == "spoken" and "Let me check" in args[0] for fn, args in sent)
+    assert end["widget"] == "" and end["question"] == "" and end["height"] == 0, end
+
+
+def test_the_filler_is_only_for_longer_requests():
+    from test_input import _assistant, _wait
+    for question, want in (("what's the weather today?", False),
+                           ("can you look up what time the pharmacy near the office closes on saturdays", True)):
+        a = _assistant()
+        a.cfg["agent"]["filler"] = "Let me check."
+        a.cfg["agent"]["filler_min_words"] = 8
+        a.brain.lookup = lambda text: iter(["It closes at six."])
+        a.brain.handle = lambda text, q=question: iter([("lookup", text)])
+        a.submit_text(question)
+        assert _wait(lambda: not a.conv_lock.locked() and a.speaker.fed)
+        said = "".join(a.speaker.fed)
+        assert ("Let me check" in said) == want, (question, said)
+        assert "Let me check" not in "".join(a._reply)                     # never part of the answer
+
+
 def test_qsb_is_built_from_the_current_shader():
     import subprocess
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "build_shaders.py"), "--check"], capture_output=True, text=True)

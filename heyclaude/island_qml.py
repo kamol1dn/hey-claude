@@ -188,6 +188,8 @@ class IslandModel(QObject):
     effectArt = Signal(str, str)
     widgetShown = Signal("QVariantMap")
     widgetCleared = Signal()
+    questionShown = Signal(str)
+    answerShown = Signal(str)
     approvalShown = Signal("QVariantMap")
     approvalCleared = Signal(str)
     toolsChanged = Signal("QVariantList")
@@ -434,7 +436,7 @@ class QmlIsland(QObject):
         for name, slot in (("tts_level", self.push_tts), ("widget", self.show_widget), ("tool", self.tool_event),
                            ("usage", self.set_usage), ("approval", self.show_approval),
                            ("approval_withdrawn", self.withdraw_approval), ("session_event", self.session_event),
-                           ("mismatch", self.voice_mismatch)):
+                           ("mismatch", self.voice_mismatch), ("turn", self.start_turn), ("spoken", self.spoken)):
             sig = getattr(bridge, name, None)
             if sig is not None:
                 sig.connect(slot)
@@ -582,6 +584,10 @@ class QmlIsland(QObject):
             self.partial = ""
         if mode != "listening":
             self.wake_listening = False
+        if mode == "thinking":
+            text = self._status_line(text)
+        elif mode == "speaking" and self.question and text:
+            self.model.answerShown.emit(text)          # it stays on the panel after it's been spoken
         ctx = {"engine": self.engine_state, "paused_until": self.paused_until, "paused_since": self.paused_since,
                "now": time.time(), "input": self.input_open}
         for fn, args in route(mode, text, ctx):
@@ -597,6 +603,30 @@ class QmlIsland(QObject):
         snap = os.environ.get("HEYCLAUDE_SNAP")
         if snap:
             QTimer.singleShot(450, lambda m=mode: self.grab().save(os.path.join(snap, f"{time.strftime('%H%M%S')}-{m}.png")))
+
+    # -- one request = one open panel (M5 turn continuity) -----------------------------
+    question = ""
+
+    def start_turn(self, info: dict):
+        """A request starts: its question stays on the panel until the panel collapses."""
+        self.question = str((info or {}).get("question") or "").strip()
+        self.model.questionShown.emit(self.question)
+
+    def spoken(self, text: str, secs: float):
+        """A sentence of the answer starts playing: reveal it in step with the voice."""
+        self._send("spoken", [text, int(max(0.2, float(secs)) * 1000)])
+
+    def _status_line(self, text: str) -> str:
+        """The thinking head's line while a question is up: a status, never the question again."""
+        q = self.question
+        t = (text or "").strip()
+        if not q:
+            return t or "…"
+        if t == q or not t or t == "…":
+            return "thinking…"
+        if t.endswith(q):
+            return t[: -len(q)].strip() or "thinking…"
+        return t
 
     def _listening(self, on: bool, until: float):
         if until and until > time.time():

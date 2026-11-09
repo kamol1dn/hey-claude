@@ -429,6 +429,7 @@ Item {
             visible: !o.listGeom && contentHeight > 0
             resting: o.state === "ready" || o.state === "off" || o.state === "paused"
             reduced: o.motion !== "full"
+            engineState: o.state || ""
             clip: true
             onContentHeightChanged: root.extraChanged()
             onMinWidthChanged: root.extraChanged()

@@ -49,6 +49,8 @@ class Bridge(QObject):
     tool = Signal(dict)             # a tool call starts/ends: {"id", "name", "phase": "start"|"end", "input"}
     usage = Signal(dict)            # plan usage as Claude Code reports it: {"five_hour": 0.05, "seven_day": 0.16, ...}
     mismatch = Signal()             # the speaker check rejected a wake ("not your voice?")
+    turn = Signal(dict)             # a request starts: {"question": what was heard or typed}
+    spoken = Signal(str, float)     # a sentence of the answer starts playing (text, seconds)
     # M7 plugs in here: approval cards and watched-session events (see ui/m5-island-handover.md)
     approval = Signal(dict)         # {"id", "title", "detail", "tool", "session", "actions": [{"id","label","primary"}]}
     approval_withdrawn = Signal(str)  # the request went away (answered elsewhere, timed out)

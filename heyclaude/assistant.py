@@ -743,7 +743,9 @@ class Assistant:
             t_rec = time.perf_counter()
             partial = self.turn.partial_text if self.turn and self.turn.partial_text else ""
             if not (partial.strip() and not strip_wake(partial).strip()):    # (a bare wake word: no flash of "thinking")
-                self.set_mode("thinking", partial or "…")
+                # "…": the question itself goes up in its own row a moment later (the turn);
+                # showing the transcript in the head first would put it on screen twice
+                self.set_mode("thinking", "…")
             text = self.turn.final() if self.turn is not None else None
             reused = text is not None
             if text is None:

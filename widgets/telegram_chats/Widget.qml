@@ -23,9 +23,11 @@ Item {
     readonly property int bh: rowH > 34 ? 18 : 16                 // unread badge height
     implicitHeight: Math.max(1, chats.length) * rowH
 
+    // first letters of the first two words that have one: a name starting with an emoji
+    // ("🫂FAMILY🫂") must not give half a surrogate pair (a "?" box)
     function initials(n) {
-        var p = String(n || "?").trim().split(/\s+/).filter(function (s) { return s !== "" })
-        return p.map(function (s) { return s[0] }).join("").slice(0, 2).toUpperCase() || "?"
+        var p = String(n || "").match(/[A-Za-z0-9À-ɏͰ-ϿЀ-ӿ֐-ۿ]+/g) || []
+        return p.map(function (s) { return s[0] }).join("").slice(0, 2).toUpperCase() || "#"
     }
     function hue(n) { var h = 0; n = String(n || ""); for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) % 360; return h / 360 }
 

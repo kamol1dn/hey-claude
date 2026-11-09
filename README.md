@@ -584,6 +584,50 @@ everything else. An undo plays the same effect backwards. They are short
 (~0.6 s) and calm. After the entry only a countdown hairline redraws, at 4 fps,
 and nothing runs once the row has gone.
 
+## Instant commands, no model (M10)
+
+The simple ones don't wait for Claude: "volume 30", "turn it up a bit",
+"mute", "dark mode", "brightness down", "next song", "pause", "what's
+playing", "set a timer for 5 minutes", "cancel the timer", "open Spotify",
+"open Wi-Fi settings", "lock the screen", "what time is it", "Wi-Fi off".
+They are matched and run inside hey-claude in about a millisecond (plus the
+Windows call itself), with the same island effect and **"undo that"** as when
+the agent does it, and a short spoken ack ("Volume 30."). Follow-ups apply to
+the last one: "a bit more", "again", "the other way", "make it 40". Anything
+it isn't sure about goes to Claude exactly as before.
+
+**How.** `heyclaude/intents/`: a grammar of anchored patterns (the whole
+sentence must fit, so "what's the volume of a sphere" or "set a timer in
+Python" never act), slot parsers for spoken numbers ("thirty", "a third",
+"volume tree zero"), amounts ("a bit", "by 10") and durations ("an hour and a
+half"), fixes for Whisper's slips ("dark mod", "nest song"), then a small
+numpy nearest-neighbour classifier for paraphrases ("my ears hurt, it's too
+loud"). The classifier only answers above `instant.threshold`, never for a
+question, a negation, or a sentence without a word of that command's domain.
+The executors call the same M9 tool functions in-process
+(`mcp_windows/registry.py`), so the result, effect and undo are identical.
+Timers run in hey-claude (`intents/timers.py`) with the island's timer card,
+and are said aloud when they end even if the card was replaced. Sleep,
+restart and shutdown are never instant: they keep the click to confirm.
+Routing order in `Brain.handle`: the exact local routes (undo, tasks,
+"start fresh") first, then instant commands, then local weather (weather-mcp), then the quick
+model and the agent.
+
+**Teach it.** When the agent handles a request with exactly one settings
+change ("give the boombox some juice" → volume +20), the wording is noted in
+`state/intents_misses.jsonl`. Say **"teach it"** right after, and that
+wording is instant from then on (`state/intents_taught.yaml`, yours to edit).
+Both files stay on your PC (`state/` is never committed).
+
+**Measured** (tests/test_intents.py, CI): 369 phrasings, 99.2% routed right
+(345 by the grammar, 21 by the classifier); 156 near-misses, 0 acted on.
+Text → match → executor with Windows mocked: median 0.11 ms, p95 0.22 ms.
+`tools\bench_instant.py` adds live read-only timings. Each turn is logged with
+`route=local-instant` and `speech_end_to_effect` in `state/latency.csv`, and
+the UX harness reports it per scenario (`tools/ux_scenarios/19-25`). Settings
+are under `instant:` in `config.example.yaml` (`ack: silent` for the effect
+only).
+
 ## The island (M5: "Ember & Thread")
 
 The island is Qt Quick: one fixed, transparent window at the top centre that
@@ -999,12 +1043,15 @@ heyclaude/
   undo.py         M9: "undo that" and the island's Undo button (inverse calls, run locally)
   mcp_windows/    M9: the Windows settings MCP server (audio, display, radios, power, media, apps,
                   clipboard, screen, Settings pages) and its tool registry (allow-list, undo)
+  intents/        M10: instant commands without a model: grammar, slots, classifier (numpy),
+                  executors over mcp_windows, local timers, "teach it"
   claude_cli.py   finds claude.exe, launch flags
 tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
                   wake_eval.py (wake word hit rate, false wakes per hour, threshold),
                   stage_wake_release.py (stage the shared model as a release asset; publishes nothing),
                   stt_eval.py (record your voice; whisper models' speed and word error rate),
                   check_windows_settings.py (M9: every settings tool, live, values restored),
+                  bench_instant.py (M10: instant-command latency, mocked + live read-only),
                   island_lab.py + island_measure.py (M5: the motion lab, screenshots, acceptance measurements),
                   build_shaders.py (M5: ui/island/*.frag -> .qsb)
 tests/            offline tests (python tests	est_island.py, tests	est_offline.py, tests	est_wake.py, tests	est_conversation.py,

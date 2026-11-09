@@ -38,6 +38,7 @@ LIVE = (
     "tts.voice", "tts.speed", "tts.first_chunk_words",   # read per sentence
     "conversation.",                 # read per request (save: the agent's next lookup)
     "island.",
+    "instant.",                      # M10: read on every request (the classifier's threshold too)
     "app.",                          # hotkey re-registered, autostart toggled, guard re-read
     "weather.local_route", "weather.mcp.timeout_s", "weather.mcp.fallback", "weather.mcp.cache_s",  # per question
 )

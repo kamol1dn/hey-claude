@@ -13,6 +13,8 @@ Every utterance goes through `Brain.handle(text)`, which yields events:
     ("task_resume", ref)        "resume the last task in a terminal"
     ("control", text)           "volume 30", "dark mode": the agent with the Windows tools, no filler
     ("undo",)                   "undo that": revert the last Windows settings change locally
+    ("instant", match)          M10: "volume 30", "next song", "timer 5 minutes": run locally, no model
+                                (heyclaude/intents; match is an intents.Match)
     ("weather", query)          a plain weather question: answered locally from weather-mcp (weather_mcp/)
 
 `ref` is how the user named a task ("inha app", "last", "readme", "#<id>");
@@ -746,6 +748,15 @@ class Brain:
             self.chat = _CliChat(exe, fast_args(fast["cli_model"], sp), cwd=os.path.expanduser("~"),
                                  persistent=bool(fast["persistent"]), max_turns=int(fast["max_turns"]))
         self.timing: dict = {}
+        self.intents = None                     # M10: the local intent engine (heyclaude/intents)
+        try:
+            from .config import STATE_DIR
+            from .intents import IntentEngine
+            self.intents = IntentEngine(cfg.setdefault("instant", {}), state_dir=STATE_DIR)
+            print(f"[instant] intent engine ready in {self.intents.load_ms:.0f} ms "
+                  f"({len(self.intents.clf.texts)} example phrasings)")
+        except Exception as e:
+            print(f"[instant] intent engine off: {e}")
         self.wx = None                      # M5b: the local weather route (weather_mcp.WeatherService)
         if (cfg.get("weather") or {}).get("enabled", True):
             from .weather_mcp import WeatherService
@@ -848,6 +859,20 @@ class Brain:
         yield from chat.stream(question + "\n\n(This answer is read aloud: one to three short plain "
                                "sentences, no markdown, bullet points, file paths or code.)")
 
+    def instant(self, text: str):
+        """M10: an intents.Match when `text` is an instant command, else None."""
+        eng = getattr(self, "intents", None)
+        if eng is None:
+            return None
+        try:
+            m = eng.match(text)
+        except Exception as e:
+            print(f"[instant] match failed: {e}")
+            return None
+        if m is not None:
+            self.timing["match_ms"] = round(m.match_ms, 2)
+        return m
+
     def handle(self, text: str):
         if self.convo is not None:
             self.convo.expire_if_idle()
@@ -856,6 +881,10 @@ class Brain:
             tid = self.convo.last_task_id()
             if tid:
                 routed = ("task_ask", "#" + tid, text.strip())
+        if routed is None or routed[0] in ("control", "lookup"):      # M10
+            inst = self.instant(text)
+            if inst is not None:
+                routed = ("instant", inst)
         if routed is None or routed[0] in ("control", "lookup"):      # weather-mcp
             wq = self.weather_query(text)
             if wq is not None:

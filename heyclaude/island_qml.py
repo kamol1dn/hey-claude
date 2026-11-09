@@ -439,7 +439,8 @@ class QmlIsland(QObject):
         for name, slot in (("tts_level", self.push_tts), ("widget", self.show_widget), ("tool", self.tool_event),
                            ("usage", self.set_usage), ("approval", self.show_approval),
                            ("approval_withdrawn", self.withdraw_approval), ("session_event", self.session_event),
-                           ("mismatch", self.voice_mismatch), ("turn", self.start_turn), ("spoken", self.spoken)):
+                           ("mismatch", self.voice_mismatch), ("turn", self.start_turn), ("spoken", self.spoken),
+                           ("widget_clear", self.clear_timer_widget)):
             sig = getattr(bridge, name, None)
             if sig is not None:
                 sig.connect(slot)
@@ -870,6 +871,11 @@ class QmlIsland(QObject):
     def clear_widget(self):
         self.widget = None
         self.model.widgetCleared.emit()
+
+    def clear_timer_widget(self):
+        """M10: a timer cancelled by voice: its card goes (any other card stays)."""
+        if (self.widget or {}).get("widget") == "timer":
+            self.clear_widget()
 
     def _widget_action(self, wid: str, action: str, payload):
         print(f"[widget] {action} on {wid}")

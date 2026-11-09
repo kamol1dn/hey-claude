@@ -17,6 +17,10 @@ from .tasks import TaskManager
 from .tts import Speaker, clean_for_speech
 from .vad import TurnListener, make_vad
 
+# Short acks for instant commands, synthesised ahead (tts.Speaker.prewarm) so they play at once.
+INSTANT_ACKS = ("Muted.", "Sound on.", "Dark mode.", "Light mode.", "Skipped.", "Paused.", "Playing.", "Going back.",
+                "Timer cancelled.", "Locked.", "Volume 30.", "Volume 50.", "Your timer is done.")
+
 
 class _Either:
     """Duck-typed threading.Event for record_utterance's stop_event: set when
@@ -99,6 +103,10 @@ class Assistant:
         # M9: Windows settings changes -> island effects, undo, click-to-confirm power actions.
         self.undo_stack = None                 # undo.UndoStack, made in load()
         self._pending_power: dict[str, tuple[str, float]] = {}   # effect id -> (action, expires)
+        # M10: instant commands (heyclaude/intents): the executor and the local timers, made in load()
+        self.instant_exec = None
+        self.timers = None
+        self._turn_writes: list = []           # Windows write tools the agent ran this turn ("teach it")
 
     # -- UI helpers -----------------------------------------------------------
     def _wake_label(self, label: str):
@@ -117,8 +125,15 @@ class Assistant:
                 time.sleep(0.1)
             self._filler = ""
             self._speaking_text = text
-            self._ui_emit("turn", {"question": about or "announcement"})
+            self._ui_emit("turn", {"question": about or "announcement", "announcement": True})
             self.speaker.announce(text)
+            if self.mode in ("idle", "off"):
+                # its own turn: not "at rest" while the voice gets ready (speaking follows at the first
+                # sound; the synthesis takes far longer than this check)
+                self.set_mode("thinking", about or "announcement")
+                t = threading.Timer(15.0, lambda: self.rest() if self.mode == "thinking" and not self._busy() else None)
+                t.daemon = True
+                t.start()                       # the voice never started (no audio device): don't stay "thinking"
         threading.Thread(target=go, daemon=True, name="announce").start()
 
     def _ui_emit(self, name: str, *args):
@@ -351,6 +366,7 @@ class Assistant:
             self.undo_stack = UndoStack()
         except Exception as e:                  # the settings tools' modules failed to import
             print(f"[undo] off: {e}")
+        self._setup_instant()
         if self.brain.agent is not None:
             self.brain.agent.on_tool_result = self._on_tool_result
             self.brain.agent.on_tool_use = lambda ev: self._ui_emit("tool", ev)       # M5: service icons
@@ -454,6 +470,9 @@ class Assistant:
         """The agent ran a tool (its process's thread): show the effect, remember the undo."""
         if is_error:
             return
+        writes = getattr(self, "_turn_writes", None)
+        if writes is not None and name.startswith("mcp__windows__"):
+            writes.append((name, args, result))
         try:                                    # M5: a widget straight from the tool result (weather)
             from .widgets import from_tool
             spec = from_tool(name, args, result, raw)
@@ -511,6 +530,9 @@ class Assistant:
             return f"I couldn't undo that: {str(e)[:80]}."
         if done is None:
             return "There's nothing to undo." if effect_id is None else "That can't be undone any more."
+        eng = getattr(getattr(self, "brain", None), "intents", None)
+        if eng is not None:
+            eng.forget()                        # "a bit more" after an undo means nothing
         ch, res = done
         from . import effects
         from .undo import describe
@@ -541,6 +563,110 @@ class Assistant:
     def cancel_clicked(self, effect_id: str):
         if self._pending_power.pop(effect_id, None):
             print("[power] cancelled")
+
+    # -- M10: instant commands -----------------------------------------------------------
+    def _setup_instant(self, runner=None):
+        """The executor and the timers for heyclaude/intents (after the brain exists)."""
+        eng = getattr(self.brain, "intents", None)
+        if eng is None:
+            return
+        from .intents import Executor, Timers
+        self.timers = self.timers or Timers(on_done=self._timer_done)
+        eng.has_timers = lambda: bool(self.timers and self.timers.running())
+        self.instant_exec = Executor(eng, runner=runner, timers=self.timers, state_dir=STATE_DIR)
+        if runner is None:
+            def apps():                         # the Start menu's apps, for "open <app>" (a COM call: off the start-up path)
+                try:
+                    from .mcp_windows import apps as A
+                    from .mcp_windows._util import com_init
+                    com_init()
+                    names = [a["name"] for a in A._os_start_apps()]
+                    eng.set_apps(names)
+                    print(f"[instant] {len(names)} apps can be opened by name")
+                except Exception as e:
+                    print(f"[instant] no app list ({e}); common app names only")
+                try:                            # pay pycaw's first-call cost (~0.2 s) now, with a read
+                    from .mcp_windows import registry
+                    registry.call("get_volume", {})
+                except Exception:
+                    pass
+            threading.Thread(target=apps, daemon=True, name="instant-apps").start()
+        sp = getattr(self, "speaker", None)
+        if sp is not None and hasattr(sp, "prewarm") and self._instant_ack() == "speak":
+            sp.prewarm(INSTANT_ACKS)
+
+    def _instant_ack(self) -> str:
+        return str((self.cfg.get("instant") or {}).get("ack") or "speak").lower()
+
+    def _instant(self, match, text: str, gen: int, timing: dict) -> str:
+        """Run an instant command: the M9 tool in-process, its effect and undo, a short
+        ack. Returns the tier for the log ("instant", or "agent" when it fell back)."""
+        timing["intent"] = f"{match.intent}/{match.source}"
+        t0 = time.perf_counter()
+        try:
+            if self.instant_exec is None:
+                raise RuntimeError("instant commands aren't set up")
+            out = self.instant_exec.run(match)
+        except Exception as e:
+            # not the user's mistake (a module failed, Windows refused oddly): let the agent try it
+            print(f"[instant] {match.describe()} failed: {e}")
+            if getattr(self.brain, "agent", None) is not None:
+                self._stream(self.brain.lookup(text), gen, timing)
+                return "agent"
+            self._say("Sorry, that didn't work.")
+            return "instant"
+        t_exec = time.perf_counter()
+        if out.tool:
+            self._on_tool_result(out.tool, out.args, out.result, False)
+        if out.widget is not None:
+            from .widgets import normalise
+            spec = normalise(out.widget)
+            if spec is not None:
+                self._ui_emit("widget", spec)
+        if out.clear_timer_card:
+            self._ui_emit("widget_clear")
+        timing["effect"] = time.perf_counter()
+        eng = getattr(self.brain, "intents", None)
+        if eng is not None and not out.error and not match.intent.startswith(("learn.", "clock.")):
+            eng.remember(match, out.result if isinstance(out.result, dict) else None)
+        print(f"[instant] {match.describe()} matched in {match.match_ms:.1f} ms, ran in "
+              f"{(t_exec - t0) * 1000:.0f} ms{' (' + match.note + ')' if match.note else ''}: {out.say}")
+        if out.say and (out.always_say or self._instant_ack() == "speak"):
+            self._say(out.say)
+        return "instant"
+
+    def _learn_miss(self, text: str):
+        """The agent did this with exactly one settings change: a phrasing the instant
+        engine missed (state/intents_misses.jsonl, for "teach it")."""
+        eng = getattr(self.brain, "intents", None)
+        if eng is None or not eng.opt("learn") or not eng.enabled:
+            return
+        try:
+            from .mcp_windows import registry
+            writes = [w for w in self._turn_writes if (registry.get(w[0]) or None) and registry.get(w[0]).kind == "write"]
+            if len(writes) != 1:
+                return
+            from .intents import learn
+            row = learn.log_miss(STATE_DIR, text, writes[0][0], writes[0][1],
+                                 writes[0][2] if isinstance(writes[0][2], dict) else None)
+            if row:
+                print(f"[instant] missed: {text!r} was {row['intent']} (say \"teach it\" to make it instant)")
+        except Exception as e:
+            print(f"[instant] learn: {e}")
+
+    def _timer_done(self, t):
+        label = t.label
+        print(f"[timer] {label or 'timer'} done ({t.seconds}s)")
+        self.announce(f"Your {label} timer is done." if label else "Your timer is done.",
+                      about=f"{label + ' ' if label else ''}timer")
+
+    def timer_widget_done(self, label: str):
+        """The island's timer card reached zero. Ours are announced by the scheduler;
+        a card the model made (no local timer) is announced here."""
+        label = str(label or "").strip()
+        if self.timers is not None and self.timers.owns(label):
+            return
+        self.announce(f"Your {label} timer is done." if label else "Your timer is done.")
 
     # -- task callbacks -------------------------------------------------------
     def _task_finished(self, t):
@@ -876,6 +1002,7 @@ class Assistant:
         from .widgets import WidgetFilter
         wf = self._wf = WidgetFilter()          # M5: a `WIDGET {...}` line is shown, never spoken
         tier, task_id, answered = "", None, False
+        self._turn_writes = []
         t_llm0 = time.perf_counter()
         try:
             for ev in self.brain.handle(text):
@@ -918,6 +1045,9 @@ class Assistant:
                         self._late_filler(filler, late, gen)
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
+                elif kind == "instant":
+                    # M10: "volume 30", "next song", "timer for 5 minutes": done locally, no model
+                    tier = self._instant(ev[1], text, gen, timing)
                 elif kind == "weather":
                     # M5b: a plain weather question, answered locally: the card, then the summary
                     tier = "weather"
@@ -970,11 +1100,15 @@ class Assistant:
                 self.brain.convo.add(text, "".join(said).strip(), tier or "fast", task_id=task_id)
             if timing.get("source") != "typed":
                 self._arm_followup()
-        # wait for first audio to record latency
+        if tier == "agent":
+            self._learn_miss(text)
+        # wait for first audio to record latency (nothing to wait for when nothing was said)
         t_wait = time.perf_counter()
-        while self.speaker.first_audio_t is None and time.perf_counter() - t_wait < 20 and gen == self.gen:
+        spoke = bool("".join(said).strip()) or bool(self._filler)
+        while spoke and self.speaker.first_audio_t is None and time.perf_counter() - t_wait < 20 and gen == self.gen:
             time.sleep(0.01)
         timing.update(llm_start=t_llm0, route=self.brain.timing.get("route"), voice=getattr(self.speaker, "label", ""),
+                      match_ms=self.brain.timing.get("match_ms"),
                       first_token=self.brain.timing.get("first_token"),
                       first_audio=self.speaker.first_audio_t, reply="".join(said).strip())
         self._log_timing(timing)
@@ -1164,6 +1298,8 @@ class Assistant:
             wake_to_first_audio=d("wake", "first_audio"),
             speech_end_to_first_audio=d("speech_end", "first_audio"),
             speech_end_to_lookup_answer=d("speech_end", "answer"),
+            speech_end_to_effect=d("speech_end", "effect"),        # M10: an instant command's change landed
+            intent=tm.get("intent"), match_ms=tm.get("match_ms"),
             speech_end_to_card=d("speech_end", "card"),
             vad_tail=d("speech_end", "vad_done"), stt=d("vad_done", "stt_done"),
             first_token=round(tm["first_token"], 3) if tm.get("first_token") else None,

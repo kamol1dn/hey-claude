@@ -1,0 +1,577 @@
+# M10 phrasing corpus (tests/test_intents.py). Kept apart from the classifier's
+# training phrasings (heyclaude/intents/examples.yaml): it measures how well
+# the grammar + classifier generalise. Transcripts are written the way Whisper
+# writes them (capitals, punctuation, digits, "30%"), slips included.
+#
+# corpus: [text, intent, slots]   slots are checked when given (a subset)
+# near_miss: text that must NOT be an instant command (it goes to Claude)
+# Target: >= 95% of the corpus right, 0 near-misses triggered.
+
+corpus:
+  # -- volume: set ------------------------------------------------------------------
+  - ["Volume 30.", volume.set, {level: 30}]
+  - ["Set the volume to 30.", volume.set, {level: 30}]
+  - ["Set the volume to thirty.", volume.set, {level: 30}]
+  - ["Volume to thirty percent.", volume.set, {level: 30}]
+  - ["Volume 30%.", volume.set, {level: 30}]
+  - ["Volume tree zero.", volume.set, {level: 30}]
+  - ["Volume three zero", volume.set, {level: 30}]
+  - ["Put the volume at 50.", volume.set, {level: 50}]
+  - ["Change the volume to 45 percent.", volume.set, {level: 45}]
+  - ["Can you set the volume to 20, please?", volume.set, {level: 20}]
+  - ["Hey Claude, volume 70.", volume.set, {level: 70}]
+  - ["Turn the volume down to 15.", volume.set, {level: 15}]
+  - ["Turn the volume up to 80.", volume.set, {level: 80}]
+  - ["Turn down the volume to 25.", volume.set, {level: 25}]
+  - ["Volume at half.", volume.set, {level: 50}]
+  - ["Set the volume to half.", volume.set, {level: 50}]
+  - ["Volume to a third.", volume.set, {level: 33}]
+  - ["Set volume to a quarter.", volume.set, {level: 25}]
+  - ["Max volume.", volume.set, {level: 100}]
+  - ["Full volume, please.", volume.set, {level: 100}]
+  - ["Volume to the max.", volume.set, {level: 100}]
+  - ["Set the volume to maximum.", volume.set, {level: 100}]
+  - ["Half volume.", volume.set, {level: 50}]
+  - ["50 percent volume.", volume.set, {level: 50}]
+  - ["Volume sixty five.", volume.set, {level: 65}]
+  - ["Set the sound to 40.", volume.set, {level: 40}]
+  - ["Could you put the volume on 10?", volume.set, {level: 10}]
+  - ["Volume one hundred.", volume.set, {level: 100}]
+  - ["Make the volume 35.", volume.set, {level: 35}]
+  - ["Set the system volume to 60.", volume.set, {level: 60}]
+  - ["Turn the volume all the way up.", volume.set, {level: 100}]
+  - ["Crank the volume all the way up!", volume.set, {level: 100}]
+  - ["Volume twenty.", volume.set, {level: 20}]
+  - ["Okay, volume 55 please.", volume.set, {level: 55}]
+  - ["Please set the master volume to 25%.", volume.set, {level: 25}]
+  - ["Turn it up to 50.", volume.set, {level: 50}]
+  - ["Turn the music down to 20 percent.", volume.set, {level: 20}]
+  # -- volume: up / down ------------------------------------------------------------
+  - ["Volume up.", volume.step, {delta: 10}]
+  - ["Volume down.", volume.step, {delta: -10}]
+  - ["Turn it up.", volume.step, {delta: 10}]
+  - ["Turn it down.", volume.step, {delta: -10}]
+  - ["Turn it up a bit.", volume.step, {delta: 5}]
+  - ["Turn it down a little.", volume.step, {delta: -5}]
+  - ["Turn it up a lot.", volume.step, {delta: 25}]
+  - ["Turn the volume up.", volume.step, {delta: 10}]
+  - ["Turn the volume down by 20.", volume.step, {delta: -20}]
+  - ["Turn up the volume.", volume.step, {delta: 10}]
+  - ["Turn down the volume a bit.", volume.step, {delta: -5}]
+  - ["Louder.", volume.step, {delta: 10}]
+  - ["Louder, please.", volume.step, {delta: 10}]
+  - ["A bit louder.", volume.step, {delta: 5}]
+  - ["A little quieter.", volume.step, {delta: -5}]
+  - ["Quieter.", volume.step, {delta: -10}]
+  - ["Much louder.", volume.step, {delta: 25}]
+  - ["Make it louder.", volume.step, {delta: 10}]
+  - ["Make it quieter please.", volume.step, {delta: -10}]
+  - ["Make the music louder.", volume.step, {delta: 10}]
+  - ["Can you make the music a bit quieter?", volume.step, {delta: -5}]
+  - ["Increase the volume.", volume.step, {delta: 10}]
+  - ["Decrease the volume.", volume.step, {delta: -10}]
+  - ["Increase the volume by 15.", volume.step, {delta: 15}]
+  - ["Lower the volume.", volume.step, {delta: -10}]
+  - ["Lower the volume a bit.", volume.step, {delta: -5}]
+  - ["Raise the volume.", volume.step, {delta: 10}]
+  - ["Reduce the volume by 10 percent.", volume.step, {delta: -10}]
+  - ["Volume up a bit.", volume.step, {delta: 5}]
+  - ["Volume down 20.", volume.step, {delta: -20}]
+  - ["Volume up by 10.", volume.step, {delta: 10}]
+  - ["Turn the music up.", volume.step, {delta: 10}]
+  - ["Turn the music down a little bit.", volume.step, {delta: -5}]
+  - ["Turn up the music.", volume.step, {delta: 10}]
+  - ["Crank it up.", volume.step, {delta: 10}]
+  - ["Pump up the volume.", volume.step, {delta: 10}]
+  - ["Bump the volume up.", volume.step, {delta: 10}]
+  - ["Dial it down a bit.", volume.step, {delta: -5}]
+  - ["Tone it down.", volume.step, {delta: -10}]
+  - ["It's too loud.", volume.step, {delta: -10}]
+  - ["It's way too loud in here.", volume.step, {delta: -10}]
+  - ["This is too quiet.", volume.step, {delta: 10}]
+  - ["The music is too loud.", volume.step, {delta: -10}]
+  - ["Too loud!", volume.step, {delta: -10}]
+  - ["More volume.", volume.step, {delta: 10}]
+  - ["Less volume please.", volume.step, {delta: -10}]
+  - ["Make the sound a little louder.", volume.step, {delta: 5}]
+  - ["Slightly louder.", volume.step, {delta: 5}]
+  - ["Turn the sound down.", volume.step, {delta: -10}]
+  - ["Could you turn the volume up two notches?", volume.step, {delta: 4}]
+  - ["Boost the volume.", volume.step, {delta: 10}]
+  - ["Volume up, please.", volume.step, {delta: 10}]
+  - ["Turn up the sound a bit.", volume.step, {delta: 5}]
+  - ["It's blasting, way too loud.", volume.step, {delta: -10}]
+  - ["The audio is way too quiet.", volume.step, {delta: 10}]
+  - ["I can barely hear it, turn it up.", volume.step, {delta: 10}]
+  - ["That's too loud, bring it down a bit.", volume.step, {delta: -10}]
+  - ["Make the speakers louder.", volume.step, {delta: 10}]
+  - ["Music louder please.", volume.step, {delta: 10}]
+  # -- mute / unmute -------------------------------------------------------------------
+  - ["Mute.", volume.mute, {}]
+  - ["Mute it.", volume.mute, {}]
+  - ["Mute the sound.", volume.mute, {}]
+  - ["Mute the computer.", volume.mute, {}]
+  - ["Mute everything.", volume.mute, {}]
+  - ["Mute, please.", volume.mute, {}]
+  - ["Turn off the sound.", volume.mute, {}]
+  - ["Turn the sound off.", volume.mute, {}]
+  - ["Sound off.", volume.mute, {}]
+  - ["Mute the volume.", volume.mute, {}]
+  - ["Kill the sound.", volume.mute, {}]
+  - ["Silence the speakers.", volume.mute, {}]
+  - ["Mute the music.", volume.mute, {}]
+  - ["Mute the audio.", volume.mute, {}]
+  - ["Unmute.", volume.unmute, {}]
+  - ["Un-mute.", volume.unmute, {}]
+  - ["Unmute the sound.", volume.unmute, {}]
+  - ["Turn the sound back on.", volume.unmute, {}]
+  - ["Sound on.", volume.unmute, {}]
+  - ["Turn on the sound.", volume.unmute, {}]
+  - ["Unmute the computer please.", volume.unmute, {}]
+  - ["Bring the sound back.", volume.unmute, {}]
+  # -- brightness -----------------------------------------------------------------------
+  - ["Brightness 70.", brightness.set, {level: 70}]
+  - ["Set the brightness to 40.", brightness.set, {level: 40}]
+  - ["Screen brightness 80 percent.", brightness.set, {level: 80}]
+  - ["Brightness to half.", brightness.set, {level: 50}]
+  - ["Set brightness to max.", brightness.set, {level: 100}]
+  - ["Full brightness.", brightness.set, {level: 100}]
+  - ["Max brightness please.", brightness.set, {level: 100}]
+  - ["Set the screen brightness to 60%.", brightness.set, {level: 60}]
+  - ["Turn the brightness down to 30.", brightness.set, {level: 30}]
+  - ["Brightness fifty.", brightness.set, {level: 50}]
+  - ["Set the screen to 25 percent brightness.", brightness.set, {level: 25}]
+  - ["Brightness up.", brightness.step, {delta: 10}]
+  - ["Brightness down.", brightness.step, {delta: -10}]
+  - ["Brightness down a bit.", brightness.step, {delta: -5}]
+  - ["Turn the brightness up.", brightness.step, {delta: 10}]
+  - ["Turn up the brightness.", brightness.step, {delta: 10}]
+  - ["Turn down the brightness a little.", brightness.step, {delta: -5}]
+  - ["Lower the brightness.", brightness.step, {delta: -10}]
+  - ["Increase the brightness by 20.", brightness.step, {delta: 20}]
+  - ["Reduce the screen brightness.", brightness.step, {delta: -10}]
+  - ["Dim the screen.", brightness.step, {delta: -10}]
+  - ["Dim the screen a bit.", brightness.step, {delta: -5}]
+  - ["Brighten the screen.", brightness.step, {delta: 10}]
+  - ["Make the screen brighter.", brightness.step, {delta: 10}]
+  - ["Make the screen darker.", brightness.step, {delta: -10}]
+  - ["Make it brighter.", brightness.step, {delta: 10}]
+  - ["A bit brighter.", brightness.step, {delta: 5}]
+  - ["Dimmer please.", brightness.step, {delta: -10}]
+  - ["The screen is too bright.", brightness.step, {delta: -10}]
+  - ["The screen is too dark.", brightness.step, {delta: 10}]
+  - ["More brightness.", brightness.step, {delta: 10}]
+  - ["Less brightness please.", brightness.step, {delta: -10}]
+  - ["Brightness up a lot.", brightness.step, {delta: 25}]
+  - ["My screen is way too bright, it hurts my eyes.", brightness.step, {delta: -10}]
+  - ["Lower the display brightness a little.", brightness.step, {delta: -5}]
+  # -- dark / light mode ----------------------------------------------------------------
+  - ["Dark mode.", theme.set, {mode: dark}]
+  - ["Dark mode, please.", theme.set, {mode: dark}]
+  - ["Dark mod.", theme.set, {mode: dark}]
+  - ["Light mode.", theme.set, {mode: light}]
+  - ["Light mod.", theme.set, {mode: light}]
+  - ["Turn on dark mode.", theme.set, {mode: dark}]
+  - ["Switch to dark mode.", theme.set, {mode: dark}]
+  - ["Switch to light mode.", theme.set, {mode: light}]
+  - ["Enable dark mode.", theme.set, {mode: dark}]
+  - ["Dark mode on.", theme.set, {mode: dark}]
+  - ["Dark mode off.", theme.set, {mode: light}]
+  - ["Turn off dark mode.", theme.set, {mode: light}]
+  - ["Disable dark mode.", theme.set, {mode: light}]
+  - ["Turn off light mode.", theme.set, {mode: dark}]
+  - ["Go to dark mode.", theme.set, {mode: dark}]
+  - ["Use the light theme.", theme.set, {mode: light}]
+  - ["Dark theme.", theme.set, {mode: dark}]
+  - ["Change to light theme.", theme.set, {mode: light}]
+  - ["Make Windows dark.", theme.set, {mode: dark}]
+  - ["Set the theme to light.", theme.set, {mode: light}]
+  - ["Switch the theme to dark mode.", theme.set, {mode: dark}]
+  - ["Could you put it in dark mode?", theme.set, {mode: dark}]
+  - ["I want dark mode.", theme.set, {mode: dark}]
+  - ["Toggle dark mode.", theme.set, {mode: toggle}]
+  - ["Switch themes.", theme.set, {mode: toggle}]
+  - ["Darkmode.", theme.set, {mode: dark}]
+  - ["Go back to light mode.", theme.set, {mode: light}]
+  - ["Switch back to dark mode please.", theme.set, {mode: dark}]
+  - ["Turn dark mode off.", theme.set, {mode: light}]
+  - ["Activate the dark theme.", theme.set, {mode: dark}]
+  - ["Put windows in dark mode, please.", theme.set, {mode: dark}]
+  # -- media ------------------------------------------------------------------------------
+  - ["Next song.", media.next, {}]
+  - ["Nest song.", media.next, {}]
+  - ["Next track.", media.next, {}]
+  - ["Next track, please.", media.next, {}]
+  - ["Skip.", media.next, {}]
+  - ["Skip this song.", media.next, {}]
+  - ["Skip this one.", media.next, {}]
+  - ["Skip it.", media.next, {}]
+  - ["Skip the song.", media.next, {}]
+  - ["Play the next song.", media.next, {}]
+  - ["Go to the next track.", media.next, {}]
+  - ["Change the song.", media.next, {}]
+  - ["Another song please.", media.next, {}]
+  - ["Skip to the next one.", media.next, {}]
+  - ["Can you skip this track?", media.next, {}]
+  - ["I don't like this song, skip it.", media.next, {}]
+  - ["Previous song.", media.previous, {}]
+  - ["Previous track.", media.previous, {}]
+  - ["Play the previous song.", media.previous, {}]
+  - ["Go back a song.", media.previous, {}]
+  - ["Go back one track.", media.previous, {}]
+  - ["Last song.", media.previous, {}]
+  - ["Play the last track again.", media.previous, {}]
+  - ["Back a track.", media.previous, {}]
+  - ["Play that song again.", media.previous, {}]
+  - ["Restart the song.", media.previous, {}]
+  - ["Pause.", media.pause, {}]
+  - ["Pause the music.", media.pause, {}]
+  - ["Pause the song.", media.pause, {}]
+  - ["Pause it.", media.pause, {}]
+  - ["Stop the music.", media.pause, {}]
+  - ["Stop the music, please.", media.pause, {}]
+  - ["Pause Spotify.", media.pause, {}]
+  - ["Pause the video.", media.pause, {}]
+  - ["Pause playback.", media.pause, {}]
+  - ["Stop playing.", media.pause, {}]
+  - ["Pause the podcast for a second.", media.pause, {}]
+  - ["Hold the music.", media.pause, {}]
+  - ["Play.", media.play, {}]
+  - ["Resume.", media.play, {}]
+  - ["Resume the music.", media.play, {}]
+  - ["Play the music.", media.play, {}]
+  - ["Play music.", media.play, {}]
+  - ["Unpause.", media.play, {}]
+  - ["Un-pause the song.", media.play, {}]
+  - ["Continue playing.", media.play, {}]
+  - ["Keep playing.", media.play, {}]
+  - ["Start the music again.", media.play, {}]
+  - ["Resume playback.", media.play, {}]
+  - ["Play it.", media.play, {}]
+  - ["Play some music.", media.play, {}]
+  - ["Play pause.", media.toggle, {}]
+  - ["What song is this?", media.now_playing, {}]
+  - ["What's playing?", media.now_playing, {}]
+  - ["What is playing right now?", media.now_playing, {}]
+  - ["What song is playing?", media.now_playing, {}]
+  - ["What's this song?", media.now_playing, {}]
+  - ["What's this song called?", media.now_playing, {}]
+  - ["Who sings this?", media.now_playing, {}]
+  - ["Who sings this song?", media.now_playing, {}]
+  - ["What am I listening to?", media.now_playing, {}]
+  - ["Which song is this?", media.now_playing, {}]
+  - ["What track is this?", media.now_playing, {}]
+  - ["Name this song.", media.now_playing, {}]
+  - ["Now playing.", media.now_playing, {}]
+  - ["Who is this artist?", media.now_playing, {}]
+  # -- timers ------------------------------------------------------------------------------
+  - ["Set a timer for 5 minutes.", timer.set, {seconds: 300}]
+  - ["Set a timer for five minutes.", timer.set, {seconds: 300}]
+  - ["Set a five minute timer.", timer.set, {seconds: 300}]
+  - ["Set a 5 minute timer.", timer.set, {seconds: 300}]
+  - ["Timer for 10 minutes.", timer.set, {seconds: 600}]
+  - ["Timer 10 minutes.", timer.set, {seconds: 600}]
+  - ["Start a timer for 30 seconds.", timer.set, {seconds: 30}]
+  - ["Set a timer for an hour.", timer.set, {seconds: 3600}]
+  - ["Set a timer for 1 and a half hours.", timer.set, {seconds: 5400}]
+  - ["Set a timer for an hour and a half.", timer.set, {seconds: 5400}]
+  - ["Set a timer for half an hour.", timer.set, {seconds: 1800}]
+  - ["Timer for 2 hours and 15 minutes.", timer.set, {seconds: 8100}]
+  - ["Set a timer for 90 seconds.", timer.set, {seconds: 90}]
+  - ["Set a timer for a minute and a half.", timer.set, {seconds: 90}]
+  - ["Set a 10 minute pasta timer.", timer.set, {seconds: 600, label: pasta}]
+  - ["Set a pasta timer for 10 minutes.", timer.set, {seconds: 600, label: pasta}]
+  - ["Set a timer for 4 minutes for the tea.", timer.set, {seconds: 240, label: tea}]
+  - ["Start a 25 minute timer.", timer.set, {seconds: 1500}]
+  - ["Can you set a timer for three minutes?", timer.set, {seconds: 180}]
+  - ["Set timer 20 min.", timer.set, {seconds: 1200}]
+  - ["Make a timer for 15 minutes.", timer.set, {seconds: 900}]
+  - ["Countdown 60 seconds.", timer.set, {seconds: 60}]
+  - ["Start a countdown for two minutes.", timer.set, {seconds: 120}]
+  - ["Set a timer for 1.5 hours.", timer.set, {seconds: 5400}]
+  - ["Please set a timer for twenty minutes.", timer.set, {seconds: 1200}]
+  - ["Give me a ten minute timer.", timer.set, {seconds: 600}]
+  - ["Set an egg timer for 7 minutes.", timer.set, {seconds: 420, label: egg}]
+  - ["Put on a timer for 45 minutes.", timer.set, {seconds: 2700}]
+  - ["Set a timer for a quarter of an hour.", timer.set, {seconds: 900}]
+  - ["Cancel the timer.", timer.cancel, {}]
+  - ["Stop the timer.", timer.cancel, {}]
+  - ["Cancel my timer.", timer.cancel, {}]
+  - ["Cancel all timers.", timer.cancel, {}]
+  - ["Cancel the pasta timer.", timer.cancel, {label: pasta}]
+  - ["Turn off the timer.", timer.cancel, {}]
+  - ["Delete the timer.", timer.cancel, {}]
+  - ["Timer off.", timer.cancel, {}]
+  - ["Never mind the timer.", timer.cancel, {}]
+  - ["How long is left on the timer?", timer.status, {}]
+  - ["How much time is left on my timer?", timer.status, {}]
+  - ["Check the timer.", timer.status, {}]
+  # -- apps, Settings, lock -------------------------------------------------------------------
+  - ["Open Spotify.", app.open, {app: Spotify}]
+  - ["Open spotify please.", app.open, {app: Spotify}]
+  - ["Launch Spotify.", app.open, {app: Spotify}]
+  - ["Start Spotify.", app.open, {app: Spotify}]
+  - ["Open Chrome.", app.open, {app: Google Chrome}]
+  - ["Open Google Chrome.", app.open, {app: Google Chrome}]
+  - ["Open the calculator.", app.open, {app: Calculator}]
+  - ["Open Notepad.", app.open, {app: Notepad}]
+  - ["Open VS Code.", app.open, {app: Visual Studio Code}]
+  - ["Launch Visual Studio Code.", app.open, {app: Visual Studio Code}]
+  - ["Open File Explorer.", app.open, {app: File Explorer}]
+  - ["Open Discord.", app.open, {app: Discord}]
+  - ["Fire up Steam.", app.open, {app: Steam}]
+  - ["Can you open Word?", app.open, {app: Word}]
+  - ["Open Spotfy.", app.open, {app: Spotify}]
+  - ["Open the Telegram app.", app.open, {app: Telegram Desktop}]
+  - ["Open settings.", app.open, {app: Settings}]
+  - ["Open Wi-Fi settings.", settings.open, {page: wifi}]
+  - ["Open the Bluetooth settings.", settings.open, {page: bluetooth}]
+  - ["Open display settings.", settings.open, {page: display}]
+  - ["Open sound settings.", settings.open, {page: sound}]
+  - ["Show me the taskbar settings.", settings.open, {page: taskbar}]
+  - ["Lock the screen.", screen.lock, {}]
+  - ["Lock my computer.", screen.lock, {}]
+  - ["Lock the PC.", screen.lock, {}]
+  - ["Lock screen.", screen.lock, {}]
+  - ["Lock my laptop please.", screen.lock, {}]
+  - ["Lock the computer now.", screen.lock, {}]
+  # -- the clock ---------------------------------------------------------------------------------
+  - ["What time is it?", clock.time, {}]
+  - ["What's the time?", clock.time, {}]
+  - ["What is the time right now?", clock.time, {}]
+  - ["Tell me the time.", clock.time, {}]
+  - ["Do you know what time it is?", clock.time, {}]
+  - ["What time is it now?", clock.time, {}]
+  - ["Time check.", clock.time, {}]
+  - ["Hey Claude, what time is it?", clock.time, {}]
+  - ["What's the current time?", clock.time, {}]
+  - ["What's the date?", clock.date, {}]
+  - ["What's today's date?", clock.date, {}]
+  - ["What day is it?", clock.date, {}]
+  - ["What day is it today?", clock.date, {}]
+  - ["What's the date today?", clock.date, {}]
+  - ["What day of the week is it?", clock.date, {}]
+  # -- radios -------------------------------------------------------------------------------------
+  - ["Turn off Wi-Fi.", radio.set, {radio: wifi, "on": false}]
+  - ["Turn on the Wi-Fi.", radio.set, {radio: wifi, "on": true}]
+  - ["Wi-Fi off.", radio.set, {radio: wifi, "on": false}]
+  - ["WiFi on.", radio.set, {radio: wifi, "on": true}]
+  - ["Turn Bluetooth on.", radio.set, {radio: bluetooth, "on": true}]
+  - ["Turn off Bluetooth.", radio.set, {radio: bluetooth, "on": false}]
+  - ["Disable Bluetooth.", radio.set, {radio: bluetooth, "on": false}]
+  - ["Enable Wi-Fi.", radio.set, {radio: wifi, "on": true}]
+  - ["Switch the Bluetooth off.", radio.set, {radio: bluetooth, "on": false}]
+  - ["Blue tooth on.", radio.set, {radio: bluetooth, "on": true}]
+  # -- teach --------------------------------------------------------------------------------------
+  - ["Teach it.", learn.teach, {}]
+  - ["Learn that.", learn.teach, {}]
+  - ["Teach that one.", learn.teach, {}]
+  # -- paraphrases the grammar doesn't spell out (the classifier) -----------------------------------
+  - ["Ugh, that's deafening.", volume.step, {delta: -10}]
+  - ["My ears hurt, it's too loud.", volume.step, {delta: -10}]
+  - ["I can barely hear the music.", volume.step, {delta: 10}]
+  - ["The speakers are too quiet.", volume.step, {delta: 10}]
+  - ["Keep the music down a bit.", volume.step, {delta: -5}]
+  - ["Make the audio softer.", volume.step, {delta: -10}]
+  - ["The screen is blinding me.", brightness.step, {delta: -10}]
+  - ["There's too much glare on the screen.", brightness.step, {delta: -10}]
+  - ["I'm done with this song.", media.next, {}]
+  - ["This song is boring, skip.", media.next, {}]
+  - ["Move on to the next track.", media.next, {}]
+  - ["Play the song before this one.", media.previous, {}]
+  - ["Hold the music for a second.", media.pause, {}]
+  - ["Get the music going again.", media.play, {}]
+  - ["Carry on playing the song.", media.play, {}]
+  - ["Who's singing right now?", media.now_playing, {}]
+  - ["Tell me what song this is.", media.now_playing, {}]
+  - ["Get rid of the timer.", timer.cancel, {}]
+  - ["Make windows black.", theme.set, {mode: dark}]
+  - ["Switch everything to light.", theme.set, {mode: light}]
+  - ["Put the sound on mute.", volume.mute, {}]
+  - ["Give me my sound back.", volume.unmute, {}]
+
+# Follow-ups: each list is one conversation; every line but the first leans on the one before.
+context:
+  - [["Turn it up.", volume.step, {delta: 10}], ["A bit more.", volume.step, {delta: 5}],
+     ["Again.", volume.step, {delta: 5}], ["The other way.", volume.step, {delta: -10}]]
+  - [["Quieter.", volume.step, {delta: -10}], ["A bit more.", volume.step, {delta: -5}],
+     ["Less.", volume.step, {delta: -10}]]
+  - [["Volume 30.", volume.set, {level: 30}], ["Make it 40.", volume.set, {level: 40}],
+     ["A little more.", volume.step, {delta: 5}], ["Higher.", volume.step, {delta: 10}]]
+  - [["Brightness 50.", brightness.set, {level: 50}], ["Turn it up.", brightness.step, {delta: 10}], ["Turn it up to 80.", brightness.set, {level: 80}],
+     ["Down a bit.", brightness.step, {delta: -5}], ["Set it to 70.", brightness.set, {level: 70}]]
+  - [["Next song.", media.next, {}], ["Again.", media.next, {}], ["Next.", media.next, {}],
+     ["No, the other way.", media.previous, {}], ["Previous.", media.previous, {}]]
+  - [["Dark mode.", theme.set, {mode: dark}], ["The opposite.", theme.set, {mode: light}]]
+  - [["Mute.", volume.mute, {}], ["The other way.", volume.unmute, {}]]
+  - [["Light mode.", theme.set, {mode: light}], ["Turn it to dark.", theme.set, {mode: dark}]]
+
+near_miss:
+  # the brief's examples
+  - "What's the volume of a sphere?"
+  - "The music was too dark."
+  - "I need a break of five minutes from this essay."
+  - "Tell me about Spotify's business model."
+  - "How bright is the sun?"
+  - "Timer in Python."
+  # volume / sound
+  - "What's the volume of a cylinder with radius 3?"
+  - "How do I calculate the volume of a cone?"
+  - "Volume of a cube with side 4."
+  - "How loud is a jet engine?"
+  - "What's louder, a lion or a chainsaw?"
+  - "Why is my laptop so quiet when I play videos?"
+  - "Is 80 decibels too loud for headphones?"
+  - "Turn up the heat."
+  - "Turn down the thermostat to 20."
+  - "Turn it up to eleven is a Spinal Tap joke, right?"
+  - "Speak louder."
+  - "Talk quieter please."
+  - "The sound of silence is my favorite song."
+  - "Mute the microphone."
+  - "Mute him on Telegram."
+  - "Unmute me in the meeting."
+  - "Mute notifications for an hour."
+  - "Don't turn up the volume."
+  - "Don't mute the sound."
+  - "The neighbours are too loud."
+  - "It's too loud outside to sleep."
+  - "Is it too loud for a baby?"
+  - "What volume should I listen to music at?"
+  - "Volume one of Harry Potter."
+  - "Read me volume two of the report."
+  - "Sound good?"
+  # brightness
+  - "What's the brightest star in the sky?"
+  - "Dim the lights in the kitchen."
+  - "Turn on the lights."
+  - "Brighten up my day with a joke."
+  - "Is the screen too bright for my eyes at night?"
+  - "Why is my screen so dim?"
+  - "How bright should my monitor be?"
+  - "Make the text brighter in my document."
+  - "Darker colors for the logo."
+  # theme
+  - "Is dark mode better for your eyes?"
+  - "Who invented dark mode?"
+  - "Turn on dark mode in VS Code."
+  - "Tell me about dark matter."
+  - "Is it dark outside?"
+  - "Light mode or dark mode, which do you prefer?"
+  - "Write a CSS dark mode toggle."
+  - "The movie was too dark."
+  - "Dark souls is a hard game."
+  # media
+  - "What's the next step?"
+  - "Next question."
+  - "What's next on my calendar?"
+  - "Skip the intro and give me the answer."
+  - "Pause for a moment and think about it."
+  - "Pause listening for 10 minutes."
+  - "Play a game with me."
+  - "Play chess."
+  - "Play Hotel California."
+  - "Play some jazz on Spotify."
+  - "Who sang Bohemian Rhapsody?"
+  - "What song should I play at my wedding?"
+  - "What was the last song you heard?"
+  - "Recommend a song for running."
+  - "Previous answer was wrong."
+  - "Go back to what we were talking about."
+  - "Stop the task."
+  - "Continue."
+  - "What is this?"
+  - "Who is this?"
+  # timers
+  - "How do kitchen timers work?"
+  - "Write a timer in JavaScript."
+  - "Set a timer in my code to run every 5 minutes."
+  - "What's a good timer app?"
+  - "The timer on my oven is broken."
+  - "Remind me in 10 minutes to call mom."
+  - "Wake me up in 20 minutes."
+  - "How long is five minutes in seconds?"
+  - "I'll be back in five minutes."
+  - "Give me five minutes to think."
+  - "Schedule a meeting for 30 minutes tomorrow."
+  - "How much time is left?"
+  - "Set a timer."
+  # apps
+  - "Open the pod bay doors."
+  - "Open a new tab."
+  - "Open the door."
+  - "Open my email."
+  - "Open the file I was working on."
+  - "Open YouTube."
+  - "Run the tests."
+  - "Start a task in inha app: fix the login."
+  - "Open PowerShell."
+  - "Open the registry editor."
+  - "Start the car."
+  - "Launch the rocket."
+  # lock / power
+  - "Lock the door."
+  - "How do I lock my screen?"
+  - "Shut down the computer."
+  - "Restart the PC."
+  - "Put the computer to sleep."
+  - "Lock in, we have work to do."
+  # time / date / weather
+  - "What time is it in Tokyo?"
+  - "What time does the store close?"
+  - "What time is sunset?"
+  - "What time is the meeting?"
+  - "What time zone am I in?"
+  - "What day is Christmas this year?"
+  - "What's the weather like?"
+  - "Is it going to rain tomorrow?"
+  - "What's the temperature?"
+  - "Do I need an umbrella?"
+  # radios
+  - "My Wi-Fi is slow."
+  - "Why does my Bluetooth keep disconnecting?"
+  - "Is Bluetooth on?"
+  - "Connect to the hotel Wi-Fi."
+  - "What's the Wi-Fi password?"
+  # misc commands that look close
+  - "Undo that."
+  - "Never mind."
+  - "Stop."
+  - "Take a screenshot."
+  - "What's on my screen?"
+  - "Change my wallpaper."
+  - "Snap this window to the left."
+  - "Turn on night light."
+  - "Set power mode to best performance."
+  - "More."
+  - "Again."
+  - "The other way."
+  - "Up."
+  - "Forty."
+  # everyday requests to the assistant that share words with commands
+  - "Make it shorter."
+  - "Turn it into a poem."
+  - "Turn left at the next street."
+  - "Next, tell me about the Romans."
+  - "Lower your voice."
+  - "Talk louder."
+  - "Pause the task."
+  - "Stop talking."
+  - "Be quiet."
+  - "Open the window."
+  - "Open a terminal."
+  - "Start the dishwasher."
+  - "Lock the front door."
+  - "How much time do I have before the meeting?"
+  - "Give me a minute."
+  - "Wait five minutes."
+  - "Previous slide."
+  - "Next slide."
+  - "More details please."
+  - "A bit more context please."
+  - "Make it 40 words."
+  - "The other way around, I meant London to Paris."
+  - "What's playing at the cinema tonight?"
+  - "Set an alarm for 7 am."
+  - "Go back to the last question."
+  - "The volume of traffic is high today."

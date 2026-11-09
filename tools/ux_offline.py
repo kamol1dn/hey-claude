@@ -13,7 +13,10 @@ island.
   (~0.33 s a word) and have a level (so the island's wave moves).
 - `ScriptedBrain`: brain.Brain's surface with canned, timed answers: a fast
   answer, a weather question on the local weather route (M5b: the card, then
-  the summary, no agent), a tool lookup, a Windows volume change, a long answer.
+  the summary, no agent), a tool lookup, a Windows volume change, a long
+  answer. Instant commands (M10) go through the real intent engine
+  (heyclaude/intents) and its executor, over `FakeWindows` (in-memory
+  volume / theme / brightness / media, the M9 tools' result shapes).
 - `RoomWake` / `RoomSTT` / `energy_vad`: the wake word fires when a "wake"
   clip ends in the SimRoom; the transcript is the text of the last clip said.
 """
@@ -244,6 +247,8 @@ class ScriptedBrain:
         self.warm.set()
         self.projects = None
         self.fast_first_s, self.agent_think_s, self.token_s = fast_first_s, agent_think_s, token_s
+        from heyclaude.intents import IntentEngine
+        self.intents = IntentEngine(cfg.setdefault("instant", {}), state_dir=None)
 
     def _stream(self, text):
         for i, w in enumerate(re.findall(r"\S+\s*", text)):
@@ -254,11 +259,17 @@ class ScriptedBrain:
 
     def handle(self, text):
         t = text.lower()
-        self.timing = {"route": 0.01}
+        self.timing = {"route": "scripted"}
+        if "undo" not in t and self.intents is not None:          # M10, as brain.Brain.handle
+            m = self.intents.match(text)
+            if m is not None:
+                self.timing = {"route": "local-instant", "match_ms": round(m.match_ms, 2)}
+                yield ("instant", m)
+                return
         if "weather" in t or "umbrella" in t:
             self.timing["route"] = "local-weather"
             yield ("weather", self.wx.query(text))
-        elif "volume" in t:
+        elif re.search(r"(?:set|turn|change|put).*volume", t):
             yield ("control", text)
         elif "undo" in t:
             yield ("undo",)
@@ -310,24 +321,91 @@ class ScriptedBrain:
         yield "Nothing to report."
 
 
-class FakeUndo:
-    """undo.UndoStack's surface: remembers the volume change, "undoes" it."""
+class FakeWindows:
+    """The M9 settings tools in memory (same result shapes), for instant commands offline."""
 
     def __init__(self):
+        self.volume, self.muted, self.theme, self.brightness = 45, False, "dark", 70
+        self.tracks = [{"title": "Blue in Green", "artist": "Miles Davis"}, {"title": "So What", "artist": "Miles Davis"},
+                       {"title": "Naima", "artist": "John Coltrane"}]
+        self.track, self.playing = 0, True
+        self.calls: list = []
+
+    def _t(self):
+        return dict(self.tracks[self.track % len(self.tracks)], status="playing" if self.playing else "paused")
+
+    def call(self, name, args):
+        self.calls.append((name, dict(args or {})))
+        a = args or {}
+        if name == "set_volume":
+            old, om = self.volume, self.muted
+            self.volume = max(0, min(100, a["level"] if a.get("level") is not None else old + a.get("delta", 0)))
+            if om and self.volume > 0:
+                self.muted = False
+            return {"old": old, "new": self.volume, "old_muted": om, "muted": self.muted}
+        if name == "set_mute":
+            old = self.muted
+            self.muted = (not old) if a.get("muted") is None else bool(a["muted"])
+            return {"old": old, "new": self.muted, "level": self.volume}
+        if name == "set_theme":
+            old = self.theme
+            self.theme = ("light" if old == "dark" else "dark") if a.get("mode") == "toggle" else a.get("mode", "dark")
+            return {"old": old, "new": self.theme, "old_apps": 0 if old == "dark" else 1,
+                    "old_system": 0 if old == "dark" else 1}
+        if name == "set_brightness":
+            old = self.brightness
+            self.brightness = max(0, min(100, a["level"] if a.get("level") is not None else old + a.get("delta", 0)))
+            return {"old": old, "new": self.brightness, "monitors": [{"id": "panel", "old": old, "new": self.brightness}]}
+        if name == "media_control":
+            before = self._t()
+            act = a.get("action")
+            if act == "next":
+                self.track += 1
+            elif act == "previous":
+                self.track -= 1
+            elif act in ("pause", "play", "play_pause"):
+                self.playing = act == "play" or (act == "play_pause" and not self.playing)
+            return {"old": before, "new": self._t(), "action": act}
+        if name == "now_playing":
+            return dict(self._t(), album="", app="Spotify.exe")
+        if name in ("get_volume",):
+            return {"level": self.volume, "muted": self.muted}
+        raise PermissionError(f"offline: {name} is not simulated")
+
+
+class FakeUndo:
+    """undo.UndoStack's surface over FakeWindows: the registry's real inverse calls."""
+
+    def __init__(self, windows=None):
         self.stack = []
+        self.windows = windows
 
     def can_undo(self, name, args, result):
-        return name.endswith("set_volume")
+        from heyclaude.mcp_windows import registry
+        return isinstance(result, dict) and bool(registry.inverse(name, args or {}, result))
 
     def record(self, name, args, result, effect=None):
         from types import SimpleNamespace
-        self.stack.append(SimpleNamespace(tool=name, args=args, calls=[], effect=effect, result=result))
+        from heyclaude.mcp_windows import registry
+        calls = registry.inverse(name, args or {}, result) or []
+        self.stack.append(SimpleNamespace(tool=name, args=args, calls=calls, effect=effect, result=result))
 
     def undo(self, effect_id=None):
         if not self.stack:
             return None
         ch = self.stack.pop()
-        return ch, {"ok": True, "old": 30, "new": 45}
+        res = None
+        for name, a in ch.calls:
+            short = name.split("__")[-1]
+            if self.windows is None:
+                break
+            if short in ("set_volume", "set_mute", "media_control", "set_brightness"):
+                res = self.windows.call(short, a)
+            elif short == "restore_theme":
+                res = self.windows.call("set_theme", {"mode": "light" if a.get("apps") == 1 else "dark"})
+            elif short == "restore_brightness":
+                res = self.windows.call("set_brightness", {"level": a["monitors"][0]["old"]})
+        return ch, res if res is not None else {"ok": True, "old": 30, "new": 45}
 
 
 def install(asst, room, cfg):
@@ -339,7 +417,9 @@ def install(asst, room, cfg):
     asst.brain = ScriptedBrain(cfg)
     asst.brain.agent.on_tool_result = asst._on_tool_result
     asst.brain.agent.on_tool_use = lambda ev: asst._ui_emit("tool", ev)
-    asst.undo_stack = FakeUndo()
+    asst.windows = FakeWindows()
+    asst.undo_stack = FakeUndo(asst.windows)
+    asst._setup_instant(runner=asst.windows.call)          # M10 over the fake settings
     asst.wake_gate = asst.wake_gate or SpeakingGate(cfg["wake"])
     asst.wake = RoomWake(room, asst.wake_gate)
     asst.stt = RoomSTT(room)

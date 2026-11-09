@@ -21,6 +21,10 @@ with the reason in the log and on the island:
 - Kokoro missing (model files, package) or failing on the CPU too: SAPI.
 - `stt.yield_to_premiere` (opt-in) moves Kokoro to the CPU while Premiere runs.
 
+Short sentences ("Volume 30.", "Dark mode.", the acks of M10's instant
+commands) are kept in a small cache once synthesised, per voice and speed,
+so saying them again costs nothing; `Speaker.prewarm` fills it ahead.
+
 PCM engines (Kokoro, piper) play through our own output stream, which also
 hands every played sample to `far_tap` (16 kHz) for echo cancellation.
 """
@@ -32,6 +36,7 @@ import re
 import subprocess
 import threading
 import time
+from collections import OrderedDict
 
 import numpy as np
 
@@ -43,6 +48,8 @@ FAR_RATE = 16000
 KOKORO_VOICES = ("af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_nova", "af_river",
                  "am_michael", "am_fenrir", "am_puck", "am_adam", "am_echo", "bf_emma", "bf_isabella",
                  "bf_alice", "bm_george", "bm_fable", "bm_lewis", "bm_daniel")
+ACK_MAX_CHARS = 40          # sentences this short are cached once synthesised (instant-command acks)
+ACK_CACHE_SIZE = 96
 KOKORO_VRAM_MB = 700        # fp32 model + activations, measured ~450 MB on an RTX 4060
 
 
@@ -635,6 +642,9 @@ class Speaker:
         if hasattr(self.player, "on_chunk"):
             self.player.on_chunk = self._sentence
         self.synth_ms: list[float] = []   # per sentence, for the log
+        self._ack_cache: OrderedDict = OrderedDict()   # (voice, speed, text) -> (pcm, rate)
+        self._synth_lock = threading.Lock()            # the speaking thread and prewarm() share the engine
+        self.ack_hits = 0
         self._ready = threading.Event()
         threading.Thread(target=self._run, daemon=True, name="tts").start()
         self._ready.wait(60)
@@ -675,7 +685,7 @@ class Speaker:
         if eng is not None and eng.pcm:
             t = time.perf_counter()
             try:
-                samples, rate = self.voice.synth(text)
+                samples, rate = self.synth_cached(text)
             except _UseSapi:
                 eng = None
             else:
@@ -698,6 +708,50 @@ class Speaker:
         self.player.wait(lambda: gen == self._gen)   # finish any PCM still playing first
         if gen == self._gen:
             sapi.speak(text)
+
+    def _ack_key(self, text: str):
+        if len(text) > ACK_MAX_CHARS:
+            return None
+        return (self.voice.label, str(self.cfg.get("voice") or ""), float(self.cfg.get("speed") or 1.0), text)
+
+    def synth_cached(self, text: str):
+        """voice.synth, with short sentences served from (and added to) the ack cache."""
+        key = self._ack_key(text)
+        if key is not None:
+            hit = self._ack_cache.get(key)
+            if hit is not None:
+                self._ack_cache.move_to_end(key)
+                self.ack_hits += 1
+                return hit
+        with self._synth_lock:
+            samples, rate = self.voice.synth(text)
+        if key is not None:
+            self._ack_cache[key] = (samples, rate)
+            while len(self._ack_cache) > ACK_CACHE_SIZE:
+                self._ack_cache.popitem(last=False)
+        return samples, rate
+
+    def prewarm(self, phrases, delay_s: float = 4.0):
+        """Synthesise short phrases ahead (in the background, after start-up settles),
+        so an instant command's ack plays at once. Kokoro/piper only."""
+        def go():
+            time.sleep(delay_s)
+            done = 0
+            for p in phrases:
+                eng = self.voice.current
+                if eng is None or not getattr(eng, "pcm", False) or self._ack_key(p) in self._ack_cache:
+                    continue
+                if self.busy:                   # never compete with a reply
+                    time.sleep(1.0)
+                try:
+                    self.synth_cached(p)
+                    done += 1
+                except Exception as e:
+                    print(f"[tts] prewarm: {e}")
+                    return
+            if done:
+                print(f"[tts] {done} short acks cached ({self.voice.label})")
+        threading.Thread(target=go, daemon=True, name="tts-prewarm").start()
 
     def _sentence(self, text, secs):
         cb = self.on_sentence

@@ -46,6 +46,7 @@ class Bridge(QObject):
     # M5 (the QML island, island_qml.py)
     tts_level = Signal(float)       # loudness of what it is saying right now, 0..1 (~30 Hz while speaking)
     widget = Signal(dict)           # a response widget spec from the answer (widgets.py, ui/widgets.schema.json)
+    widget_clear = Signal()         # M10: "cancel the timer": take the timer card down
     tool = Signal(dict)             # a tool call starts/ends: {"id", "name", "phase": "start"|"end", "input"}
     usage = Signal(dict)            # plan usage as Claude Code reports it: {"five_hour": 0.05, "seven_day": 0.16, ...}
     mismatch = Signal()             # the speaker check rejected a wake ("not your voice?")

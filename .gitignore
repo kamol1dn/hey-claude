@@ -7,3 +7,7 @@ samples/*.wav
 !samples/question.wav
 !samples/task.wav
 !samples/lookup.wav
+
+# trained wake-word models (partly trained on your voice; this repo is public)
+models/*.onnx
+models/*.tflite

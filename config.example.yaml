@@ -7,13 +7,22 @@ app:
   start_with_windows: false  # Startup-folder shortcut (pythonw -m heyclaude, no console)
 
 wake:
-  # Stock openWakeWord model until a custom "hey claude" one is trained
-  # (see docs/train-hey-claude.md). Either a stock name (hey_jarvis, alexa,
-  # hey_mycroft, hey_rhasspy) or a path to a .onnx file.
-  model: hey_jarvis
+  # The "hey claude" model: a path to a .onnx file (relative = inside this
+  # folder) or a stock openWakeWord name (hey_jarvis, alexa, hey_mycroft,
+  # hey_rhasspy). If the file is missing or won't load, it falls back to the
+  # stock hey_jarvis model at threshold 0.5: the log says why and the island
+  # shows "hey jarvis". Training one: docs/train-hey-claude.md.
+  model: models/hey_claude.onnx
+  # How sure the model must be. tools/wake_eval.py measures your samples and
+  # a long recording without the wake word, and recommends a value.
   threshold: 0.5
   # Seconds to ignore the wake word after an interaction ends.
   cooldown: 1.0
+  # Ignore the wake word while the assistant itself is speaking, and for
+  # speaking_tail_s after it stops (echo, audio still in flight). Clicking the
+  # island or the hotkey still interrupts it.
+  suppress_while_speaking: true
+  speaking_tail_s: 0.7
 
 listen:
   device: null            # sounddevice input index or name; null = Windows default mic

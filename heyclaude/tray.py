@@ -68,6 +68,7 @@ class Tray(QObject):
     pause_requested = Signal(int)      # seconds
     settings_requested = Signal()
     logs_requested = Signal()
+    record_samples_requested = Signal()
     quit_requested = Signal()
 
     def __init__(self, parent=None, hotkey_label: str = ""):
@@ -84,11 +85,14 @@ class Tray(QObject):
         self.act_pause = QAction("Pause for 1 hour", self.menu, triggered=self._pause_clicked)
         self.act_settings = QAction("Settings…", self.menu, triggered=lambda: self.settings_requested.emit())
         self.act_logs = QAction("Open logs", self.menu, triggered=lambda: self.logs_requested.emit())
+        self.act_record = QAction("Record wake samples…", self.menu,
+                                  triggered=lambda: self.record_samples_requested.emit())
         self.act_quit = QAction("Quit", self.menu, triggered=lambda: self.quit_requested.emit())
         for a in (self.act_talk, self.act_listen, self.act_pause):
             self.menu.addAction(a)
         self.menu.addSeparator()
         self.menu.addAction(self.act_settings)
+        self.menu.addAction(self.act_record)
         self.menu.addAction(self.act_logs)
         self.menu.addSeparator()
         self.menu.addAction(self.act_quit)

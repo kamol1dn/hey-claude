@@ -107,6 +107,7 @@ mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ fas
 | `--muted` | start with listening off (mic closed); the hotkey and "Talk now" still work. |
 | `--quit` | ask the running hey-claude to quit, then exit. |
 | `--config f.yaml` | use another config file instead of `config.yaml`. |
+| `--record-wake-samples [N]` | record N (default 40) clips of you saying "hey claude" for training and `tools\wake_eval.py`, then exit. `--auto`: no Enter between clips. See [docs/train-hey-claude.md](docs/train-hey-claude.md). |
 | `--no-ui` / `--no-tray` | no island / no tray icon. |
 
 `--simulate` and `--text` runs are treated as tests: they skip the
@@ -124,6 +125,7 @@ listening is off). Left-click it to talk. Right-click for:
 | **Listening** | wake word on/off. Off **closes the microphone stream**, so Windows' mic-in-use indicator goes away; the island turns into a muted grey pill |
 | **Pause for 1 hour** | listening off, back on by itself after an hour ("Resume listening" ends it early) |
 | **Settings…** | the settings window, below |
+| **Record wake samples…** | opens the "hey claude" sample recorder in a console window; listening is paused until you close it |
 | **Open logs** | `state\logs\` (the app log and every task's log) |
 | **Quit** | |
 
@@ -163,7 +165,7 @@ now** button after saving them. Everything else applies on save:
 
 | applies on save | needs a restart |
 |---|---|
-| wake threshold and cooldown, `listen.*`, `tasks.*` (permission mode, allowed tools, model, parallel limit), projects for "start a task in …", the agent's filler line, `island.*`, hotkey, start with Windows, `stt.*_busy_pct`, `stt.yield_to_premiere` | wake model, the rest of `stt.*` (device, models), `tts.*` (voice, rate, backend), `fast.*`, the agent's on/off, model and allowed tools, `claude.exe` |
+| wake threshold, cooldown and speaking suppression, `listen.*`, `tasks.*` (permission mode, allowed tools, model, parallel limit), projects for "start a task in …", the agent's filler line, `island.*`, hotkey, start with Windows, `stt.*_busy_pct`, `stt.yield_to_premiere` | wake model, the rest of `stt.*` (device, models), `tts.*` (voice, rate, backend), `fast.*`, the agent's on/off, model and allowed tools, `claude.exe` |
 
 New project names are routed right away; whisper's spelling hints and the
 quick model's project list pick them up after a restart.
@@ -236,18 +238,22 @@ Make a test clip with a Windows voice:
 
 | say | what happens |
 |---|---|
-| *hey jarvis … what's 15% of 80?* | quick answer from haiku, spoken |
-| *hey jarvis … start a task in hey claude: add a license file* | headless Claude Code run in `D:\coding\hey-claude` |
-| *hey jarvis … in the inha app, find why login is slow* | the model notices it's real work and turns it into a task |
-| *hey jarvis … who messaged me on Telegram today?* | "Let me check." → the warm tool agent answers (needs the MCP set up, see below) |
-| *hey jarvis … how are my tasks going?* | spoken status of running tasks |
-| *hey jarvis* while it's talking | cuts it off and listens again |
+| *hey claude … what's 15% of 80?* | quick answer from haiku, spoken |
+| *hey claude … start a task in hey claude: add a license file* | headless Claude Code run in `D:\coding\hey-claude` |
+| *hey claude … in the inha app, find why login is slow* | the model notices it's real work and turns it into a task |
+| *hey claude … who messaged me on Telegram today?* | "Let me check." → the warm tool agent answers (needs the MCP set up, see below) |
+| *hey claude … how are my tasks going?* | spoken status of running tasks |
 | click the idle pill, or press the hotkey (`Ctrl+Alt+Space`) | talk without the wake word |
-| click while speaking | stop speaking |
+| click while speaking, or the hotkey | stop speaking (and, with the hotkey, listen again) |
 | right-click the island | menu: talk now / stop / open logs / quit (the tray menu has the rest) |
 
-The wake word is the stock **"hey jarvis"** model until a "hey claude" model
-is trained. See [docs/train-hey-claude.md](docs/train-hey-claude.md). Project
+The wake word is **"hey claude"** once its model is trained and saved as
+`models\hey_claude.onnx` (see [docs/train-hey-claude.md](docs/train-hey-claude.md):
+record your voice, train in Colab, measure with `tools\wake_eval.py`). Until
+then it falls back to openWakeWord's stock **"hey jarvis"**: the idle island
+shows which one is loaded, and the log says why it fell back. While it's
+talking, the wake word is ignored (plus 0.7 s), so its own voice can't wake it;
+click or use the hotkey to cut it off. Project
 names don't have to be heard perfectly: "in ha app" still matches `inha app`,
 and the names are given to whisper as a spelling hint.
 
@@ -438,15 +444,19 @@ heyclaude/
   sysload.py      GPU (NVML) and CPU (psutil) load, sampled in the background
   applog.py       state/logs/app.log (rotating)
   config.py       config.yaml load/save, what applies live vs after a restart
-  listen.py       mic (sounddevice), openWakeWord, webrtcvad recorder, wav simulator
+  listen.py       mic (sounddevice), openWakeWord (+ hey_jarvis fallback, quiet while speaking),
+                  webrtcvad recorder, wav simulator
+  wake_samples.py record your own "hey claude" clips (state/wake_samples), zip them for training
   stt.py          faster-whisper: GPU by default, CPU when the GPU is busy or fails
   brain.py        router, tier (a) chat (CLI or SDK), tier (b) warm tool agent, TASK/LOOKUP detection
   tasks.py        headless claude runs, stream-json parsing, logs, session ids
   tts.py          SAPI (direct COM), Piper, Kokoro; sentence streaming
   island.py       the pill, task list, log window
   claude_cli.py   finds claude.exe, launch flags
-tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py
-tests/            offline tests (python tests\test_offline.py)
+tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
+                  wake_eval.py (wake word hit rate, false wakes per hour, threshold)
+tests/            offline tests (python tests\test_offline.py, python tests\test_wake.py)
+models/           the trained hey_claude.onnx goes here (git-ignored)
 docs/             training a "hey claude" wake word
 ```
 
@@ -457,8 +467,10 @@ docs/             training a "hey claude" wake word
   `sapi` backend therefore drives `SAPI.SpVoice` directly through pywin32
   (which pyttsx3 installs). It's the same voices and engine, with reliable
   async speech and instant stop.
-- The wake word stays live while it speaks (so you can interrupt). "Hey
-  Jarvis" never appears in its own replies, so it doesn't trigger itself.
+- The wake word is ignored while it speaks and for `wake.speaking_tail_s`
+  (0.7 s) after, so a reply that says "Claude" can't wake it. Interrupt with a
+  click or the hotkey; `wake.suppress_while_speaking: false` brings back
+  interrupting by voice.
 - Only one quick question is handled at a time. Tasks run in parallel (up to
   `tasks.max_parallel`).
 - Started from inside a Claude Code session, hey-claude strips the

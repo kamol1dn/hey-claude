@@ -63,7 +63,25 @@ small hooks in `assistant.py`.
 window; the toggle frees the mic (check Windows' mic-in-use indicator);
 settings changes persist.
 
-## M2: A real "hey claude" wake word
+## M2: A real "hey claude" wake word ⏳ built, waiting for the trained model (2026-11-09)
+
+**Status:** everything except the model itself is built; see
+[docs/train-hey-claude.md](docs/train-hey-claude.md). The sample recorder
+(`--record-wake-samples`, tray → Record wake samples…) saves clips to
+`state/wake_samples/`, holds every 4th clip out of training, and zips the
+rest for Colab. `tools/wake_eval.py` measures the hit rate, false wakes per hour
+on any audio/video files (ffmpeg, parallel CPU processes, ~25–75x real time),
+and recommends a threshold (`--apply` writes it). The wake word is ignored
+while TTS plays, plus `wake.speaking_tail_s` (0.7 s), and the model is reset
+when that ends. `wake.model` defaults to `models/hey_claude.onnx`; if that's
+missing or broken it falls back to hey_jarvis at 0.5, with the reason in the log and the
+island label. 25 new offline tests (`tests/test_wake.py`) pass, and so do the 39 existing ones;
+`--simulate samples\question.wav --exit` still answers (on the fallback).
+The official openWakeWord Colab notebooks are broken on current Colab, so the
+doc uses the patched notebook from openWakeWord PR #359, plus one pasted cell.
+Local training would need WSL2, which isn't installed. **Not done yet:**
+training (the user runs Colab) and the ≥95% / <1 per 3 h measurement with
+`wake_eval.py` on the user's lecture audio.
 
 **Goal:** wake on "hey claude", rarely on anything else.
 

@@ -6,7 +6,9 @@ frames inside each block.
 """
 from __future__ import annotations
 
+import os
 import queue
+import re
 import threading
 import time
 import wave
@@ -116,26 +118,147 @@ class WavSource:
             i += BLOCK
 
 
-class WakeWord:
-    def __init__(self, model: str, threshold: float):
-        import openwakeword
-        from openwakeword.model import Model
+STOCK_FALLBACK = "hey_jarvis"     # used when the configured model is missing or broken
+FALLBACK_THRESHOLD = 0.5          # the stock models are trained for 0.5
 
-        if not model.endswith(".onnx"):
-            # Stock models live inside the package; fetch them once.
-            try:
-                openwakeword.utils.download_models([model])
-            except Exception:
-                pass
-        self.model = Model(wakeword_models=[model], inference_framework="onnx")
-        self.threshold = threshold
+
+def resolve_wake_model(model, root: Path | None = None) -> tuple[str, str | None]:
+    """`wake.model` -> (what to load, why it fell back to hey_jarvis or None).
+
+    A stock name (hey_jarvis, alexa...) is returned as is. Anything that looks
+    like a file (.onnx, or a path) is resolved against the repo folder when
+    relative; a missing file falls back to the stock hey_jarvis model.
+    """
+    m = str(model or "").strip()
+    if not m:
+        return STOCK_FALLBACK, "no wake.model set"
+    if not (m.lower().endswith((".onnx", ".tflite")) or "/" in m or "\\" in m):
+        return m, None
+    if root is None:
+        from .config import ROOT as root
+    p = Path(os.path.expandvars(os.path.expanduser(m)))
+    if not p.is_absolute():
+        p = root / p
+    if p.suffix.lower() == ".tflite":          # we run onnxruntime; use the .onnx next to it
+        p = p.with_suffix(".onnx")
+    if not p.is_file():
+        return STOCK_FALLBACK, f"{m} not found"
+    return str(p), None
+
+
+def wake_label(name_or_path: str) -> str:
+    """'models/hey_claude.onnx' or 'hey_jarvis_v0.1' -> 'hey claude' / 'hey jarvis'."""
+    base = os.path.splitext(os.path.basename(str(name_or_path)))[0]
+    return re.sub(r"_v?[\d.]+$", "", base).replace("_", " ")
+
+
+def _load_oww(model: str):
+    import openwakeword
+    from openwakeword.model import Model
+
+    if not model.endswith(".onnx"):
+        # Stock models live inside the package; fetch them once.
+        try:
+            openwakeword.utils.download_models([model])
+        except Exception:
+            pass
+    return Model(wakeword_models=[model], inference_framework="onnx")
+
+
+class SpeakingGate:
+    """Says whether wake triggers should be ignored because the assistant itself
+    is talking (TTS playing), or stopped less than `wake.speaking_tail_s` ago
+    (room echo, audio still in the mic queue).
+
+    `cfg` is the live `wake` config section; both keys are read on every call,
+    so the settings window changes them without a restart.
+    """
+
+    def __init__(self, cfg: dict | None = None, clock=time.monotonic):
+        self.cfg = cfg if cfg is not None else {}
+        self.clock = clock
+        self._speaking = False
+        self._until = 0.0
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.cfg.get("suppress_while_speaking", True))
+
+    def set_speaking(self, on: bool):
+        if on:
+            self._speaking = True
+        elif self._speaking:
+            self._speaking = False
+            self._until = self.clock() + float(self.cfg.get("speaking_tail_s", 0.7))
+
+    def suppressed(self) -> bool:
+        return self.enabled and (self._speaking or self.clock() < self._until)
+
+
+class WakeWord:
+    """openWakeWord on the CPU (onnxruntime).
+
+    A missing or unloadable `wake.model` file falls back to the stock
+    hey_jarvis model at threshold 0.5; `fallback` then says why.
+    With a `gate` (SpeakingGate), triggers are ignored while the assistant is
+    speaking. The model keeps hearing the audio meanwhile, and is reset when
+    the gate opens, so its own voice still in the model's window can't fire it.
+    """
+
+    def __init__(self, model: str, threshold: float, gate: SpeakingGate | None = None, loader=None):
+        load = loader or _load_oww
+        path, why = resolve_wake_model(model)
+        try:
+            self.model = load(path)
+        except Exception as e:
+            if path == STOCK_FALLBACK:
+                raise
+            why, path = f"{model} failed to load ({e})", STOCK_FALLBACK
+            self.model = load(path)
+        self.fallback = why
+        self.source = path
+        self._threshold = FALLBACK_THRESHOLD if why else float(threshold)
         self.name = next(iter(self.model.models))
+        self.label = wake_label(self.name)
+        self.gate = gate
+        self._gated = False               # the gate was closed on the last block
+        self._gated_hit = False           # ...and the model fired behind it
+        self.ignored = 0                  # triggers swallowed while speaking (for the log)
+        if why:
+            print(f"[wake] {why}; using the stock hey_jarvis model at threshold {FALLBACK_THRESHOLD} "
+                  f"(say \"hey jarvis\"). See docs/train-hey-claude.md")
+        else:
+            print(f"[wake] {self.label} ({path}), threshold {self._threshold}")
+
+    @property
+    def threshold(self) -> float:
+        return self._threshold
+
+    @threshold.setter
+    def threshold(self, value: float):
+        # On the hey_jarvis fallback the configured threshold belongs to the
+        # missing model; keep the stock one.
+        if not self.fallback:
+            self._threshold = float(value)
 
     def feed(self, block: np.ndarray) -> float:
         return float(self.model.predict(block)[self.name])
 
     def hit(self, block: np.ndarray) -> bool:
-        return self.feed(block) >= self.threshold
+        score = self.feed(block)
+        if self.gate is not None:
+            if self.gate.suppressed():
+                if score >= self._threshold and not self._gated_hit:
+                    self._gated_hit = True
+                    self.ignored += 1
+                    print(f"[wake] ignored a trigger while speaking (score {score:.2f})")
+                self._gated = True
+                return False
+            if self._gated:               # just stopped speaking: forget what it heard
+                self._gated = self._gated_hit = False
+                self.model.reset()
+                return False
+        return score >= self._threshold
 
     def reset(self):
         self.model.reset()

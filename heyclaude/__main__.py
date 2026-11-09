@@ -5,12 +5,12 @@
     python -m heyclaude --cpu           # whisper on the CPU (stt.device in config.yaml is gpu by default)
     python -m heyclaude --text          # type instead of talk (no mic, no whisper)
     python -m heyclaude --simulate samples\\question.wav --exit   # feed a wav as the mic
+    python -m heyclaude --record-wake-samples [N] [--auto]       # record your own "hey claude" clips
 """
 from __future__ import annotations
 
 import argparse
 import os
-import re
 import signal
 import sys
 import threading
@@ -29,9 +29,17 @@ def main():
     ap.add_argument("--no-tray", action="store_true", help="no tray icon")
     ap.add_argument("--muted", action="store_true", help="start with listening off (mic closed)")
     ap.add_argument("--quit", action="store_true", help="ask the running hey-claude to quit, then exit")
+    ap.add_argument("--record-wake-samples", nargs="?", type=int, const=40, metavar="N",
+                    help="record N (default 40) clips of you saying \"hey claude\" into state/wake_samples")
+    ap.add_argument("--auto", action="store_true", help="with --record-wake-samples: no Enter between clips")
     args = ap.parse_args()
 
-    from . import applog, config
+    from . import config
+    if args.record_wake_samples is not None:
+        from . import wake_samples
+        sys.exit(wake_samples.main([str(args.record_wake_samples)] + (["--auto"] if args.auto else []),
+                                   cfg=config.load(args.config)))
+    from . import applog
     log_path = applog.setup()
     cfg = config.load(args.config)
     if args.muted:
@@ -85,6 +93,35 @@ def main():
 
     def open_logs():
         os.startfile(str(config.LOG_DIR))
+
+    def record_wake_samples():
+        """Tray -> "Record wake samples...": the recorder in its own console window,
+        with listening paused meanwhile so the assistant doesn't answer every clip."""
+        import subprocess
+        exe = sys.executable
+        if os.path.basename(exe).lower() == "pythonw.exe":       # needs a console for the prompts
+            exe = os.path.join(os.path.dirname(exe), "python.exe")
+        cmd = [exe, "-m", "heyclaude.wake_samples", "--pause-at-end"]
+        if args.config:
+            cmd += ["--config", args.config]
+        was_on = asst.listening.is_set()
+        if was_on:
+            asst.set_listening(False)
+        try:
+            p = subprocess.Popen(cmd, cwd=str(config.ROOT), creationflags=subprocess.CREATE_NEW_CONSOLE)
+        except Exception as e:
+            print(f"[wake] couldn't start the sample recorder: {e}")
+            if was_on:
+                asst.set_listening(True)
+            return
+        print("[wake] recording samples in a new window; listening is paused until it closes")
+
+        def wait():
+            p.wait()
+            print("[wake] sample recorder closed")
+            if was_on and not asst.listening.is_set():
+                asst.set_listening(True)
+        threading.Thread(target=wait, daemon=True, name="wake-samples").start()
 
     # -- settings window --------------------------------------------------------
     settings = {"win": None}
@@ -160,8 +197,8 @@ def main():
     # -- island -------------------------------------------------------------------
     island = None
     if not args.no_ui:
-        wake = os.path.splitext(os.path.basename(cfg["wake"]["model"]))[0]
-        island = Island(bridge, cfg["island"], wake_label=re.sub(r"_v?[\d.]+$", "", wake).replace("_", " "))
+        from .listen import resolve_wake_model, wake_label
+        island = Island(bridge, cfg["island"], wake_label=wake_label(resolve_wake_model(cfg["wake"]["model"])[0]))
         island.activate.connect(asst.talk_now)
         island.stop_speaking.connect(lambda: asst.speaker.stop())
         island.quit_requested.connect(app.quit)
@@ -169,6 +206,8 @@ def main():
         def attach_tm():
             asst.ready.wait()
             island.tm = asst.tasks
+            if getattr(asst, "wake", None) is not None:
+                island.wake_label = asst.wake.label     # what actually loaded (fallback included)
         threading.Thread(target=attach_tm, daemon=True).start()
 
     # -- tray -----------------------------------------------------------------------
@@ -181,6 +220,7 @@ def main():
         tray.pause_requested.connect(lambda secs: asst.set_listening(False, pause_seconds=secs))
         tray.settings_requested.connect(open_settings)
         tray.logs_requested.connect(open_logs)
+        tray.record_samples_requested.connect(record_wake_samples)
         tray.quit_requested.connect(app.quit)
         bridge.listening.connect(lambda on, until: tray.set_listening(on, until or None))
         tray.set_listening(asst.listening.is_set())

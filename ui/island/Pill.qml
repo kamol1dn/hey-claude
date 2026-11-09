@@ -15,8 +15,7 @@ Rectangle {
          : primary ? Qt.rgba(217 / 255, 119 / 255, 87 / 255, ma.containsMouse ? 1 : 0.85)
          : accent ? Qt.rgba(217 / 255, 119 / 255, 87 / 255, ma.containsMouse ? 0.30 : 0.16)
          : Qt.rgba(1, 1, 1, ma.containsMouse ? 0.18 : 0.08)
-    Text {
-        anchors.centerIn: parent
+    InkText {
         text: b.label
         color: !b.enabled_ ? "#6A6A6A" : b.primary ? "#080808" : b.accent ? "#EC9A78" : "#F2F2F2"
         font.family: "Segoe UI Variable Text"; font.pointSize: 8

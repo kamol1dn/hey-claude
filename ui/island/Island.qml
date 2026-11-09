@@ -374,7 +374,7 @@ Item {
             width: 62; height: 22; radius: 11
             x: o.w - 14 - width; y: Math.min(o.head, 40) / 2 - 11
             color: Qt.rgba(1, 1, 1, 0.08 + 0.10 * (o.hn || 0))
-            Text { anchors.centerIn: parent; text: "not me"; font.family: root.family; font.pointSize: 9
+            InkText { text: "not me"; font.family: root.family; font.pointSize: 9
                 color: (o.hn || 0) > 0.5 ? root.cFg : root.cDim }
         }
 

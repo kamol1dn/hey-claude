@@ -523,6 +523,38 @@ weather (keyless Open-Meteo tool, animated conditions), calendar agenda,
 timer, task card, link/file, code, image, and the Telegram set.
 
 Next packs, each with its own small animation:
+- **Weather, upgraded with [weather-mcp](https://github.com/weather-mcp/weather-mcp)**
+  (MIT, `@dangahagan/weather-mcp` on npm, 17 tools, no API keys: NOAA, Open-Meteo,
+  MET Norway). Keep M5's small built-in Open-Meteo tool as the fast default and
+  the fallback; weather-mcp adds depth.
+  - **Tools used:**
+    - `get_weather_summary`, `get_forecast` (up to 16 days, a 15-minute
+      precipitation nowcast in Central Europe/N. America, moon and twilight
+      almanac);
+    - `get_current_conditions`;
+    - `get_alerts` (official warnings, sorted by severity);
+    - `get_air_quality` (AQI, UV, pollen);
+    - `search_location`.
+    Enable these beyond its `basic` preset; leave the US-only and niche tools
+    (rivers, wildfires, lightning, marine, radar) off unless asked.
+  - **Install:** pin a version (`npx -y @dangahagan/weather-mcp@<x.y.z>`, not
+    `@latest`) and check its npm provenance. Only the official
+    `@dangahagan` scope: the README warns about stale republished forks.
+    Its server name is `weather-mcp`, so it doesn't clash with our built-in
+    `weather`.
+  - **Speed:** the stress test measured ~10 s from speech end to first audio
+    on a weather question routed through the agent. So hey-claude calls
+    weather-mcp **directly as an MCP client** on the local weather route (no
+    agent hop), keeps a warm stdio connection, and relies on its built-in cache.
+    The card shows immediately, with the spoken summary right behind.
+  - **New widget states:**
+    - an alert banner (a severity colour, the issuing service credited);
+    - an AQI/UV/pollen strip;
+    - a "rain in N minutes" nowcast bar;
+    - sunrise/sunset and moon phase;
+    - a "how sure is this?" model-agreement chip when asked.
+  - Respect its fair-use limits: cache, never poll in the background more than
+    every ~30 min for the idle weather glance.
 - **Now playing:** album art, progress, controls (M9's media tools).
 - **System:** battery, CPU/GPU load and VRAM, with hey-claude's own devices
   shown ("stt: gpu (turbo)").

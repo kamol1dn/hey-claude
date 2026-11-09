@@ -1,0 +1,75 @@
+{
+ "id": "telegram_message",
+ "name": "Telegram message",
+ "api": "1.0",
+ "description": "one Telegram message or a short thread; replies indented",
+ "title": "Telegram · {chat}",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": true,
+ "ttl_s": 12,
+ "icon": "telegram",
+ "example": {
+  "chat": "Aziz",
+  "link": "tg://resolve?domain=aziz",
+  "messages": [
+   {
+    "sender": "Aziz",
+    "text": "are we still on for 7?",
+    "time": "18:42"
+   },
+   {
+    "sender": "You",
+    "text": "yes!",
+    "time": "18:44",
+    "reply": true
+   }
+  ]
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "messages"
+  ],
+  "properties": {
+   "chat": {
+    "type": "string",
+    "maxLength": 50
+   },
+   "link": {
+    "type": "string",
+    "maxLength": 200,
+    "pattern": "^tg://"
+   },
+   "messages": {
+    "type": "array",
+    "maxItems": 5,
+    "items": {
+     "type": "object",
+     "required": [
+      "text"
+     ],
+     "properties": {
+      "sender": {
+       "type": "string",
+       "maxLength": 50
+      },
+      "text": {
+       "type": "string",
+       "maxLength": 600
+      },
+      "time": {
+       "type": "string",
+       "maxLength": 16
+      },
+      "reply": {
+       "type": "boolean"
+      }
+     }
+    }
+   }
+  }
+ }
+}

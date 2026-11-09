@@ -170,6 +170,125 @@ def test_telegram_avatars_only_from_the_cache():
     assert W._avatar("") == ""
 
 
+# ------------------------------------------------------------------ widget plug-ins
+FIRST_PACKS = {"weather", "calendar_list", "timer", "task_card", "link", "code", "image",
+               "telegram_chats", "telegram_message", "telegram_draft", "text"}
+
+
+def test_every_first_pack_widget_is_a_valid_plugin():
+    reg = W.registry()
+    assert set(reg) >= FIRST_PACKS, set(reg) ^ FIRST_PACKS
+    for wid, man in reg.items():
+        folder = ROOT / "widgets" / wid
+        assert man["id"] == wid and (folder / "Widget.qml").exists()
+        assert W.validate(man["example"], man["schema"]) == [], wid
+        assert str(man["api"]).startswith("1.")
+        assert man["size"]["width"] <= 460 and man["size"]["max_height"] <= 280, wid
+        w = W.for_qml({"widget": wid, "data": man["example"]})
+        assert w["qml"].endswith(f"widgets/{wid}/Widget.qml") and w["title"], wid
+
+
+def test_a_broken_plugin_is_skipped_not_fatal():
+    with tempfile.TemporaryDirectory() as d:
+        bad = Path(d) / "broken"
+        bad.mkdir()
+        (bad / "widget.json").write_text('{"id": "other", "api": "9.0"}', encoding="utf-8")
+        good = Path(d) / "mini"
+        good.mkdir()
+        (good / "widget.json").write_text(json.dumps({"id": "mini", "name": "Mini", "api": "1.0", "description": "x",
+                                                     "schema": {"type": "object"}, "example": {}}), encoding="utf-8")
+        (good / "Widget.qml").write_text("import QtQuick\nItem {}\n", encoding="utf-8")
+        reg = W.registry.__wrapped__(d)
+        assert set(reg) == {"mini"}
+
+
+def test_widgets_and_effects_draw_on_the_gpu():
+    """No CPU-painted Canvas in widget plug-ins, effects or glyphs (Shapes / items / ShaderEffect only)."""
+    files = list((ROOT / "widgets").glob("*/Widget.qml")) + [ROOT / "ui" / "island" / n for n in
+                                                            ("EffectRow.qml", "Glyph.qml", "WidgetCard.qml", "Sky.qml", "Extras.qml")]
+    for f in files:
+        assert "Canvas" not in f.read_text(encoding="utf-8"), f
+
+
+def test_titles_from_the_manifest_template():
+    man = W.registry()["weather"]
+    assert W.title_for(man, {"location": "Tashkent, Uzbekistan"}) == "Weather · Tashkent, Uzbekistan"
+    assert W.title_for(man, {}) == "Weather"
+
+
+# ------------------------------------------------------------------ weather (Open-Meteo)
+_GEO = {"results": [{"name": "Tashkent", "latitude": 41.26, "longitude": 69.21, "country": "Uzbekistan"}]}
+_FC = {"current": {"time": "2026-11-09T21:45", "temperature_2m": 15.2, "apparent_temperature": 13.9, "weather_code": 1,
+                   "is_day": 0, "wind_speed_10m": 11.6},
+       "hourly": {"time": [f"2026-11-09T{h:02d}:00" for h in range(24)] + [f"2026-11-10T{h:02d}:00" for h in range(24)],
+                  "temperature_2m": [10 + h % 7 for h in range(48)], "weather_code": [61 if h % 5 == 0 else 2 for h in range(48)],
+                  "is_day": [1 if 7 <= h % 24 <= 17 else 0 for h in range(48)]},
+       "daily": {"time": ["2026-11-09", "2026-11-10", "2026-11-11"], "weather_code": [61, 0, 3],
+                 "temperature_2m_max": [20.1, 16.4, 18.0], "temperature_2m_min": [13.6, 9.2, 8.8]}}
+
+
+def _fetch_counter():
+    calls = []
+
+    def fetch(url, params, timeout=8.0):
+        calls.append(url)
+        return _GEO if "geocoding" in url else _FC
+    return fetch, calls
+
+
+def test_weather_maps_open_meteo_onto_the_widget():
+    from heyclaude import weather as WX
+    WX._cache.clear()
+    WX._places.clear()
+    fetch, calls = _fetch_counter()
+    d = WX.forecast("Tashkent", fetch=fetch, now=1000.0)
+    assert d["location"] == "Tashkent, Uzbekistan" and d["temp"] == 15 and d["icon"] == "night"
+    assert d["condition"] == "Mainly clear" and d["feels"] == 14 and d["high"] == 20 and d["low"] == 14
+    assert [h["time"] for h in d["hourly"]] == ["22:00", "23:00", "00:00", "01:00", "02:00", "03:00"]
+    assert [x["day"] for x in d["days"]] == ["Today", "Tue", "Wed"] and d["days"][1]["icon"] == "sun"
+    w = W.normalise({"widget": "weather", "data": d})
+    assert w is not None and w["widget"] == "weather"                     # the tool result IS the widget data
+    WX.forecast("tashkent", fetch=fetch, now=1300.0)                      # cached: same place, 5 min later
+    assert len(calls) == 2
+    WX.forecast("Tashkent", fetch=fetch, now=1000.0 + 700)                # 11+ min later: the forecast again
+    assert len(calls) == 3
+
+
+def test_weather_errors_say_what_to_do():
+    from heyclaude import weather as WX
+    WX._places.clear()
+    try:
+        WX.forecast("", fetch=lambda *a, **k: {})
+        raise AssertionError("expected an error")
+    except WX.WeatherError as e:
+        assert "weather.location" in str(e)
+    try:
+        WX.forecast("Nowhereville", fetch=lambda *a, **k: {"results": []})
+        raise AssertionError("expected an error")
+    except WX.WeatherError as e:
+        assert "Nowhereville" in str(e)
+    assert WX.describe(95) == ("Thunderstorm", "storm") and WX.describe(0, False)[1] == "night"
+
+
+def test_the_weather_tool_result_becomes_the_card():
+    from heyclaude import weather as WX
+    d = WX.to_widget(_FC, "Tashkent, Uzbekistan")
+    spec = W.from_tool("mcp__weather__get_weather", {}, d)
+    assert spec["widget"] == "weather" and spec["data"]["temp"] == 15
+    assert W.from_tool("mcp__other__tool", {}, d) is None
+    assert "never write it yourself" in W.prompt_text()
+
+
+def test_the_agent_gets_the_weather_server_and_tool():
+    from heyclaude import brain as B
+    srv = B.weather_mcp_servers({"weather": {"location": "Tashkent", "unit": "C"}})
+    assert srv["weather"]["args"] == ["-m", "heyclaude.mcp_weather"]
+    assert srv["weather"]["env"]["HEYCLAUDE_WEATHER_LOCATION"] == "Tashkent"
+    assert B.weather_mcp_servers({"weather": {"enabled": False}}) == {}
+    from heyclaude.mcp_weather.__main__ import build
+    assert build() is not None
+
+
 # ------------------------------------------------------------------ service icons
 def test_service_icons_resolve_in_order():
     from heyclaude import service_icons as I

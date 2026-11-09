@@ -1,0 +1,32 @@
+{
+ "id": "text",
+ "name": "Text",
+ "api": "1.0",
+ "description": "a plain card of text (also the fallback)",
+ "title": "{title}",
+ "size": {
+  "width": 400,
+  "max_height": 160
+ },
+ "private": false,
+ "ttl_s": 12,
+ "example": {
+  "text": "Bring an umbrella."
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "text"
+  ],
+  "properties": {
+   "title": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "text": {
+    "type": "string",
+    "maxLength": 400
+   }
+  }
+ }
+}

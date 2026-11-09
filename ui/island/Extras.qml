@@ -7,6 +7,7 @@ import QtQuick
 Item {
     id: ex
     property bool resting: false
+    property bool reduced: false
     readonly property real contentHeight: (effect.ev ? effect.height : 0) + approvals.height + (widget.spec ? widget.height : 0)
     readonly property real minWidth: Math.max(effect.ev ? effect.minWidth : 0, approvals.count ? 440 : 0, widget.spec ? widget.minWidth : 0)
     readonly property bool animating: effect.animating
@@ -46,6 +47,7 @@ Item {
             width: ex.width
             visible: spec !== null
             resting: ex.resting
+            reduced: ex.reduced
             onAction: function (wid, name, payload) {
                 if (!model) return
                 if (name === "open") model.openUrl(String(payload))

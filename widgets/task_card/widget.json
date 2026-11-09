@@ -1,0 +1,94 @@
+{
+ "id": "task_card",
+ "name": "Task card",
+ "api": "1.0",
+ "description": "one task or to-do with its status",
+ "title": "Task · {project}",
+ "size": {
+  "width": 440,
+  "max_height": 150
+ },
+ "private": false,
+ "ttl_s": 12,
+ "glyph": "check",
+ "example": {
+  "title": "Write the wake tests",
+  "project": "hey-claude",
+  "status": "running",
+  "detail": "editing test_wake.py",
+  "due": "today",
+  "progress": 0.64,
+  "steps": [
+   {
+    "text": "read test_wake.py and listen.py",
+    "done": true
+   },
+   {
+    "text": "added 6 cases for the fallback model",
+    "done": true
+   },
+   {
+    "text": "editing test_wake.py",
+    "done": false
+   }
+  ]
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "title"
+  ],
+  "properties": {
+   "title": {
+    "type": "string",
+    "maxLength": 80
+   },
+   "project": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "status": {
+    "type": "string",
+    "enum": [
+     "todo",
+     "running",
+     "done",
+     "failed",
+     "blocked"
+    ]
+   },
+   "detail": {
+    "type": "string",
+    "maxLength": 120
+   },
+   "due": {
+    "type": "string",
+    "maxLength": 30
+   },
+   "progress": {
+    "type": "number",
+    "minimum": 0,
+    "maximum": 1
+   },
+   "steps": {
+    "type": "array",
+    "maxItems": 4,
+    "items": {
+     "type": "object",
+     "required": [
+      "text"
+     ],
+     "properties": {
+      "text": {
+       "type": "string",
+       "maxLength": 80
+      },
+      "done": {
+       "type": "boolean"
+      }
+     }
+    }
+   }
+  }
+ }
+}

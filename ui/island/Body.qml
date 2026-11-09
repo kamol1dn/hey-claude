@@ -55,7 +55,7 @@ Item {
         anchors.fill: parent
         visible: body.gpuOk
         blending: true
-        fragmentShader: "island.frag.qsb"
+        fragmentShader: Qt.resolvedUrl("island.frag.qsb")
         property size size: Qt.size(10, 10)
         property vector4d pill; property vector4d ember; property vector4d emberCol; property vector4d coreCol
         property vector4d glow; property vector4d glowCol; property vector4d rimCol

@@ -1,0 +1,44 @@
+{
+ "id": "link",
+ "name": "Link or file",
+ "api": "1.0",
+ "description": "a web link or a local file to open with a click",
+ "title": "{title}",
+ "size": {
+  "width": 440,
+  "max_height": 90
+ },
+ "private": false,
+ "ttl_s": 12,
+ "glyph": "link",
+ "example": {
+  "title": "PySide6 docs",
+  "url": "https://doc.qt.io/qtforpython-6/",
+  "description": "Qt for Python"
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "title"
+  ],
+  "properties": {
+   "title": {
+    "type": "string",
+    "maxLength": 80
+   },
+   "url": {
+    "type": "string",
+    "maxLength": 500,
+    "pattern": "^(https?://|tg://)"
+   },
+   "path": {
+    "type": "string",
+    "maxLength": 300
+   },
+   "description": {
+    "type": "string",
+    "maxLength": 140
+   }
+  }
+ }
+}

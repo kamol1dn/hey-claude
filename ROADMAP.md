@@ -501,6 +501,9 @@ transitions measured; no focus stealing.
   (`heyclaude/service_icons.py`), plan usage from Claude Code's `rate_limit_event`.
 - Bridge signals for M7: `approval`, `approval_withdrawn`, `session_event`; `QmlIsland.approval_decided`.
 - `tools/island_lab.py` (motion lab, `--shots`, `--measure`); the measured numbers are in the PR.
+- Widget plug-ins (`widgets/<id>/widget.json` + `Widget.qml`), designed in `docs/widgets-preview.html`, the
+  pill-to-panel morph, and the first packs: weather (keyless Open-Meteo tool `heyclaude/mcp_weather`, card from
+  the tool result, animated sky shader), calendar agenda, timer, task card, link/file, code, image, Telegram set.
 
 ## M5b: Widget packs
 

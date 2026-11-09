@@ -1,0 +1,35 @@
+{
+ "id": "timer",
+ "name": "Timer",
+ "api": "1.0",
+ "description": "a countdown; when it ends the island says so",
+ "title": "Timer · {label}",
+ "size": {
+  "width": 380,
+  "max_height": 128
+ },
+ "private": false,
+ "ttl_s": 8,
+ "glyph": "timer",
+ "example": {
+  "label": "Tea",
+  "seconds": 240
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "seconds"
+  ],
+  "properties": {
+   "label": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "seconds": {
+    "type": "number",
+    "minimum": 1,
+    "maximum": 86400
+   }
+  }
+ }
+}

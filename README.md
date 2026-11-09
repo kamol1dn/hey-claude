@@ -597,13 +597,24 @@ line: white is you, terracotta is Claude).
   reads. Icons: your override (`island.service_icons`), an icon the MCP server
   declares, a bundled Simple Icons logo (CC0), a cached favicon
   (`island.fetch_favicons`, off by default), or a plug with initials.
-- **Response widgets:** an answer may end with `WIDGET {...}` (never read
-  aloud) and the island shows a card: weather, calendar agenda, timer (it says
-  when it ends), task card, link or file, code snippet with Copy, image, and
+- **Response widgets:** the pill springs into a panel (up to ~460 × 280) for a
+  card: weather, calendar agenda, timer (+1 min / Pause / Cancel; it says when
+  it ends), task card, link or file, code snippet with Copy, image, and
   Telegram chats / message / draft. The draft has Send, Edit and Cancel; Send
-  stays disabled until M7's approvals exist. The contract is one file,
-  [ui/widgets.schema.json](ui/widgets.schema.json), and both answering tiers
-  are prompted from it. An unknown or invalid widget falls back to its text.
+  stays disabled until M7's approvals exist. An answer may end with
+  `WIDGET {...}` (never read aloud), or a tool's result becomes the card by
+  itself. The design is [docs/widgets-preview.html](docs/widgets-preview.html).
+- **Widgets are plug-ins:** each is a folder `widgets/<id>/` with
+  `widget.json` (its data schema, an example, size, title, which tools
+  trigger it) and `Widget.qml`. Add one by PR without touching the island.
+  [ui/widgets.schema.json](ui/widgets.schema.json) is the envelope and the
+  manifest contract; both answering tiers are prompted from the registry. An
+  unknown or invalid widget falls back to its text. Cards draw on the GPU
+  (Qt Quick items, Shapes, shaders; no CPU-painted canvases).
+- **Weather** comes from a built-in, keyless tool (Open-Meteo, cached 10 min):
+  the agent calls `get_weather`, and the card (now, the next 6 hours, 3 days,
+  an animated sky drawn by a shader) comes straight from the result.
+  `weather.location` in the config is your home place.
 - **Drop a file** on the island to ask about it: the talk-or-type field opens
   with the file attached, and the tool agent gets its path.
 - **Hide when idle** (`island.hide_when_idle`): nothing on screen at rest. It

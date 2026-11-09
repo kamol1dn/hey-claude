@@ -1,0 +1,41 @@
+{
+ "id": "telegram_draft",
+ "name": "Telegram draft",
+ "api": "1.0",
+ "description": "a reply drafted for the user to Send / Edit / Cancel (Send stays disabled until approvals, M7)",
+ "title": "Draft · to {chat}",
+ "size": {
+  "width": 440,
+  "max_height": 200
+ },
+ "private": true,
+ "ttl_s": 12,
+ "icon": "telegram",
+ "example": {
+  "chat": "Aziz",
+  "text": "Yes, 7 works. See you there!",
+  "link": "tg://resolve?domain=aziz"
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "chat",
+   "text"
+  ],
+  "properties": {
+   "chat": {
+    "type": "string",
+    "maxLength": 50
+   },
+   "text": {
+    "type": "string",
+    "maxLength": 1000
+   },
+   "link": {
+    "type": "string",
+    "maxLength": 200,
+    "pattern": "^tg://"
+   }
+  }
+ }
+}

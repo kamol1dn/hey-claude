@@ -1,0 +1,213 @@
+{
+ "id": "weather",
+ "name": "Weather",
+ "api": "1.0",
+ "description": "current weather and a short forecast",
+ "title": "Weather · {location}",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": false,
+ "ttl_s": 12,
+ "glyph": "sun",
+ "triggers": {
+  "tools": [
+   "mcp__weather__get_weather"
+  ],
+  "data": "result"
+ },
+ "example": {
+  "location": "Tashkent, Uzbekistan",
+  "temp": 21,
+  "unit": "C",
+  "condition": "Partly cloudy",
+  "icon": "partly",
+  "feels": 20,
+  "high": 24,
+  "low": 13,
+  "wind": 11,
+  "hourly": [
+   {
+    "time": "15:00",
+    "temp": 22,
+    "icon": "sun"
+   },
+   {
+    "time": "16:00",
+    "temp": 22,
+    "icon": "partly"
+   },
+   {
+    "time": "17:00",
+    "temp": 21,
+    "icon": "partly"
+   },
+   {
+    "time": "18:00",
+    "temp": 19,
+    "icon": "cloud"
+   },
+   {
+    "time": "19:00",
+    "temp": 18,
+    "icon": "night"
+   },
+   {
+    "time": "20:00",
+    "temp": 17,
+    "icon": "night"
+   }
+  ],
+  "days": [
+   {
+    "day": "Today",
+    "low": 13,
+    "high": 24,
+    "icon": "partly"
+   },
+   {
+    "day": "Tue",
+    "low": 14,
+    "high": 26,
+    "icon": "sun"
+   },
+   {
+    "day": "Wed",
+    "low": 11,
+    "high": 21,
+    "icon": "rain"
+   }
+  ],
+  "source": "Open-Meteo"
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "location",
+   "temp"
+  ],
+  "properties": {
+   "location": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "temp": {
+    "type": "number"
+   },
+   "unit": {
+    "type": "string",
+    "enum": [
+     "C",
+     "F"
+    ]
+   },
+   "condition": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "icon": {
+    "type": "string",
+    "enum": [
+     "sun",
+     "partly",
+     "cloud",
+     "rain",
+     "storm",
+     "snow",
+     "fog",
+     "wind",
+     "night"
+    ]
+   },
+   "high": {
+    "type": "number"
+   },
+   "low": {
+    "type": "number"
+   },
+   "hourly": {
+    "type": "array",
+    "maxItems": 6,
+    "items": {
+     "type": "object",
+     "required": [
+      "time",
+      "temp"
+     ],
+     "properties": {
+      "time": {
+       "type": "string",
+       "maxLength": 8
+      },
+      "temp": {
+       "type": "number"
+      },
+      "icon": {
+       "type": "string",
+       "enum": [
+        "sun",
+        "partly",
+        "cloud",
+        "rain",
+        "storm",
+        "snow",
+        "fog",
+        "wind",
+        "night"
+       ]
+      }
+     }
+    }
+   },
+   "feels": {
+    "type": "number"
+   },
+   "wind": {
+    "type": "number"
+   },
+   "source": {
+    "type": "string",
+    "maxLength": 30
+   },
+   "days": {
+    "type": "array",
+    "maxItems": 3,
+    "items": {
+     "type": "object",
+     "required": [
+      "day",
+      "low",
+      "high"
+     ],
+     "properties": {
+      "day": {
+       "type": "string",
+       "maxLength": 10
+      },
+      "low": {
+       "type": "number"
+      },
+      "high": {
+       "type": "number"
+      },
+      "icon": {
+       "type": "string",
+       "enum": [
+        "sun",
+        "partly",
+        "cloud",
+        "rain",
+        "storm",
+        "snow",
+        "fog",
+        "wind",
+        "night"
+       ]
+      }
+     }
+    }
+   }
+  }
+ }
+}

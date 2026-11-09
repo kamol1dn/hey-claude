@@ -803,7 +803,7 @@ var RINGS_OUT = [], SPARKS_OUT = [], SATS_OUT = [], DOTS_OUT = [0.7, 0.7, 0.7], 
 function render() {
     var w = W.x, h = Math.max(8, H.x), head = Math.min(HEAD.x, h), cy = head / 2;
     out.w = w; out.h = h; out.head = head; out.cy = cy;
-    out.rad = Math.min(h / 2, (S.listGeom || S.extraH) ? 18 : 20);
+    out.rad = Math.min(h / 2, S.listGeom ? 18 : S.extraH ? 22 : 20);   // a card grows the pill into a panel
     out.hide = HIDE.x;
     var trem = offsetOf(S.trem); if (S.trem && NOW - S.trem.t0 > S.trem.dur) S.trem = null;
     var shake = offsetOf(S.shake); if (S.shake && NOW - S.shake.t0 > S.shake.dur) S.shake = null;

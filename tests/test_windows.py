@@ -603,10 +603,10 @@ def test_agent_args_have_windows_server_and_gated_tools(tmp_path):
     with mock.patch.object(config, "STATE_DIR", tmp_path):
         args = a._args()
     allowed = args[args.index("--allowedTools") + 1]
-    assert allowed == "Read,mcp__windows__set_volume"
+    assert allowed == "Read,mcp__windows__set_volume,mcp__weather__get_weather"   # M5: the keyless weather tool
     mcp_files = args[args.index("--mcp-config") + 1:]
     data = json.load(open(mcp_files[-1], encoding="utf-8"))
-    assert "windows" in data["mcpServers"]
+    assert "windows" in data["mcpServers"] and "weather" in data["mcpServers"]
     assert "mcp__windows tools" in args[args.index("--append-system-prompt") + 1]
 
 

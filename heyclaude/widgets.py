@@ -1,13 +1,18 @@
 """Response widgets (ROADMAP M5): the answer can carry a small card.
 
-The contract is ui/widgets.schema.json, the only place widgets are defined.
-An answer (either tier) may end with one line
+Widgets are plug-ins: widgets/<id>/widget.json (its data schema, example,
+size, title, tool triggers) + Widget.qml. ui/widgets.schema.json is the
+envelope and the manifest contract. An answer (either tier) may end with one
+line
 
     WIDGET {"widget": "calendar_list", "data": {...}}
 
-which is never read aloud. `WidgetFilter` takes it out of the streamed text,
-`normalise()` checks it against the schema (unknown or invalid widgets fall
-back to their `text`, or nothing), and the island draws it (ui/island/widgets).
+which is never read aloud, or a tool result makes one by itself (a manifest's
+`triggers`: the weather card comes straight from the weather tool's result,
+so the model never makes the numbers up). `WidgetFilter` takes the line out
+of the streamed text, `normalise()` checks the data against the widget's
+schema (unknown or invalid widgets fall back to their `text`, or nothing),
+and the island draws it.
 """
 from __future__ import annotations
 
@@ -21,6 +26,8 @@ from pathlib import Path
 from .config import ROOT, STATE_DIR
 
 SCHEMA_FILE = ROOT / "ui" / "widgets.schema.json"
+WIDGETS_DIR = ROOT / "widgets"
+API_MAJOR = "1"
 PREFIX = "WIDGET"
 DEFAULT_TTL = 12.0
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"}
@@ -30,13 +37,48 @@ RUNNABLE_EXT = {".exe", ".bat", ".cmd", ".com", ".ps1", ".psm1", ".vbs", ".vbe",
 
 
 @lru_cache(maxsize=2)
+def registry(folder: str | None = None) -> dict[str, dict]:
+    """id -> manifest (widget.json, plus "dir" and "qml"), for every widget folder that loads."""
+    out: dict[str, dict] = {}
+    base = Path(folder) if folder else WIDGETS_DIR
+    for man_file in sorted(base.glob("*/widget.json")):
+        try:
+            with open(man_file, encoding="utf-8") as f:
+                man = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"[widget] {man_file.parent.name}: bad widget.json ({e})")
+            continue
+        wid = man.get("id")
+        problems = []
+        if wid != man_file.parent.name:
+            problems.append("id must match its folder")
+        if str(man.get("api", "")).split(".")[0] != API_MAJOR:
+            problems.append(f"widget API {man.get('api')!r} isn't {API_MAJOR}.x")
+        for k in ("name", "description", "schema", "example"):
+            if k not in man:
+                problems.append(f"no {k}")
+        qml = man_file.parent / "Widget.qml"
+        if not qml.exists():
+            problems.append("no Widget.qml")
+        if problems:
+            print(f"[widget] {man_file.parent.name} skipped: {'; '.join(problems)}")
+            continue
+        man = dict(man, dir=str(man_file.parent), qml=qml.resolve().as_uri())
+        out[wid] = man
+    return out
+
+
+@lru_cache(maxsize=2)
 def load(path: str | None = None) -> dict:
+    """The envelope schema, with the registry's widgets under "x-widgets"."""
     with open(path or SCHEMA_FILE, encoding="utf-8") as f:
-        return json.load(f)
+        env = json.load(f)
+    env["x-widgets"] = registry()
+    return env
 
 
 def names() -> list[str]:
-    return list(load()["x-widgets"])
+    return list(registry())
 
 
 # ----------------------------------------------------------------- validation
@@ -116,9 +158,33 @@ def normalise(spec) -> dict | None:
     if errs:
         return _fallback(out, "; ".join(errs[:3]))
     out["data"] = _strip(data, reg[name]["schema"])
+    if "ttl_s" not in spec and reg[name].get("ttl_s"):
+        out["ttl_s"] = float(reg[name]["ttl_s"])
     if name == "timer":
         out["ttl_s"] = max(out["ttl_s"], float(data["seconds"]) + 8)
     return out
+
+
+def from_tool(tool: str, args: dict | None, result) -> dict | None:
+    """A widget straight from a tool result (a manifest's triggers), or None."""
+    if not isinstance(result, dict):
+        return None
+    for wid, man in registry().items():
+        trig = man.get("triggers") or {}
+        if tool in (trig.get("tools") or []):
+            data = result if trig.get("data", "result") == "result" else None
+            return normalise({"widget": wid, "data": data, "text": ""})
+    return None
+
+
+def title_for(man: dict, data: dict) -> str:
+    """The card header from the manifest's template ("Weather · {location}")."""
+    def sub(m):
+        v = data.get(m.group(1))
+        return "" if v is None else str(v)
+    t = re.sub(r"\{(\w+)\}", sub, man.get("title") or man.get("name") or "")
+    t = re.sub(r"\s*·\s*$", "", t).strip(" ·")
+    return t or man.get("name", "")
 
 
 def _fallback(out: dict, why: str) -> dict | None:
@@ -146,6 +212,15 @@ def for_qml(spec) -> dict | None:
     w = json.loads(json.dumps(w))           # a plain copy
     w["id"] = uuid.uuid4().hex[:10]
     d = w["data"]
+    man = registry().get(w["widget"]) or registry().get("text") or {}
+    w["qml"] = man.get("qml", "")
+    w["title"] = title_for(man, d)
+    w["glyph"] = man.get("glyph", "")
+    w["icon_url"] = (ROOT / "ui" / "icons" / "services" / f"{man['icon']}.svg").resolve().as_uri() if man.get("icon") else ""
+    w["private"] = bool(man.get("private"))
+    size = man.get("size") or {}
+    w["width"] = float(size.get("width", 400))
+    w["max_height"] = float(size.get("max_height", 236))
     if w["widget"] == "image":
         d["src"] = d.get("url") or _local_image(d.get("path", ""))
         if not d["src"]:
@@ -256,6 +331,10 @@ def prompt_text() -> str:
              "snippet, an image, Telegram chats or a draft); keep the spoken part complete without it. "
              "Valid JSON on a single line. NAME and data (keys marked * are required):"]
     for name, w in load()["x-widgets"].items():
+        trig = (w.get("triggers") or {}).get("tools") or []
+        if trig:
+            lines.append(f"- {name}: {w['description']}. Shown automatically from {', '.join(trig)}: never write it yourself.")
+            continue
         sch = w["schema"]
         req = set(sch.get("required", []))
         keys = ", ".join(k + ("*" if k in req else "") for k in sch.get("properties", {}))

@@ -400,6 +400,14 @@ class Assistant:
         """The agent ran a tool (its process's thread): show the effect, remember the undo."""
         if is_error:
             return
+        try:                                    # M5: a widget straight from the tool result (weather)
+            from .widgets import from_tool
+            spec = from_tool(name, args, result)
+            if spec is not None:
+                print(f"[widget] {spec['widget']} from {name}")
+                self._ui_emit("widget", spec)
+        except Exception as e:
+            print(f"[widget] {name}: {e}")
         from . import effects
         undoable = self.undo_stack is not None and self.undo_stack.can_undo(name, args, result)
         try:

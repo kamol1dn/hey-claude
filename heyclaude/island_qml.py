@@ -200,6 +200,15 @@ class IslandModel(QObject):
 
     usageOn = Property(bool, _get_usage_on, notify=usageChanged)
 
+    def _get_widget_urls(self):
+        try:
+            from .widgets import registry
+            return [m["qml"] for m in registry().values()]
+        except Exception:
+            return []
+
+    widgetUrls = Property("QVariantList", _get_widget_urls, constant=True)
+
     # slots from QML ------------------------------------------------------------
     @Slot()
     def ready(self):

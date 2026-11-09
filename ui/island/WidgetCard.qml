@@ -1,49 +1,47 @@
 import QtQuick
 
-// The response widget under the head (ui/widgets.schema.json). One at a time;
-// a new one replaces it. It enters once the pill has mostly grown (rule 10),
-// stays while the answer is up and for ttl_s after the island rests, and a
-// hover shows a small x to dismiss it.
+// The response widget: a plug-in from widgets/<id>/ (Widget.qml + widget.json,
+// heyclaude/widgets.py). The island grows into a panel for it (up to ~460 x 280,
+// a spring morph); this draws the panel's header (the widget's glyph or the
+// service icon, its title, a dismiss x on hover) and loads the body. One at a
+// time; a new one replaces it. It stays while the answer is up and for ttl_s
+// after the island rests (personal ones, like Telegram, fade after 4 s).
 Item {
     id: card
-    property var spec: null                 // {id, widget, data, text, ttl_s}
-    property bool resting: false            // the island is back at rest: the ttl runs
+    property var spec: null                 // {id, widget, data, title, glyph, icon_url, qml, width, max_height, ttl_s, private}
+    property bool resting: false
+    property bool reduced: false
     signal action(string wid, string name, var payload)
     signal expired()
-    readonly property var files: ({
-        weather: "widgets/WeatherCard.qml", calendar_list: "widgets/CalendarCard.qml", timer: "widgets/CountdownCard.qml",
-        task_card: "widgets/TaskCard.qml", link: "widgets/LinkCard.qml", code: "widgets/CodeCard.qml",
-        image: "widgets/ImageCard.qml", telegram_chats: "widgets/TelegramChats.qml",
-        telegram_message: "widgets/TelegramMessage.qml", telegram_draft: "widgets/TelegramDraft.qml", text: "widgets/TextCard.qml" })
-    readonly property real minWidth: loader.item && loader.item.minWidth ? loader.item.minWidth : 360
+    readonly property real headH: 30
+    readonly property real minWidth: spec ? Math.max(spec.width || 400, loader.item && loader.item.minWidth ? loader.item.minWidth : 0) : 0
     readonly property bool ready: loader.status === Loader.Ready && loader.item !== null && loader.item.implicitHeight > 0
     readonly property string source: String(loader.source)
-    implicitHeight: loader.item ? loader.item.implicitHeight + 12 : 0
+    readonly property real bodyMax: spec ? (spec.max_height || 236) - headH : 200
+    implicitHeight: spec && loader.item ? headH + Math.min(bodyMax, loader.item.implicitHeight) + 14 : 0
     height: implicitHeight
     clip: true
 
-    // Compile every card type once at idle (a few seconds after start), so the first
-    // weather or agenda card of the day never stalls a frame mid-answer.
+    // Compile every widget once at idle (a few seconds after start), so the first
+    // card of the day never stalls a frame mid-answer.
     property var warmed: []
     Timer {
         interval: 4000; running: true
-        onTriggered: {
-            var names = Object.keys(card.files)
-            for (var i = 0; i < names.length; i++) card.warmed.push(Qt.createComponent(card.files[names[i]], Component.Asynchronous))
-        }
+        onTriggered: { var urls = model ? model.widgetUrls : []; for (var i = 0; i < urls.length; i++) card.warmed.push(Qt.createComponent(urls[i], Component.Asynchronous)) }
     }
+
     function show(s) {
         card.spec = s
-        loader.setSource(files[s.widget] || files.text, { data_: s.data, wid: s.id })
-        enter.restart()
+        loader.setSource(s.qml, { data_: s.data, wid: s.id, reduced: card.reduced })
+        head.opacity = 0; enter.restart()
         if (resting) ttl.restart()
     }
     function clear() { ttl.stop(); card.spec = null; loader.source = "" }
     onRestingChanged: {
         if (!spec) return
+        if (loader.item && loader.item.active !== undefined) loader.item.active = !resting
         if (resting) {
-            // Telegram text is shown only while it's the answer: it fades soon after.
-            ttl.interval = (String(spec.widget).indexOf("telegram") === 0 ? 4 : (spec.ttl_s || 12)) * 1000
+            ttl.interval = (spec.private ? 4 : (spec.ttl_s || 12)) * 1000
             if (!loader.item || !loader.item.holds) ttl.restart()
         } else ttl.stop()
     }
@@ -55,33 +53,46 @@ Item {
         function onHoldsChanged() { if (card.resting && loader.item && !loader.item.holds) ttl.restart() }
     }
 
-    Rectangle { x: 14; width: parent.width - 28; height: 1; color: Qt.rgba(1, 1, 1, 0.1) }
+    Rectangle { x: 14; width: parent.width - 28; height: 1; color: Qt.rgba(1, 1, 1, 0.07) }
+    // ---- header: glyph or service icon, title ------------------------------------------
+    Item {
+        id: head
+        x: 16; y: 0; width: card.width - 32; height: card.headH
+        opacity: 0
+        ServiceIcon {
+            id: hicon
+            y: (parent.height - 14) / 2; size: 14
+            url: card.spec ? card.spec.icon_url || "" : ""
+            glyph: card.spec ? card.spec.glyph || "" : ""
+            initials: ""
+            visible: url !== "" || glyph !== ""
+        }
+        Text {
+            x: hicon.visible ? 22 : 0; width: parent.width - x - 24; height: parent.height; verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+            text: card.spec ? card.spec.title || "" : ""
+            color: "#9A9A9A"; font.family: "Segoe UI Variable Text"; font.pointSize: 8.5; font.letterSpacing: 0.2
+        }
+    }
     Loader {
         id: loader
         asynchronous: true                  // building a card never stalls a frame
-        x: 14; y: 6; width: card.width - 28
-        opacity: 0
-        transform: Translate { id: rise; y: 4 }
+        x: 16; y: card.headH; width: card.width - 32
+        height: Math.min(card.bodyMax, item ? item.implicitHeight : 0)
+        clip: false                         // a card may paint into the header's right side (the weather sky); the card clips
+        onLoaded: if (item.active !== undefined) item.active = !card.resting
     }
-    ParallelAnimation {
-        id: enter
-        SequentialAnimation {
-            PauseAnimation { duration: 140 }
-            NumberAnimation { target: loader; property: "opacity"; from: 0; to: 1; duration: 220; easing.type: Easing.OutCubic }
-        }
-        SequentialAnimation {
-            PauseAnimation { duration: 140 }
-            NumberAnimation { target: rise; property: "y"; from: 4; to: 0; duration: 220; easing.type: Easing.OutCubic }
-        }
-    }
+    NumberAnimation { id: enter; target: head; property: "opacity"; from: 0; to: 1; duration: card.reduced ? 160 : 220
+        easing.type: Easing.OutCubic }
+
     MouseArea {
         id: hov
-        anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton; propagateComposedEvents: true
+        anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton
     }
     Rectangle {
         visible: hov.containsMouse || closeMa.containsMouse
-        x: card.width - 22; y: 6; width: 16; height: 16; radius: 8
-        color: Qt.rgba(1, 1, 1, closeMa.containsMouse ? 0.2 : 0.1)
+        x: card.width - 34; y: (card.headH - 18) / 2; width: 18; height: 18; radius: 9
+        color: Qt.rgba(1, 1, 1, closeMa.containsMouse ? 0.2 : 0.08)
         Text { anchors.centerIn: parent; text: "×"; color: "#F2F2F2"; font.pointSize: 9 }
         MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
             onClicked: card.action(card.spec ? card.spec.id : "", "dismiss", null) }

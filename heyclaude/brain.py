@@ -578,6 +578,26 @@ def windows_mcp_servers(agent_cfg: dict) -> dict:
     return servers
 
 
+def weather_mcp_servers(cfg: dict) -> dict:
+    """mcpServers entry for the built-in weather tool (Open-Meteo, keyless; M5)."""
+    from .config import ROOT
+    w = cfg.get("weather") or {}
+    if not w.get("enabled", True):
+        return {}
+    return {"weather": {"command": _console_python(), "args": ["-m", "heyclaude.mcp_weather"],
+                        "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
+                                "HEYCLAUDE_WEATHER_LOCATION": str(w.get("location") or ""),
+                                "HEYCLAUDE_WEATHER_UNIT": str(w.get("unit") or "C")}}}
+
+
+WEATHER_TOOL = "mcp__weather__get_weather"
+AGENT_WEATHER_PROMPT = (
+    " For any weather question call mcp__weather__get_weather (empty location = the user's home place); "
+    "the island shows the forecast card from its result by itself, so don't add a WIDGET line for "
+    "weather; just say the gist, e.g. 'Fifteen degrees and clear, rain after midnight.'"
+)
+
+
 def gate_allowed_tools(tools: list[str]) -> tuple[list[str], list[str]]:
     """(kept, dropped). PowerShell / Registry never pass, and of Windows-MCP
     only the read-only tools do: its acting tools (Click, Type, Shortcut, Drag,
@@ -635,14 +655,19 @@ class Agent:
         a = self.cfg["agent"]
         day = self.day = session_name(self.cfg.get("conversation"))
         win = windows_mcp_servers(a)
-        prompt = AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "") + widget_prompt(self.cfg)
+        win.update(weather_mcp_servers(self.cfg))
+        prompt = (AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
+                  + (AGENT_WEATHER_PROMPT if "weather" in win else "") + widget_prompt(self.cfg))
         args = ["--model", a["model"], "--output-format", "stream-json", "--verbose",
                 "--permission-mode", a["permission_mode"], "--permission-prompts", "none",
                 "--append-system-prompt", prompt, "--name", day or "hey-claude assistant"]
         if not day:
             args.append("--no-session-persistence")
         if a.get("allowed_tools"):
-            kept, dropped = gate_allowed_tools(list(a["allowed_tools"]))
+            allowed = list(a["allowed_tools"])
+            if "weather" in win and WEATHER_TOOL not in allowed:
+                allowed.append(WEATHER_TOOL)              # read-only and keyless: always allowed when on
+            kept, dropped = gate_allowed_tools(allowed)
             if dropped:
                 print(f"[agent] not allowed without approvals (M7): {', '.join(dropped)}")
             if kept:

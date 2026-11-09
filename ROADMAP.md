@@ -517,6 +517,10 @@ Next packs, each with its own small animation:
 - **Reminders and alarms:** a list with countdowns, once timers exist (M9 §4).
 - **Email digest:** unread count and the top senders (Gmail connector).
 - **Clipboard / screenshot preview** (M9).
+- **Design bar:** widgets are as crafted as the motion and character previews
+  ( is approved first). The island may grow: the
+  pill springs down into a larger rounded panel (up to ~440x280) for a widget,
+  with the character and service glyph in its header, then collapses back.
 - Rules for every pack:
   - data comes from a tool result, never made up by the model;
   - widgets render under the idle frame-rate budget;

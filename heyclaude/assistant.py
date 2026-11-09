@@ -67,6 +67,7 @@ class Assistant:
         self._pause_timer: threading.Timer | None = None
         self._wakeup = threading.Event()        # pokes the mic loop out of its "off" wait
         self._abort_rec = threading.Event()     # cuts an utterance short when listening goes off
+        self._reject_rec = threading.Event()    # "that wasn't me" while it records: drop the recording
         self.mic_open = False
         self.stopping = False
         self.on_listening = None                # callback(on: bool, paused_until: float | None)
@@ -88,11 +89,20 @@ class Assistant:
         self.barge_vad = None                  # for barge-in (its own state)
         self.monitor = None                    # sysload.LoadMonitor shared by STT and TTS
         self.turn: TurnListener | None = None  # the utterance being recorded
+        # M2b: "that wasn't me". The ~2.5 s before the last wake-word trigger, kept
+        # so a false wake can be saved as a negative for the next tune-up.
+        self.last_wake: tuple[float, object] | None = None     # (time.time(), int16 audio)
+        self.false_wake_dir = STATE_DIR / "wake_negatives"
         # M9: Windows settings changes -> island effects, undo, click-to-confirm power actions.
         self.undo_stack = None                 # undo.UndoStack, made in load()
         self._pending_power: dict[str, tuple[str, float]] = {}   # effect id -> (action, expires)
 
     # -- UI helpers -----------------------------------------------------------
+    def _wake_label(self, label: str):
+        sig = getattr(self.ui, "wake", None)
+        if sig is not None:
+            sig.emit(label)
+
     def set_mode(self, mode, text=""):
         self.mode = mode
         self.ui.state.emit(mode, text)
@@ -198,9 +208,40 @@ class Assistant:
         if "projects" in changed and brain is not None:
             brain.projects = Projects(self.cfg["projects"])
         wake = getattr(self, "wake", None)
-        if "wake.threshold" in changed and wake is not None:
+        if "wake.model" in changed and wake is not None:
+            self.reload_wake()
+        elif "wake.threshold" in changed and wake is not None:
             wake.threshold = float(self.cfg["wake"]["threshold"])
         return changed
+
+    def reload_wake(self):
+        """Load `wake.model` again (the wizard's Apply / Undo) and swap it in.
+        The mic loop reads self.wake per block, so the swap is atomic for it."""
+        try:
+            new = WakeWord(self.cfg["wake"]["model"], float(self.cfg["wake"]["threshold"]), gate=self.wake_gate)
+        except Exception as e:
+            print(f"[wake] couldn't load {self.cfg['wake']['model']}: {e}")
+            return
+        self.wake = new
+        self._wake_label(new.label)
+
+    def reject_wake(self, max_age_s: float = 180.0):
+        """"That wasn't me": save the audio that triggered the last wake as a
+        negative (state/wake_negatives/), and drop the request it started.
+        Returns the saved path, or None if there was no recent wake."""
+        lw = self.last_wake
+        if lw is None or time.time() - lw[0] > max_age_s:
+            return None
+        self.last_wake = None
+        from .wake_samples import write_wav
+        path = self.false_wake_dir / time.strftime("false_%Y%m%d-%H%M%S.wav", time.localtime(lw[0]))
+        write_wav(path, lw[1])
+        print(f"[wake] saved a false wake as a negative: {path.name}")
+        if self.mode == "listening":
+            self._reject_rec.set()              # it's still recording what came after: stop
+        elif self.mode in ("thinking", "speaking"):
+            self.hush()
+        return path
 
     # -- speech-to-text ---------------------------------------------------------
     def stt_device(self) -> str:
@@ -282,7 +323,15 @@ class Assistant:
             self.brain.agent.on_tool_result = self._on_tool_result
         if not self.text_mode:
             self.set_mode("loading", "loading wake word…")
+            try:
+                from .wake_models import ensure_default_model
+                msg = ensure_default_model(c["wake"]["model"])     # first run: fetch the shared model
+                if msg:
+                    print(msg)
+            except Exception as e:
+                print(f"[wake] default model check failed: {e}")
             self.wake = WakeWord(c["wake"]["model"], float(c["wake"]["threshold"]), gate=self.wake_gate)
+            self._wake_label(self.wake.label)
             self.set_mode("loading", f"loading whisper ({self.stt_device()})…")
             self.stt = SpeechToText(c["stt"], device=self.stt_device(), hint_words=list(c["projects"]),
                                     on_change=self._stt_changed, monitor=self.monitor)
@@ -511,10 +560,12 @@ class Assistant:
         cooldown_until = 0.0
         first = True
         recent: collections.deque = collections.deque(maxlen=8)   # ~0.6 s of cleaned audio, for barge-in
+        before: collections.deque = collections.deque(maxlen=32)  # ~2.6 s, saved by "that wasn't me"
         for block in blocks:
             if self.stopping:
                 return
             recent.append(block)
+            before.append(block)
             if self._sim_idle_end and getattr(src, "finished", False):
                 # --simulate: the last clip ended without a request (an end phrase,
                 # silence) before its trailing silence had been fed; exit now.
@@ -529,10 +580,12 @@ class Assistant:
                 return                          # listening switched off: release the mic
             # No wake word while the input field is open (you might be typing).
             hit = False if (one_shot or self.input_open) else self.wake.hit(block)
+            by_wake = hit                       # the wake word fired (not a click, hotkey or follow-up)
             from_input = False
             if self.manual.is_set():
                 self.manual.clear()
                 hit = True
+                by_wake = False
                 from_input = self.input_open
             followup = False
             if barged and not hit:
@@ -542,6 +595,13 @@ class Assistant:
             if not hit or (not followup and time.perf_counter() < cooldown_until):
                 continue
             t_wake = time.perf_counter()
+            if by_wake and not (followup or barged):
+                import numpy as _np
+                self.last_wake = (time.time(), _np.concatenate(list(before)))
+                wake_sig = getattr(self.ui, "wake_hit", None)
+                if wake_sig is not None:
+                    wake_sig.emit(time.time())
+            before.clear()
             if barged:
                 print("[barge-in] you talked over it: stopped speaking, listening")
                 self.followup.cancel()
@@ -564,6 +624,8 @@ class Assistant:
                 hold.arm()
             try:
                 stops = [] if self.simulate else ([] if one_shot else [self._abort_rec])
+                self._reject_rec.clear()
+                stops.append(self._reject_rec)
                 if from_input:
                     stops.append(self._cancel_utt)
                 stop = _AnyEvent(stops) if stops else None

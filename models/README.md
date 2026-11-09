@@ -1,9 +1,15 @@
 # models/
 
-Put the trained wake-word model here as `hey_claude.onnx`. That's the default
-`wake.model` in `config.example.yaml`, so hey-claude picks it up on its next
-start. Without it, hey-claude uses openWakeWord's stock "hey jarvis".
+`hey_claude.onnx` here is the shared "hey claude" wake-word model. hey-claude
+downloads it on first start from the GitHub release `wake-model-v1` and keeps
+it only if its SHA-256 matches `heyclaude/wake_models.py`. It's the default
+`wake.model`; a file you put here yourself (an older Colab model) is never
+overwritten.
 
-`*.onnx` and `*.tflite` here are git-ignored: the model is partly trained on
-recordings of your voice, and this repository is public. Training and
-measuring it: [docs/train-hey-claude.md](../docs/train-hey-claude.md).
+`*.onnx` and `*.tflite` are git-ignored: models trained with your own voice
+(Settings → Wake word, or Colab) must not end up in this public repository.
+Personal models from the Settings wizard live in `state/wake_models/` instead.
+
+Licence of the model: [LICENSE](LICENSE) (CC BY-NC-SA 4.0). How it's made and
+measured: [docs/train-hey-claude.md](../docs/train-hey-claude.md) and README
+"Wake word".

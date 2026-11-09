@@ -55,31 +55,46 @@ REC_CFG = {"vad_aggressiveness": 2, "end_silence_ms": 450, "start_timeout": 10.0
 
 
 # -- files ----------------------------------------------------------------------
-def clip_index(path: Path) -> int | None:
-    m = re.match(re.escape(PREFIX) + r"(\d+)", Path(path).name)
+def phrase_slug(phrase: str) -> str:
+    """"Hey, Claude!" -> "hey_claude"."""
+    return "_".join(re.sub(r"[^a-z0-9 ]+", " ", phrase.lower()).split()) or "wake"
+
+
+def phrase_folder(phrase: str) -> tuple[Path, str]:
+    """(folder, file prefix) for a phrase's clips: "hey claude" keeps M2's
+    state/wake_samples/hey_claude_NNN_*.wav; any other phrase gets its own
+    subfolder, state/wake_samples/<slug>/<slug>_NNN_*.wav."""
+    slug = phrase_slug(phrase)
+    return (SAMPLES_DIR, PREFIX) if slug == "hey_claude" else (SAMPLES_DIR / slug, slug + "_")
+
+
+def clip_index(path: Path, prefix: str = PREFIX) -> int | None:
+    m = re.match(re.escape(prefix) + r"(\d+)", Path(path).name)
     return int(m.group(1)) if m else None
 
 
-def list_clips(folder: Path = SAMPLES_DIR) -> list[Path]:
+def list_clips(folder: Path = SAMPLES_DIR, prefix: str = PREFIX) -> list[Path]:
     """Recorded clips in index order (other files in the folder are ignored)."""
     folder = Path(folder)
     if not folder.is_dir():
         return []
-    clips = [p for p in folder.glob(PREFIX + "*.wav") if clip_index(p) is not None]
-    return sorted(clips, key=clip_index)
+    clips = [p for p in folder.glob(prefix + "*.wav") if clip_index(p, prefix) is not None]
+    return sorted(clips, key=lambda p: clip_index(p, prefix))
 
 
-def next_index(folder: Path = SAMPLES_DIR) -> int:
-    idx = [clip_index(p) for p in list_clips(folder)]
+def next_index(folder: Path = SAMPLES_DIR, prefix: str = PREFIX) -> int:
+    idx = [clip_index(p, prefix) for p in list_clips(folder, prefix)]
     return max(idx) + 1 if idx else 0
 
 
-def clip_path(folder: Path, index: int, tag: str) -> Path:
-    return Path(folder) / f"{PREFIX}{index:03d}_{re.sub(r'[^a-z0-9]+', '', tag.lower()) or 'x'}.wav"
+def clip_path(folder: Path, index: int, tag: str, prefix: str = PREFIX) -> Path:
+    return Path(folder) / f"{prefix}{index:03d}_{re.sub(r'[^a-z0-9]+', '', tag.lower()) or 'x'}.wav"
 
 
 def is_held_out(path: Path) -> bool:
-    i = clip_index(path)
+    """Every 4th clip by index (works for any phrase's prefix)."""
+    m = re.search(r"_(\d{3,})_[a-z0-9]+\.wav$", Path(path).name)
+    i = int(m.group(1)) if m else None
     return i is not None and i % HOLD_OUT_EVERY == HOLD_OUT_EVERY - 1
 
 
@@ -161,6 +176,80 @@ def check_clip(pcm: np.ndarray) -> list[str]:
     if len(pcm) and np.mean(np.abs(pcm.astype(np.int32)) >= 32000) > 0.001:
         out.append("clipped (too loud): back off a little")
     return out
+
+
+# -- recorder for the Settings wizard (no console) ---------------------------------
+class ClipRecorder:
+    """Records one clip at a time on a background thread, for the Qt wizard.
+
+    record(path) opens the mic, waits for speech, records until silence,
+    trims, checks and saves to `path`, then calls on_done(path, problems)
+    (or on_fail(message)); on_level(0..1) runs for every 80 ms block. The mic
+    is closed between clips. `open_source` returns a listen.MicSource-like
+    object (tests pass a fake)."""
+
+    def __init__(self, open_source, on_level=None, on_done=None, on_fail=None, is_speech=None):
+        self.open_source = open_source
+        self.on_level, self.on_done, self.on_fail = on_level, on_done, on_fail
+        self.is_speech = is_speech
+        self._stop = None
+        self.busy = False
+
+    def record(self, path: Path, cfg: dict | None = None):
+        import threading
+        if self.busy:
+            return
+        self.busy = True
+        self._stop = threading.Event()
+        threading.Thread(target=self._run, args=(Path(path), cfg or REC_CFG, self._stop), daemon=True,
+                         name="wake-clip").start()
+
+    def cancel(self):
+        if self._stop is not None:
+            self._stop.set()
+
+    def _run(self, path: Path, cfg: dict, stop):
+        src = None
+        try:
+            src = self.open_source()
+            src.start()
+            audio, _ = record_utterance(iter(src), cfg, on_level=self.on_level, stop_event=stop,
+                                        is_speech=self.is_speech)
+            if stop.is_set():
+                return
+            if audio is None:
+                if self.on_fail:
+                    self.on_fail("didn't hear anything")
+                return
+            clip = trim_clip(audio)
+            write_wav(path, clip)
+            if self.on_done:
+                self.on_done(path, check_clip(clip))
+        except Exception as e:
+            if self.on_fail:
+                self.on_fail(f"microphone error: {e}")
+        finally:
+            if src is not None:
+                src.close()
+            self.busy = False
+
+
+def record_seconds(open_source, seconds: float, on_level=None, stop=None) -> np.ndarray:
+    """Plain recording of `seconds` (the wizard's minute of room sound)."""
+    from .listen import BLOCK, level
+    src = open_source()
+    src.start()
+    out = []
+    try:
+        for block in src:
+            out.append(block)
+            if on_level:
+                on_level(level(block))
+            if len(out) * BLOCK >= seconds * RATE or (stop is not None and stop.is_set()):
+                break
+    finally:
+        src.close()
+    return np.concatenate(out) if out else np.zeros(0, np.int16)
 
 
 # -- the session ----------------------------------------------------------------

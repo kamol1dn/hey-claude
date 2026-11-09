@@ -258,9 +258,11 @@ class SettingsWindow(QWidget):
     saved = Signal(dict, list)       # (new full config, changed dotted keys)
     restart_requested = Signal()
 
-    def __init__(self, cfg: dict, config_path=None, parent=None):
+    def __init__(self, cfg: dict, config_path=None, parent=None, wake_hooks=None):
         super().__init__(parent, Qt.Window)
         self.config_path = config_path
+        self.wake_hooks = wake_hooks          # __main__._WakeHooks (pause/resume listening, GPU load)
+        self._wizard = None
         self._orig: dict = copy.deepcopy(cfg)
         self._pending_restart: list[str] = []
         self._tts_test = None
@@ -275,6 +277,7 @@ class SettingsWindow(QWidget):
         lay.addWidget(self.tabs, 1)
         self._build_general()
         self._build_voice()
+        self._build_wake()
         self._build_models()
         self._build_projects()
         self._build_permissions()
@@ -430,10 +433,13 @@ class SettingsWindow(QWidget):
                                "paths…) can be edited in config.yaml by hand." % ACCENT))
         v.addStretch(1)
 
-    def _build_voice(self):
-        v = self._scroll_tab("Voice && wake")
+    def _build_wake(self):
+        v = self._scroll_tab("Wake word")
         g = QGroupBox("Wake word")
         f = self._form(g)
+        self.lb_wake_now = QLabel("")
+        self.lb_wake_now.setWordWrap(True)
+        f.addRow("Using", self.lb_wake_now)
         self.cmb_wake = self._combo(WAKE_MODELS, editable=True)
         self.btn_wake_browse = QPushButton("Browse…", clicked=self._browse_wake)
         self._row(f, "wake.model", "Model", self.cmb_wake, self.btn_wake_browse)
@@ -443,6 +449,31 @@ class SettingsWindow(QWidget):
         self._row(f, "wake.cooldown", "Cooldown", self.sp_cooldown)
         v.addWidget(g)
 
+        g = QGroupBox("Personal tune-up (optional)")
+        gv = QVBoxLayout(g)
+        gv.addWidget(self._help(
+            "The shared \"hey claude\" model works for most voices. If it often misses you, or you want a "
+            "different phrase, this trains a model on your voice, here on this PC, in about 15 minutes. "
+            "Your recordings and the model stay in the state folder."))
+        row = QHBoxLayout()
+        self.btn_wizard = QPushButton("Tune it to my voice…", clicked=self._open_wizard)
+        self.btn_wizard.setObjectName("primary")
+        self.btn_wake_default = QPushButton("Use the shared default", clicked=self._use_default_wake)
+        self.btn_wake_undo = QPushButton("Undo the last change", clicked=self._undo_wake)
+        row.addWidget(self.btn_wizard)
+        row.addWidget(self.btn_wake_default)
+        row.addWidget(self.btn_wake_undo)
+        row.addStretch(1)
+        gv.addLayout(row)
+        self.lb_false_wakes = QLabel("")
+        self.lb_false_wakes.setObjectName("hint")
+        self.lb_false_wakes.setWordWrap(True)
+        gv.addWidget(self.lb_false_wakes)
+        v.addWidget(g)
+        v.addStretch(1)
+
+    def _build_voice(self):
+        v = self._scroll_tab("Voice")
         g = QGroupBox("Speech recognition (whisper)")
         f = self._form(g)
         self.cmb_stt_device = self._combo([("GPU, CPU as fallback", "gpu"), ("CPU only", "cpu")])
@@ -598,6 +629,7 @@ class SettingsWindow(QWidget):
         self._set_combo(self.cmb_wake, _get(cfg, "wake.model", "hey_jarvis"))
         self.sp_threshold.setValue(float(_get(cfg, "wake.threshold", 0.5)))
         self.sp_cooldown.setValue(float(_get(cfg, "wake.cooldown", 1.0)))
+        self._wake_status(cfg)
         self._set_combo(self.cmb_stt_model, _get(cfg, "stt.cpu_model", "base.en"))
         dev = str(_get(cfg, "stt.device", "gpu")).lower()
         self._set_combo(self.cmb_stt_device, "gpu" if dev in ("gpu", "cuda") else "cpu")
@@ -845,6 +877,73 @@ class SettingsWindow(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Wake word model", start, "ONNX models (*.onnx)")
         if path:
             self.cmb_wake.setCurrentText(str(Path(path)))
+
+    # -- wake word: status, wizard, default, undo --------------------------------------
+    def _wake_status(self, cfg: dict | None = None):
+        from .listen import wake_label
+        from .wake_wizard import FALSE_WAKES, describe_model, load_history
+        cfg = cfg or self._orig
+        model = str(_get(cfg, "wake.model", ""))
+        loaded = self.wake_hooks.loaded_label() if self.wake_hooks is not None else (None, None)
+        if loaded[0] and loaded[1]:
+            text = f"\"{loaded[0]}\" (fallback: {loaded[1]})"
+        else:
+            text = f"\"{wake_label(model)}\": {describe_model(model)}"
+        self.lb_wake_now.setText(text)
+        self.btn_wake_undo.setEnabled(bool(load_history()))
+        n = len(list(FALSE_WAKES.glob("*.wav"))) if FALSE_WAKES.is_dir() else 0
+        self.lb_false_wakes.setText(
+            f"{n} false wake{'s' if n != 1 else ''} saved with \"not me\" on the island; the next tune-up "
+            f"learns from them." if n else
+            "When it wakes by mistake, click \"not me\" on the island (or right-click it, That wasn't me): the "
+            "audio is saved and the next tune-up learns from it.")
+
+    def _apply_wake(self, new: dict, msg: str) -> str:
+        """Save a config that only changes wake.model / wake.threshold (built
+        from the last saved config, so unsaved edits in the form stay out)."""
+        try:
+            config.ensure_user_config(self.config_path)
+            config.save(new, self.config_path)
+        except OSError as e:
+            self._set_status(f"Couldn't write the config file: {e}", "#E5646A")
+            return f"Couldn't write the config file: {e}"
+        changed = config.diff(self._orig, new)
+        self._orig = copy.deepcopy(new)
+        self._set_combo(self.cmb_wake, _get(new, "wake.model"))
+        self.sp_threshold.setValue(float(_get(new, "wake.threshold", 0.5)))
+        self.saved.emit(copy.deepcopy(new), list(changed))
+        self._wake_status(new)
+        self._set_status(msg, "#6CCB7A")
+        return msg
+
+    def _open_wizard(self):
+        from .wake_wizard import apply_model, make_wizard
+        if self._wizard is not None and self._wizard.isVisible():
+            self._wizard.raise_()
+            return
+
+        def on_apply(model):
+            return self._apply_wake(apply_model(self._orig, model),
+                                    f"Now using {Path(model).name} (live, no restart).")
+        self._wizard = make_wizard(self._orig, self.wake_hooks, self, on_apply=on_apply, on_undo=self._undo_wake)
+        self._wizard.finished.connect(lambda *_: self._wake_status())
+        self._wizard.show()
+
+    def _use_default_wake(self):
+        from .wake_models import DEFAULT_REL
+        from .wake_wizard import apply_model
+        if str(_get(self._orig, "wake.model")) == DEFAULT_REL and float(_get(self._orig, "wake.threshold", 0.5)) == 0.5:
+            self._set_status("Already using the shared default model.")
+            return
+        self._apply_wake(apply_model(self._orig, config.ROOT / DEFAULT_REL), "Back to the shared default model.")
+
+    def _undo_wake(self) -> str:
+        from .wake_wizard import undo_model
+        new = undo_model(self._orig)
+        if new is None:
+            self._set_status("Nothing to undo.")
+            return "Nothing to undo."
+        return self._apply_wake(new, f"Back to {_get(new, 'wake.model')} (threshold {_get(new, 'wake.threshold')}).")
 
     def _add_project(self, name: str = "", folder: str = ""):
         r = self.tbl.rowCount()

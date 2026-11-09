@@ -27,7 +27,7 @@ HEADER = ("# hey-claude settings. Written by the Settings window; edit by hand i
 # Dotted keys (or section prefixes ending in ".") that the running app picks up
 # without a restart. Everything else needs one.
 LIVE = (
-    "wake.threshold", "wake.cooldown", "wake.suppress_while_speaking", "wake.speaking_tail_s",
+    "wake.model", "wake.threshold", "wake.cooldown", "wake.suppress_while_speaking", "wake.speaking_tail_s",
     "stt.yield_to_premiere", "stt.gpu_busy_pct", "stt.gpu_resume_pct", "stt.cpu_busy_pct",  # read per request
     "listen.",                       # read on every utterance (device: next time the mic opens)
     "tasks.",                        # read when each task starts

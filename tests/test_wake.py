@@ -367,7 +367,7 @@ def test_example_config_points_at_the_trained_model():
     d = C.defaults()["wake"]
     assert d["model"] == "models/hey_claude.onnx" and d["suppress_while_speaking"] is True
     assert C.is_live("wake.suppress_while_speaking") and C.is_live("wake.speaking_tail_s")
-    assert not C.is_live("wake.model")
+    assert C.is_live("wake.model")                            # M2b: Apply/Undo swaps the model live
 
 
 if __name__ == "__main__":

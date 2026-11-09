@@ -11,3 +11,6 @@ samples/*.wav
 # trained wake-word models (partly trained on your voice; this repo is public)
 models/*.onnx
 models/*.tflite
+
+# staged release assets (tools/stage_wake_release.py); published with gh, never committed
+dist/

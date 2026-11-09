@@ -1,0 +1,1405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Companion Character Options</title>
+<style>
+:root{
+  --page:#0d0c0b; --panel:rgba(22,20,19,.82); --panel-2:#1f1c1a; --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.14);
+  --fg:#F2F2F2; --dim:#9A9A9A; --faint:#6f6a66; --accent:#D97757; --accent-ink:#f0a487; --ok:#6CCB7A; --bad:#E5646A;
+  --font:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--page);color:var(--fg);font:14px/1.45 var(--font);-webkit-font-smoothing:antialiased;min-height:100vh}
+/* the mock desktop wallpaper */
+.wall{position:fixed;inset:0;z-index:0;pointer-events:none;background:
+  radial-gradient(110% 70% at 85% 115%,#3a2738 0%,rgba(58,39,56,0) 60%),
+  radial-gradient(90% 70% at 5% 105%,#1d3346 0%,rgba(29,51,70,0) 55%),
+  radial-gradient(60% 40% at 50% -5%,#2a201b 0%,rgba(42,32,27,0) 70%),
+  linear-gradient(180deg,#121419 0%,#171a24 50%,#1f1b28 100%)}
+.wall::after{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.035) 1px,transparent 1px);background-size:22px 22px;mask-image:linear-gradient(180deg,#000,transparent 80%)}
+
+/* top of the "screen": the island lives here */
+.screen-top{position:sticky;top:0;z-index:5;height:64px;display:flex;justify-content:center;
+  background:linear-gradient(180deg,rgba(12,12,14,.92),rgba(12,12,14,.55) 70%,rgba(12,12,14,0));backdrop-filter:blur(6px)}
+#island{width:min(640px,100%);height:64px;display:block}
+.isl-cap{position:absolute;right:16px;top:20px;font:11px/1 var(--mono);color:var(--faint);pointer-events:none}
+@media (max-width:760px){.isl-cap{display:none}}
+
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:8px 16px 48px}
+header.intro{margin:6px 0 14px}
+h1{font-size:21px;font-weight:650;margin:0 0 4px;letter-spacing:.1px}
+h1 span{color:var(--accent-ink);font-weight:500}
+.sub{color:var(--dim);font-size:13.5px;max-width:760px;margin:0}
+
+/* global controls */
+.bar{position:sticky;top:64px;z-index:4;display:flex;flex-wrap:wrap;align-items:center;gap:6px 6px;
+  background:rgba(20,18,17,.86);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:0 0 16px}
+.bar .lbl{color:var(--faint);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-right:4px}
+.bar .sep{width:1px;height:20px;background:var(--line-2);margin:0 4px}
+button{font:inherit;font-size:12.5px;color:var(--fg);background:var(--panel-2);border:1px solid var(--line-2);
+  border-radius:8px;padding:5px 9px;cursor:pointer;line-height:1.2;transition:background .15s,border-color .15s,color .15s}
+button:hover{background:#2a2624;border-color:rgba(255,255,255,.22)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button[aria-pressed="true"]{background:rgba(217,119,87,.16);border-color:rgba(217,119,87,.7);color:#ffd9c9}
+button.strong{border-color:rgba(217,119,87,.45)}
+.tog{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--dim);cursor:pointer;user-select:none;padding:4px 6px}
+.tog input{accent-color:var(--accent);margin:0}
+
+/* cards */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,352px),1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 14px 12px;backdrop-filter:blur(10px);
+  box-shadow:0 10px 30px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:10px;min-width:0}
+.card.featured{border-color:rgba(217,119,87,.45)}
+.chead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.chead h2{margin:0;font-size:17px;font-weight:650;letter-spacing:.2px}
+.chead h2 small{font-size:12px;color:var(--faint);font-weight:500;margin-left:6px;font-family:var(--mono)}
+.chead p{margin:2px 0 0;color:var(--dim);font-size:13px}
+.num{font:600 11px/1 var(--mono);color:var(--faint);padding-top:4px}
+.stage{display:grid;grid-template-columns:160px minmax(0,1fr);gap:10px;align-items:stretch}
+.bigwrap,.pillwrap{position:relative;border-radius:12px;background:
+  radial-gradient(70% 55% at 50% 60%,rgba(255,255,255,.035),rgba(255,255,255,0) 70%),rgba(0,0,0,.22);
+  border:1px solid rgba(255,255,255,.05);overflow:hidden}
+.bigwrap canvas{display:block;width:160px;height:156px}
+.pillwrap{display:flex;flex-direction:column;justify-content:center;min-height:156px}
+.pillwrap canvas{display:block;width:100%;height:84px}
+.cap{position:absolute;left:8px;bottom:6px;font:10.5px/1 var(--mono);color:var(--faint);pointer-events:none}
+.now{position:absolute;right:8px;top:7px;font:10.5px/1 var(--mono);color:var(--dim);pointer-events:none}
+.states{display:flex;flex-wrap:wrap;gap:5px}
+.states button{padding:4px 8px;font-size:12px}
+.row2{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sig{margin:0;color:var(--faint);font-size:12px;line-height:1.4}
+.sig b{color:var(--dim);font-weight:600}
+@media (max-width:560px){ .bar{position:static} }
+@media (max-width:420px){
+  .stage{grid-template-columns:1fr}
+  .bigwrap canvas{margin:0 auto}
+  .pillwrap{min-height:110px}
+}
+footer{margin-top:22px;color:var(--faint);font-size:12.5px;max-width:860px}
+footer h3{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px}
+footer ul{margin:0;padding-left:18px}
+footer li{margin:2px 0}
+</style>
+</head>
+<body>
+<div class="wall" aria-hidden="true"></div>
+
+<div class="screen-top">
+  <canvas id="island" aria-label="The island, showing the featured character at true size"></canvas>
+  <div class="isl-cap" id="islCap">island · true size</div>
+</div>
+
+<main class="wrap">
+  <header class="intro">
+    <h1>Pick a companion <span>for hey-claude</span></h1>
+    <p class="sub">Five original characters. Each one is drawn live at 120&nbsp;px as a desktop companion and at true size inside the island pill. Move your pointer near one and it notices you. "Show in island" puts it in the pill at the top of the screen.</p>
+  </header>
+
+  <div class="bar" id="bar" role="toolbar" aria-label="Controls for all five characters">
+    <span class="lbl">All five</span>
+    <span id="gStates" style="display:contents"></span>
+    <span class="sep"></span>
+    <button id="gAuto" class="strong" aria-pressed="false" title="Cycle every state, all five in lock-step">Auto · play all in sync</button>
+    <label class="tog"><input type="checkbox" id="calm"> Calm motion</label>
+    <label class="tog"><input type="checkbox" id="loupe"> Pill loupe 2×</label>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <footer>
+    <h3>Notes</h3>
+    <ul>
+      <li>The mic level and the voice amplitude are simulated (speech-like syllables), and every card shares the same signal, so the five react to the same "sentence".</li>
+      <li>Calm motion follows <code>prefers-reduced-motion</code>: idle goes still, hops, particles and flights are dropped, and only information-bearing motion (mic and voice level, state changes) remains.</li>
+      <li>Everything is drawn with canvas and <code>requestAnimationFrame</code>. No images, fonts or network requests.</li>
+    </ul>
+  </footer>
+</main>
+
+<script>
+'use strict';
+/* ================================================================
+   Palette and small utilities
+   ================================================================ */
+const hex = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+const C = {
+  bg:hex('#080808'), accent:hex('#D97757'), fg:hex('#F2F2F2'), dim:hex('#9A9A9A'), ok:hex('#6CCB7A'), bad:hex('#E5646A'),
+  ash:hex('#5C5652'), banked:hex('#B8664C'), live:hex('#D97757'), hot:hex('#EC9A78'), whitehot:hex('#FFE3D6'), cool:hex('#B38A7A')
+};
+const TAU = Math.PI*2;
+const clamp = (x,a=0,b=1) => x<a?a:x>b?b:x;
+const lerp = (a,b,t) => a+(b-a)*t;
+const mixc = (a,b,t) => [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+const mul = (c,k) => [c[0]*k, c[1]*k, c[2]*k];
+const rgba = (c,a=1) => `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${clamp(a)})`;
+const easeOutCubic = t => 1-Math.pow(1-clamp(t),3);
+const easeInCubic = t => Math.pow(clamp(t),3);
+const easeInOut = t => { t=clamp(t); return t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; };
+const easeOutBack = t => { t=clamp(t); const c1=1.6, c3=c1+1; return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2); };
+const hash = n => { const x = Math.sin(n*127.1+311.7)*43758.5453; return x-Math.floor(x); };
+const rnd = (a,b) => a+Math.random()*(b-a);
+const pick = arr => arr[(Math.random()*arr.length)|0];
+
+const HEAT = [[0,C.ash],[0.4,C.banked],[0.7,C.live],[1.0,C.hot],[1.25,C.whitehot]];
+function heat(x){
+  x = clamp(x,0,1.25);
+  for (let i=0;i<HEAT.length-1;i++){
+    const [a,ca]=HEAT[i], [b,cb]=HEAT[i+1];
+    if (x<=b) return mixc(ca,cb,(x-a)/(b-a));
+  }
+  return C.whitehot;
+}
+/* asymmetric breath, 0..1: inhale 40 % OutSine, exhale 60 % InOutSine */
+function breath(phase){
+  const f = phase-Math.floor(phase);
+  if (f<0.4) return Math.sin((f/0.4)*Math.PI/2);
+  const u=(f-0.4)/0.6; return 1-(0.5-0.5*Math.cos(Math.PI*u));
+}
+/* a speech-like envelope: words of 2-4 syllables with pauses */
+function speech(T, seed){
+  const slot=0.2, i=Math.floor(T/slot), f=T/slot-i;
+  const w=Math.floor(i/5), k=i-w*5;
+  const len = 2+Math.floor(hash(w*1.31+seed*13.7)*3);
+  if (k>=len) return 0.01;
+  const amp = 0.3+0.7*hash(i*1.37+seed);
+  return amp*Math.pow(Math.sin(Math.PI*f),0.6)*(0.9+0.1*Math.sin(T*53));
+}
+
+/* stroke helpers, all in the current transform */
+function drawZ(ctx,x,y,s,col,a,lw){
+  ctx.save(); ctx.strokeStyle=rgba(col,a); ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(x-s/2,y-s/2); ctx.lineTo(x+s/2,y-s/2); ctx.lineTo(x-s/2,y+s/2); ctx.lineTo(x+s/2,y+s/2); ctx.stroke(); ctx.restore();
+}
+function drawQ(ctx,x,y,s,col,a,lw){
+  ctx.save(); ctx.strokeStyle=rgba(col,a); ctx.fillStyle=rgba(col,a); ctx.lineWidth=lw; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.arc(x, y-s*0.22, s*0.3, Math.PI*1.08, Math.PI*2.28); ctx.lineTo(x, y+s*0.16); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y+s*0.42, lw*0.75, 0, TAU); ctx.fill(); ctx.restore();
+}
+function drawCheck(ctx,x,y,s,trim,col,a,lw){
+  if (trim<=0||a<=0) return;
+  const P=[[x-0.45*s,y],[x-0.12*s,y+0.32*s],[x+0.5*s,y-0.38*s]];
+  const l1=Math.hypot(P[1][0]-P[0][0],P[1][1]-P[0][1]), l2=Math.hypot(P[2][0]-P[1][0],P[2][1]-P[1][1]);
+  let d=trim*(l1+l2);
+  ctx.save(); ctx.strokeStyle=rgba(col,a); ctx.lineWidth=lw; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.moveTo(P[0][0],P[0][1]);
+  if (d<=l1){ const u=d/l1; ctx.lineTo(lerp(P[0][0],P[1][0],u),lerp(P[0][1],P[1][1],u)); }
+  else { ctx.lineTo(P[1][0],P[1][1]); const u=(d-l1)/l2; ctx.lineTo(lerp(P[1][0],P[2][0],u),lerp(P[1][1],P[2][1],u)); }
+  ctx.stroke(); ctx.restore();
+}
+function poly(ctx, pts){ ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]); for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0],pts[i][1]); ctx.closePath(); }
+function pillPath(ctx,x,y,w,h){
+  const r=h/2; ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arc(x+w-r,y+r,r,-Math.PI/2,Math.PI/2);
+  ctx.lineTo(x+r,y+h); ctx.arc(x+r,y+r,r,Math.PI/2,Math.PI*1.5); ctx.closePath();
+}
+
+/* draw options: a 100-unit box centred at (cx, cy), in device px */
+function mkO(ctx,cx,cy,box,small,dpr){
+  const k=box/100;
+  return { ctx,cx,cy,box,small,dpr,k,
+    mw:px=>px*dpr/k,                          /* css px -> units */
+    lw(units,minPx){ return Math.max(units, minPx*dpr/k); },
+    begin(){ ctx.save(); ctx.translate(cx,cy); ctx.scale(k,k); },
+    end(){ ctx.restore(); } };
+}
+
+/* generic particles in unit space */
+function drawParts(o,s,filter){
+  const ctx=o.ctx;
+  for (const p of s.parts){
+    if (filter && !filter(p)) continue;
+    const u=p.life/p.max, a=(p.a0??1)*(p.fadeIn? Math.min(1,u*6):1)*(1-Math.pow(u,1.6));
+    if (a<=0.005) continue;
+    switch(p.k){
+      case 'dot': {
+        ctx.fillStyle=rgba(p.col,a); ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(p.r*(1-0.4*u),o.mw(0.8)),0,TAU); ctx.fill(); break;
+      }
+      case 'smoke': {
+        const r=p.r+u*p.grow; ctx.fillStyle=rgba(p.col,a*0.35); ctx.beginPath(); ctx.arc(p.x,p.y,r,0,TAU); ctx.fill(); break;
+      }
+      case 'ring': {
+        const r=lerp(p.r,p.r2,easeOutCubic(u)); ctx.strokeStyle=rgba(p.col,(1-u)*(p.a0??.35));
+        ctx.lineWidth=o.lw(lerp(1.6,0.5,u),0.6); ctx.beginPath(); ctx.arc(p.x,p.y,r,0,TAU); ctx.stroke(); break;
+      }
+      case 'tri': {
+        ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot); ctx.scale(1,Math.cos(p.rot*1.7));
+        ctx.fillStyle=rgba(p.col,a); poly(ctx,[[-p.r,p.r*0.6],[p.r,p.r*0.6],[0,-p.r]]); ctx.fill(); ctx.restore(); break;
+      }
+      case 'trail': {
+        if (p.tr && p.tr.length>1){
+          for (let i=1;i<p.tr.length;i++){
+            const q=i/p.tr.length; ctx.strokeStyle=rgba(p.col,a*q*0.7); ctx.lineWidth=Math.max(p.r*1.4*q,o.mw(0.7)); ctx.lineCap='round';
+            ctx.beginPath(); ctx.moveTo(p.tr[i-1][0],p.tr[i-1][1]); ctx.lineTo(p.tr[i][0],p.tr[i][1]); ctx.stroke();
+          }
+        }
+        ctx.fillStyle=rgba(p.col2||p.col,a); ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(p.r,o.mw(1)),0,TAU); ctx.fill(); break;
+      }
+      case 'z': drawZ(ctx,p.x,p.y,p.r*(0.7+0.5*u),p.col,a*0.8,o.lw(1.6,0.8)); break;
+    }
+  }
+}
+
+/* ================================================================
+   Simulation shared by both views of a card
+   ================================================================ */
+class Sim{
+  constructor(ch){
+    this.ch=ch; this.state='idle'; this.t=0; this.T=0; this.it=0; this.dt=1/60;
+    this.L=0; this.A=0; this.hist=[]; this.onset=false; this.lastOnset=-9;
+    this.look={x:0,y:0}; this.lookT={x:0,y:0}; this.near=0; this.nearT=0; this.notice=0; this.wasNear=false;
+    this.lastMove=-99; this.wander={x:0,y:0}; this.wanderAt=2;
+    this.blink=0; this.blinkAt=1.5+Math.random()*3; this.blinkT=-1;
+    this.p={}; this.cs={}; this.parts=[]; this.calm=false;
+    ch.enter && ch.enter(this,'idle');
+  }
+  set(state){
+    this.state=state; this.t=0;
+    if (this.ch.enter) this.ch.enter(this,state);
+  }
+  fo(k,target,tau=0.09){
+    const p=this.p; if (p[k]===undefined || !isFinite(p[k])) { p[k]=target; return target; }
+    const tt=this.calm? Math.max(tau,0.12): tau;
+    p[k]+= (target-p[k])*(1-Math.exp(-this.dt/tt)); return p[k];
+  }
+  spawn(o){
+    if (this.calm && !o.force) return;
+    if (this.parts.length>56) this.parts.shift();
+    this.parts.push(Object.assign({x:0,y:0,vx:0,vy:0,g:0,drag:0,life:0,max:1,r:2,rot:0,vr:0,col:C.hot,k:'dot',tr:null},o));
+  }
+  histAt(d,key){
+    const target=this.T-d, h=this.hist;
+    for (let i=h.length-1;i>=0;i--) if (h[i].T<=target) return h[i][key];
+    return h.length? h[0][key]: 0;
+  }
+  step(dt,T){
+    this.dt=dt; this.T=T; this.t+=dt; if (!this.calm) this.it+=dt;
+    /* audio followers */
+    const raw = this.state==='listening' ? speech(T,1.3) : 0;
+    const Lt = Math.pow(clamp((raw-0.02)/0.5),0.7);
+    this.L += (Lt-this.L)*(1-Math.exp(-dt/(Lt>this.L?0.03:0.18)));
+    const At = this.state==='talking' ? clamp(speech(T*1.07+7.3,4.7)*1.05) : 0;
+    this.A += (At-this.A)*(1-Math.exp(-dt/(At>this.A?0.025:0.14)));
+    this.hist.push({T,L:this.L,A:this.A});
+    while (this.hist.length && this.hist[0].T<T-0.7) this.hist.shift();
+    const Aold=this.histAt(0.06,'A');
+    this.onset=false;
+    if (this.A-Aold>0.18 && this.A>0.25 && T-this.lastOnset>0.16){ this.onset=true; this.lastOnset=T; }
+    /* where is the pointer */
+    let lt=this.lookT;
+    if (T-this.lastMove>4.5){
+      if (this.state==='idle' && !this.calm){
+        this.wanderAt-=dt;
+        if (this.wanderAt<=0){ this.wanderAt=2.5+Math.random()*3.5; this.wander = Math.random()<0.35? {x:0,y:0} : {x:rnd(-0.6,0.6),y:rnd(-0.3,0.3)}; }
+        lt=this.wander;
+      } else lt={x:0,y:0};
+      this.nearT*=Math.exp(-dt/0.5);
+    }
+    const kl=1-Math.exp(-dt/0.12);
+    this.look.x+=(lt.x-this.look.x)*kl; this.look.y+=(lt.y-this.look.y)*kl;
+    this.near+=(this.nearT-this.near)*(1-Math.exp(-dt/0.2));
+    if (this.nearT>0.55 && !this.wasNear){ this.wasNear=true; this.notice=1; }
+    if (this.nearT<0.3) this.wasNear=false;
+    this.notice*=Math.exp(-dt/0.35);
+    /* blink */
+    if (!this.calm){
+      this.blinkAt-=dt;
+      if (this.blinkAt<=0){ this.blinkT=0; this.blinkAt = Math.random()<0.18 ? 0.28 : 2.6+Math.random()*4.5; }
+    }
+    if (this.blinkT>=0){ this.blinkT+=dt; this.blink=Math.sin(Math.PI*clamp(this.blinkT/0.16)); if (this.blinkT>0.16){ this.blinkT=-1; this.blink=0; } }
+    /* particles */
+    for (const p of this.parts){
+      p.life+=dt; p.vy+=p.g*dt;
+      if (p.drag){ const d=Math.exp(-p.drag*dt); p.vx*=d; p.vy*=d; }
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.rot+=p.vr*dt;
+      if (p.k==='trail'){ (p.tr||(p.tr=[])).push([p.x,p.y]); if (p.tr.length>10) p.tr.shift(); }
+    }
+    this.parts=this.parts.filter(p=>p.life<p.max);
+    this.ch.update(this,dt);
+  }
+}
+
+/* ================================================================
+   1. ECHO, the pocket bat (pixel art)
+   ================================================================ */
+const EB={B:[150,137,130], D:[104,86,100], F:[196,185,176], K:[16,12,12], perch:[66,60,57]};
+const GLYPH={
+  z:['###','..#','.#.','#..','###'],
+  q:['.##.','#..#','..#.','.#..','....','.#..'],
+  chk:['....#','...#.','#.#..','.#...'],
+  env:['wwwww','wdwdw','wwaww','wwwww']
+};
+const Echo={
+  id:'echo', name:'Echo', kind:'pixel bat',
+  line:'A pocket-sized bat with satellite-dish ears. Hears everything, says just enough.',
+  sig:'<b>Off:</b> hangs upside down from the island and snoozes. <b>Listening:</b> ears grow with your voice and sound pings fly into them.',
+  enter(s,st){ const cs=s.cs; cs.burst=0; if (st==='off') cs.zT=0.4; },
+  update(s,dt){
+    const st=s.state,t=s.t,cs=s.cs,calm=s.calm;
+    let ear=0, flap=0, hz=2;
+    if (st==='listening') ear=1+s.L*1.4;
+    else if (st==='confused') ear=-1;
+    else if (st==='talking') ear=0.3+s.A*1.0;
+    else if (st==='happy') ear=1.2;
+    else if (st==='thinking') ear=0.6;
+    else if (st==='working') ear=0.6;
+    if (st==='idle'||st==='thinking') ear+=s.notice*1.4;
+    s.fo('ear',ear,0.06);
+    if (!calm){
+      if (st==='working'){ flap=1; hz=2.6; }
+      if (st==='happy' && t<1.3){ flap=1; hz=7; }
+      if (st==='sending' && t>0.15 && t<2.2){ flap=1; hz=6; }
+    }
+    s.fo('flap',flap,0.06);
+    cs.wph=(cs.wph||0)+dt*hz;
+    if (st==='idle' && !calm){
+      cs.tw=(cs.tw??5)-dt;
+      if (cs.tw<0){ cs.twT=0.22; cs.tw=6+Math.random()*6; }
+    }
+    if (cs.twT>0) cs.twT-=dt;
+    if (st==='listening'){
+      cs.arcT=(cs.arcT||0)-dt;
+      if (cs.arcT<=0 && s.L>0.12){
+        cs.arcT=0.34-0.16*s.L;
+        s.spawn({k:'parc',x:-3.5,y:1.5,vx:8.5,max:0.62,side:1});
+        s.spawn({k:'parc',x:15.5,y:1.5,vx:-8.5,max:0.62,side:-1});
+      }
+    }
+    if (st==='off'){
+      cs.zT=(cs.zT??0.5)-dt;
+      if (cs.zT<=0){ cs.zT=1.7; s.spawn({k:'pz',x:9.5,y:8,vx:1.4,vy:-2.2,max:2.4}); }
+    }
+    if (st==='happy' && !cs.burst && t>0.05){
+      cs.burst=1;
+      for (let i=0;i<14;i++) s.spawn({k:'ppix',x:5.5,y:3,vx:rnd(-13,13),vy:rnd(-17,-8),g:34,max:rnd(1.1,1.7),col:pick([C.accent,C.ok,C.fg,C.hot])});
+    }
+    if (st==='talking' && s.onset) cs.hop=0.12;
+    if (cs.hop>0) cs.hop-=dt;
+  },
+  draw(o,s){
+    const ctx=o.ctx, p=s.p, cs=s.cs, st=s.state, t=s.t, calm=s.calm;
+    const c=Math.max(1,Math.floor((o.box+4*o.dpr)/12));
+    let dx=0, dy=0, env=false, chk=0, gone=false;
+    if (!calm){
+      if (st==='happy' && t<1.2) dy=-Math.round(2*Math.abs(Math.sin(t*Math.PI*2.5)));
+      if (st==='working') dy=-Math.round((Math.sin(cs.wph*Math.PI*0.5)+1)*0.5);
+      if (st==='confused' && t<0.45) dx=(Math.floor(t*22)%2)?1:-1;
+      if ((st==='idle') && s.notice>0.75) dy=-1;
+      if (st==='talking' && cs.hop>0) dy=-1;
+    }
+    if (st==='sending'){
+      env = t>0.08 && t<1.2;
+      if (!calm){
+        if (t>=0.35 && t<1.15){ const u=(t-0.35)/0.8; dx=16*easeInCubic(u); dy=-7*easeInCubic(u)-(u<0.2?1:0); }
+        else if (t>=1.15 && t<1.5) gone=true;
+        else if (t>=1.5 && t<2.1){ const u=(t-1.5)/0.6; dx=-16*(1-easeOutCubic(u)); dy=-3*(1-u); }
+      } else env = t<1.2;
+      if (t>2.0) chk=clamp((t-2.0)/0.15)*(1-clamp((t-3.3)/0.3));
+    }
+    if (st==='happy') chk=0;
+    const hang = st==='off';
+    const bx=Math.round(o.cx-6*c), by=Math.round(o.cy-5.5*c);
+    const ox=bx+Math.round(dx)*c, oy=by+Math.round(dy)*c;
+    const P=(x,y,col,a=1)=>{ const yy=hang?11-y:y; ctx.fillStyle=rgba(col,a); ctx.fillRect(ox+x*c,oy+yy*c,c,c); };
+    const glyph=(rows,gx,gy,map,a=1,cell=c,orgX=bx,orgY=by)=>{
+      for (let r=0;r<rows.length;r++) for (let q=0;q<rows[r].length;q++){
+        const ch=rows[r][q]; const col=map[ch]; if (!col) continue;
+        ctx.fillStyle=rgba(col,a); ctx.fillRect(orgX+Math.round(gx*c)+q*cell, orgY+Math.round(gy*c)+r*cell, cell, cell);
+      }
+    };
+    /* working satellites, back half */
+    const sats=[];
+    if (st==='working'){
+      for (let i=0;i<3;i++){
+        const a=s.T*TAU/2.6+i*TAU/3;
+        sats.push({x:Math.round(5.5+7.5*Math.cos(a)), y:Math.round(6+2.6*Math.sin(a)), front:Math.sin(a)>0});
+      }
+      for (const q of sats) if (!q.front){ ctx.fillStyle=rgba(C.banked,0.9); ctx.fillRect(bx+q.x*c, by+q.y*c, c, c); }
+    }
+    if (!gone){
+      /* perch (big view only) */
+      if (hang && !o.small){ ctx.fillStyle=rgba(EB.perch,1); ctx.fillRect(ox-1*c, oy, 14*c, Math.max(1,Math.round(c*0.6))); }
+      const B=EB.B, D=EB.D, F=EB.F, K=EB.K, W=C.fg;
+      const earGlow = st==='off'? 0 : clamp(0.25+(st==='listening'? s.L*0.95:0)+s.notice*0.5+(st==='talking'? s.A*0.4:0));
+      const A = st==='off'? mixc(C.ash,C.banked,0.3) : mixc(C.banked,C.hot,earGlow);
+      /* wings */
+      let f=0;
+      if (p.flap>0.35){ f=[1,2,1,3][Math.floor(cs.wph*4)%4]; }
+      else if (st==='talking' && s.A>0.8) f=1;
+      else if (st==='listening' && s.L>0.7) f=1;
+      else if (st==='happy' && t>1.3) f=0;
+      /* wings: membranes with a scalloped edge, always a little open so the silhouette says "bat" */
+      const WL={0:[[1,6],[0,7],[1,7],[2,7],[0,8],[2,8],[2,9]],
+                1:[[0,5],[1,5],[0,6],[1,6],[1,7],[2,7],[0,7],[2,8]],
+                2:[[0,2],[0,3],[1,3],[0,4],[1,4],[1,5],[2,5],[1,6],[2,6],[2,7]],
+                3:[[2,7],[1,8],[2,8],[0,9],[1,9],[0,10],[2,9]]}[f];
+      for (const [x,y] of WL){ P(x,y,D); P(11-x,y,D); }
+      /* ears: big, set wide */
+      const e=p.ear||0, tw=cs.twT>0;
+      if (e<-0.5){
+        P(0,2,B); P(1,2,A); P(2,2,B); P(0,3,B,1);
+        P(11,2,B); P(10,2,A); P(9,2,B); P(11,3,B,1);
+      } else {
+        const up = e>2.1?2: e>0.55?1:0;
+        P(1,0,B); P(1,1,B); P(2,1,A); P(1,2,B); P(2,2,A); P(3,2,B);
+        if (up>=1){ P(1,-1,B); P(2,0,A); } if (up>=2){ P(1,-2,B); P(2,-1,A); }
+        P(10,2,B); P(9,2,A); P(8,2,B);
+        if (!tw){ P(10,0,B); P(10,1,B); P(9,1,A); if (up>=1){ P(10,-1,B); P(9,0,A); } if (up>=2){ P(10,-2,B); P(9,-1,A); } }
+        else { P(11,1,B); P(10,1,B); }
+      }
+      /* head, rounded top corners */
+      for (let x=2;x<=9;x++) P(x,3,B);
+      for (let y=4;y<=6;y++) for (let x=2;x<=9;x++) P(x,y,B);
+      /* body: a small furry belly */
+      for (let x=3;x<=8;x++) P(x,7,B);
+      P(3,8,B); for (let x=4;x<=7;x++) P(x,8,F); P(8,8,B);
+      for (let x=4;x<=7;x++) P(x,9,B);
+      if (!(st==='sending' && dx!==0) ) { P(4,10,D); P(7,10,D); }
+      /* eyes */
+      let lx=s.look.x, ly=s.look.y;
+      if (st==='thinking'){ lx=0.6; ly=-1; }
+      if (st==='working'){ lx=0; ly=1; }
+      if (st==='sending' && t<1.2){ lx=1; ly=-0.2; }
+      if (hang) ly=-ly;
+      let mode='open';
+      if (st==='off') mode = s.near>0.6 ? 'peek':'closed';
+      else if (st==='happy' && t<2.4) mode='happy';
+      else if (st==='sending' && t>2.0 && t<3.3) mode='happy';
+      else if (st==='confused') mode='confused';
+      if (mode!=='happy' && s.blink>0.5 && mode!=='closed') mode = mode==='peek'?'closed':'blink';
+      /* eyes: dark 2x2 with a glint that follows the pointer */
+      const eye=(x0,left,kind)=>{
+        if (kind==='open'){
+          P(x0,4,K); P(x0+1,4,K); P(x0,5,K); P(x0+1,5,K);
+          const gx = lx>0.3?1: lx<-0.3?0: (left?1:0);
+          const gy = ly>0.45?1:0;
+          P(x0+gx,4+gy,W);
+        } else if (kind==='closed'||kind==='blink'){ P(x0,5,K); P(x0+1,5,K); }
+      };
+      if (mode==='open'){ eye(3,true,'open'); eye(7,false,'open'); }
+      else if (mode==='closed'||mode==='blink'){ eye(3,true,'closed'); eye(7,false,'closed'); }
+      else if (mode==='peek'){ eye(3,true,'closed'); eye(7,false,'open'); }
+      else if (mode==='happy'){ P(2,5,K); P(3,4,K); P(4,5,K); P(7,5,K); P(8,4,K); P(9,5,K); }
+      else if (mode==='confused'){ eye(3,true,'open'); P(7,5,K); P(8,5,K); P(7,3,K); P(8,4,D); }
+      /* mouth, always with one tiny fang */
+      let m=0;
+      if (st==='talking') m = s.A>0.5?2: s.A>0.12?1:0;
+      if (mode==='happy') m=3;
+      if (st==='confused') m=4;
+      const tongue=[205,96,86];
+      if (m===0){ if (st!=='off'){ P(5,6,K); P(6,6,K); P(6,7,W); } }
+      else if (m===1){ P(5,6,W); P(6,6,K); P(5,7,K); P(6,7,K); }
+      else if (m===2){ P(5,6,W); P(6,6,K); P(5,7,K); P(6,7,tongue); P(5,8,K); P(6,8,K); }
+      else if (m===3){ P(4,6,K); P(5,7,K); P(6,7,tongue); P(7,6,K); P(5,6,K); P(6,6,K); }
+      else if (m===4){ P(4,7,K); P(5,6,K); P(6,7,K); P(7,6,K); }
+      /* envelope */
+      if (env) glyph(GLYPH.env, 3.5+Math.round(dx), 9.5+Math.round(dy), {w:C.fg,d:C.dim,a:C.accent},1,c,bx,by);
+      /* thinking dots */
+      if (st==='thinking'){
+        const n=Math.floor(t*2.6)%4;
+        [[10,1],[11,0],[12,-1]].forEach(([x,y],i)=>{ ctx.fillStyle=rgba(C.accent,i<n?1:0.18); ctx.fillRect(bx+x*c,by+y*c,c,c); });
+      }
+      if (st==='confused'){ const a=clamp(t/0.2); glyph(GLYPH.q,9.5,-5,{'#':C.bad},a); }
+    }
+    for (const q of sats) if (q.front){ ctx.fillStyle=rgba(C.hot,1); ctx.fillRect(bx+q.x*c, by+q.y*c, c, c); }
+    if (chk>0) glyph(GLYPH.chk,9,-3,{'#':C.ok},chk);
+    /* pixel particles */
+    const half=Math.max(1,Math.floor(c/2));
+    for (const q of s.parts){
+      const u=q.life/q.max, a=1-u*u;
+      if (q.k==='parc'){
+        const x=Math.round(q.x), y=Math.round(q.y), sd=q.side;
+        ctx.fillStyle=rgba(C.fg,a*(0.35+0.6*s.L));
+        ctx.fillRect(bx+x*c,by+(y-1)*c,c,c); ctx.fillRect(bx+(x+sd)*c,by+y*c,c,c); ctx.fillRect(bx+x*c,by+(y+1)*c,c,c);
+      } else if (q.k==='pz'){
+        glyph(GLYPH.z,q.x,q.y,{'#':C.dim},a*0.85,half);
+      } else if (q.k==='ppix'){
+        ctx.fillStyle=rgba(q.col,a); ctx.fillRect(bx+Math.round(q.x)*c,by+Math.round(q.y)*c,c,c);
+      }
+    }
+  }
+};
+
+/* ================================================================
+   2. CINDER, a living coal
+   ================================================================ */
+const Cinder={
+  id:'cinder', name:'Cinder', kind:'living coal',
+  line:'A warm little coal with a curl of flame. Brightens when you talk, banks down to ash when you leave.',
+  sig:'<b>Listening:</b> your voice is drawn in as sparks and it glows hotter. <b>Off:</b> cools to grey ash with a lazy curl of smoke.',
+  enter(s,st){ s.cs.burst=0; s.cs.shot=0; s.cs.puff=0; },
+  update(s,dt){
+    const st=s.state,t=s.t,cs=s.cs,calm=s.calm,L=s.L,A=s.A;
+    const b = calm?0.5: breath(s.it*0.1);
+    const fl = calm?0: (Math.sin(s.T*11)*0.5+Math.sin(s.T*17.3+1)*0.3+Math.sin(s.T*5.1)*0.2);
+    let temp=0.6+0.14*b, size=0.98+0.03*b, tuft=19+3*b, glow=0.1+0.06*b, sway=-s.look.x*0.35+(calm?0:0.12*Math.sin(s.it*1.3));
+    let x=0,y=0,sx=1,sy=1,ok=0,bad=0,eyeOpen=1,mouth=0,happy=0;
+    switch(st){
+      case 'idle': temp+=s.near*0.12+s.notice*0.2; tuft+=s.notice*8; break;
+      case 'off': temp=0.02+s.near*0.08; size=0.93; tuft=0; glow=0; eyeOpen=0; sway=0; break;
+      case 'listening': temp=0.75+0.4*L; size=1+0.07*L; tuft=18+18*L+fl*3*L; glow=0.16+0.3*L; break;
+      case 'thinking': temp=0.7+0.06*Math.sin(TAU*0.4*t); tuft=16+fl*1.5; sway=0.45*Math.sin(t*3.2); glow=0.14; break;
+      case 'talking': temp=0.78+0.4*A; mouth=A; tuft=16+10*A+fl*2; glow=0.14+0.25*A; size=1+0.04*A; break;
+      case 'happy': {
+        happy = t<2.4?1:0;
+        temp = t<0.9? 1.15 : 0.82; ok = t<1.2? 0.45:0;
+        tuft = (t>0.15 && t<0.9)? 40+fl*4 : 18;
+        glow = t<1? 0.36:0.16;
+        if (!calm){
+          if (t<0.18){ sx=1.12; sy=0.84; }
+          else if (t<0.55){ const u=(t-0.18)/0.37; y=-14*Math.sin(Math.PI*u); sx=0.93; sy=1.1; }
+          else if (t<0.72){ sx=1.08; sy=0.9; }
+        }
+        break;
+      }
+      case 'confused': {
+        bad = t<0.9? 1 : 0.55; temp = 0.5; tuft = t<1.2? 2 : 7; glow=0.08;
+        if (!calm) x = 2.5*1.6*Math.exp(-t/0.11)*Math.sin(TAU*5.5*t);
+        size = t<0.06? 0.9 : 1;
+        break;
+      }
+      case 'working': temp=0.86+0.04*Math.sin(s.T*3); tuft=18+fl*3; glow=0.2; if(!calm) y=Math.sin(s.T*2.2)*1.2; break;
+      case 'sending': {
+        temp=0.8; tuft=16; glow=0.16;
+        if (!calm && t<0.3){ sy=0.86; sx=1.07; sway=-0.5; }
+        else if (t<0.7){ x=calm?0:-5*(1-easeOutCubic((t-0.3)/0.4)); tuft=6+10*clamp((t-0.3)/0.4); }
+        if (t>1.0 && t<3) happy = 1;
+        break;
+      }
+    }
+    s.fo('temp',temp,st==='confused'?0.06:0.12); s.fo('size',size,0.1); s.fo('tuft',tuft,0.07); s.fo('glow',glow,0.12);
+    s.fo('sway',sway,0.15); s.fo('x',x,0.02); s.fo('y',y,0.03); s.fo('sx',sx,0.05); s.fo('sy',sy,0.05);
+    s.fo('ok',ok,0.08); s.fo('bad',bad,0.06); s.fo('eye',eyeOpen,0.12); s.fo('mouth',mouth,0.03); s.fo('happy',happy,0.08);
+    /* particles */
+    if (st==='listening' && L>0.18){
+      cs.inT=(cs.inT||0)-dt;
+      if (cs.inT<=0){
+        cs.inT=0.09-0.05*L;
+        const a=rnd(-Math.PI*0.95,-Math.PI*0.05), R=rnd(44,52);
+        const sx0=Math.cos(a)*R, sy0=12+Math.sin(a)*R*0.9;
+        s.spawn({k:'dot',x:sx0,y:sy0,vx:-sx0*1.9,vy:(12-sy0)*1.9,max:0.48,r:rnd(1.2,2.2),col:pick([C.hot,C.whitehot,C.live]),fadeIn:true});
+      }
+    }
+    if (st==='off'){
+      cs.smT=(cs.smT??0.2)-dt;
+      if (cs.smT<=0){ cs.smT=1.3; s.spawn({k:'smoke',x:rnd(-2,2),y:-8,vx:rnd(1,4),vy:-11,max:3,r:2.2,grow:9,col:[150,144,140]}); }
+    }
+    if (st==='talking' && s.onset) s.spawn({k:'ring',x:0,y:12,r:26,r2:50,max:0.52,col:C.hot,a0:0.3});
+    if (st==='happy' && !cs.burst && t>0.2){
+      cs.burst=1;
+      for (let i=0;i<14;i++) s.spawn({k:'dot',x:rnd(-6,6),y:-12,vx:rnd(-48,48),vy:rnd(-120,-60),g:190,max:rnd(0.8,1.3),r:rnd(1.3,2.4),col:pick([C.hot,C.whitehot,C.ok,C.live])});
+    }
+    if (st==='confused' && !cs.puff && t>0.04){
+      cs.puff=1;
+      for (let i=0;i<5;i++) s.spawn({k:'smoke',x:rnd(-5,5),y:-8,vx:rnd(-12,12),vy:rnd(-26,-14),max:1.3,r:2.5,grow:8,col:[140,132,128],drag:1.5});
+    }
+    if (st==='sending' && !cs.shot && t>0.3){
+      cs.shot=1;
+      s.spawn({k:'trail',x:4,y:-14,vx:150,vy:-120,g:40,max:1.1,r:3.2,col:C.hot,col2:C.whitehot,force:true});
+    }
+  },
+  draw(o,s){
+    const ctx=o.ctx, p=s.p, st=s.state, t=s.t;
+    o.begin();
+    const X=p.x, Y=12+p.y, rx=31*p.size*p.sx, ry=20*p.size*p.sy;
+    let col=heat(p.temp); col=mixc(col,C.ok,p.ok*0.6); col=mixc(col,C.bad,p.bad*0.75);
+    /* glow */
+    if (p.glow>0.01){
+      const R=34+38*p.glow;
+      const g=ctx.createRadialGradient(X,Y,4,X,Y,R+20); g.addColorStop(0,rgba(col,p.glow)); g.addColorStop(1,rgba(col,0));
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(X,Y,R+20,0,TAU); ctx.fill();
+    }
+    /* working: embers in orbit (back) */
+    const orbit=[];
+    if (st==='working'){
+      for (let i=0;i<3;i++){ const a=s.T*TAU/3+i*TAU/3; orbit.push({x:X+42*Math.cos(a), y:Y+4+11*Math.sin(a), f:Math.sin(a)>0}); }
+      for (const q of orbit) if (!q.f){ ctx.fillStyle=rgba(C.banked,0.9); ctx.beginPath(); ctx.arc(q.x,q.y,Math.max(2.2,o.mw(1)),0,TAU); ctx.fill(); }
+    }
+    /* tuft of flame */
+    const h=p.tuft;
+    if (h>0.6){
+      const bx=X+p.sway*3, byy=Y-ry*0.82, w=6.5+h*0.13;
+      const tx=bx+p.sway*h*0.7, ty=byy-h;
+      const lick=(bx,byy,w,h,tx,ty)=>{
+        ctx.beginPath(); ctx.moveTo(bx-w,byy+4);
+        ctx.bezierCurveTo(bx-w*1.15,byy-h*0.45, tx-w*0.55-p.sway*5,ty+h*0.38, tx,ty);
+        ctx.bezierCurveTo(tx+w*0.2-p.sway*2,ty+h*0.42, bx+w*1.1,byy-h*0.32, bx+w,byy+4);
+        ctx.closePath();
+      };
+      const fcol=mixc(heat(p.temp+0.3),C.bad,p.bad*0.5);
+      const g=ctx.createLinearGradient(0,byy,0,ty);
+      g.addColorStop(0,rgba(fcol,0.95)); g.addColorStop(1,rgba(fcol,0.55));
+      /* a smaller second tongue beside the main one */
+      const h2=h*0.55, s2=Math.sin(s.T*3.1)*0.15*(s.calm?0:1);
+      ctx.fillStyle=rgba(fcol,0.75); lick(bx+w*0.75,byy+2,w*0.55,h2,bx+w*0.75+(p.sway+0.35+s2)*h2*0.7,byy-h2); ctx.fill();
+      ctx.fillStyle=g; lick(bx,byy,w,h,tx,ty); ctx.fill();
+      /* white-hot inner flame */
+      const ih=h*0.62, iw=w*0.5, itx=bx+p.sway*ih*0.7;
+      ctx.fillStyle=rgba(mixc(C.whitehot,fcol,p.bad*0.6+(p.temp<0.5?0.5:0)),0.9); lick(bx,byy+1,iw,ih,itx,byy-ih); ctx.fill();
+    }
+    /* body: a pebble, flatter underneath */
+    ctx.beginPath(); ctx.ellipse(X,Y,rx,ry,0,Math.PI,TAU); ctx.ellipse(X,Y,rx,ry*0.8,0,0,Math.PI); ctx.closePath();
+    const bg=ctx.createLinearGradient(0,Y-ry,0,Y+ry*0.8);
+    const colLo=mixc(heat(p.temp-0.14),C.bad,p.bad*0.6);
+    bg.addColorStop(0,rgba(heat(p.temp+0.08),1)); bg.addColorStop(0.45,rgba(colLo,1));
+    bg.addColorStop(0.78,rgba(mixc(colLo,[48,28,22],0.6),1));
+    bg.addColorStop(1,rgba(mixc(heat(p.temp-0.4),[30,20,17],0.8),1));
+    ctx.fillStyle=bg; ctx.fill();
+    ctx.save(); ctx.clip();
+    const hg=ctx.createRadialGradient(X-7,Y-9,1,X-7,Y-9,22); hg.addColorStop(0,rgba(heat(p.temp+0.35),0.55)); hg.addColorStop(1,rgba(heat(p.temp+0.35),0));
+    ctx.fillStyle=hg; ctx.fillRect(X-rx,Y-ry,rx*2,ry*2);
+    /* glowing cracks in the crust: the coal is lit from inside */
+    if (p.temp>0.08){
+      const ca=clamp((p.temp-0.08)*1.4);
+      ctx.strokeStyle=rgba(heat(p.temp+0.45),ca*0.9); ctx.lineWidth=o.lw(1.3,0.7); ctx.lineCap='round'; ctx.lineJoin='round';
+      const sc=p.size;
+      ctx.beginPath();
+      ctx.moveTo(X-23*sc,Y+8*sc); ctx.lineTo(X-16*sc,Y+11*sc); ctx.lineTo(X-10*sc,Y+10.5*sc);
+      ctx.moveTo(X+11*sc,Y+12.5*sc); ctx.lineTo(X+17*sc,Y+9.5*sc); ctx.lineTo(X+23*sc,Y+9*sc);
+      ctx.stroke();
+    }
+    ctx.restore();
+    /* face */
+    const ink = st==='off'? [26,23,22] : [58,22,12];
+    let lx=s.look.x, ly=s.look.y;
+    if (st==='thinking'){ lx=0.55; ly=-0.8; }
+    if (st==='sending' && t<0.9){ lx=0.8; ly=-0.6; }
+    const ex=X+lx*4, ey=Y-1+ly*3;
+    const lw=o.lw(2.2,1.1);
+    ctx.lineCap='round'; ctx.strokeStyle=rgba(ink,1); ctx.fillStyle=rgba(ink,1); ctx.lineWidth=lw;
+    if (p.happy>0.5){
+      for (const sx of [-1,1]){ ctx.beginPath(); ctx.arc(ex+sx*9.5,ey+2,3.4,Math.PI*1.1,Math.PI*1.9); ctx.stroke(); }
+    } else if (p.eye<0.25 || (s.blink>0.5 && st!=='off')){
+      const peek = st==='off' && s.near>0.6;
+      for (const sx of [-1,1]){
+        if (peek && sx===1){ ctx.beginPath(); ctx.ellipse(ex+sx*9.5,ey,2.6,2.6,0,0,TAU); ctx.fill(); continue; }
+        ctx.beginPath(); ctx.arc(ex+sx*9.5,ey-1,3.4,Math.PI*0.15,Math.PI*0.85); ctx.stroke();
+      }
+    } else {
+      const conf = st==='confused';
+      for (const sx of [-1,1]){
+        const ryE = 4.3*p.eye*(conf && sx===1? 0.45:1)*(1+(st==='listening'?0.12*s.L:0));
+        ctx.beginPath(); ctx.ellipse(ex+sx*9.5,ey,3.1,Math.max(ryE,o.mw(1)/1.2),0,0,TAU); ctx.fill();
+        if (!o.small && ryE>2.5){ ctx.fillStyle=rgba(C.whitehot,0.85); ctx.beginPath(); ctx.arc(ex+sx*9.5-1,ey-1.6,0.9,0,TAU); ctx.fill(); ctx.fillStyle=rgba(ink,1); }
+      }
+    }
+    /* mouth */
+    const mx=X+lx*3, my=Y+8+ly*2;
+    if (p.mouth>0.04){
+      ctx.fillStyle=rgba(ink,1); ctx.beginPath(); ctx.ellipse(mx,my+1,3+2*p.mouth,0.6+5*p.mouth,0,0,TAU); ctx.fill();
+      ctx.fillStyle=rgba(C.whitehot,0.6*p.mouth); ctx.beginPath(); ctx.ellipse(mx,my+2+2*p.mouth,1.6+p.mouth,0.6+2*p.mouth,0,0,TAU); ctx.fill();
+    } else if (st==='confused'){
+      ctx.beginPath(); ctx.moveTo(mx-4,my+2); ctx.quadraticCurveTo(mx-2,my,mx,my+2); ctx.quadraticCurveTo(mx+2,my+4,mx+4,my+2); ctx.stroke();
+    } else if (st!=='off' && !o.small || p.happy>0.5){
+      ctx.lineWidth=o.lw(1.6,1); ctx.beginPath(); ctx.arc(mx,my-1.5,p.happy>0.5?4:2.6,Math.PI*0.2,Math.PI*0.8); ctx.stroke();
+    }
+    for (const q of orbit) if (q.f){ ctx.fillStyle=rgba(C.hot,1); ctx.beginPath(); ctx.arc(q.x,q.y,Math.max(2.8,o.mw(1.2)),0,TAU); ctx.fill(); }
+    drawParts(o,s);
+    if (st==='sending' && t>1.0){
+      const tr=clamp((t-1.0)/0.3), a=1-clamp((t-2.5)/0.4);
+      drawCheck(ctx,30,-24,16,tr,C.ok,a,o.lw(2.6,1.3));
+    }
+    o.end();
+  }
+};
+
+/* ================================================================
+   3. WREN, a folded-paper bird
+   ================================================================ */
+const PAPER={light:[241,235,227], mid:[218,209,198], shade:[180,170,160], line:[120,110,100]};
+const Wren={
+  id:'wren', name:'Wren', kind:'folded-paper bird',
+  line:'A little origami bird, cream on one side and terracotta on the other. Turns to face you, carries your notes.',
+  sig:'<b>Sending:</b> takes the note in its beak and flies off with it. <b>Error:</b> gets a bit crumpled, then smooths itself out.',
+  enter(s,st){ s.cs.burst=0; if (st==='sending'||st==='working') s.cs.face=1; },
+  update(s,dt){
+    const st=s.state,t=s.t,cs=s.cs,calm=s.calm,L=s.L,A=s.A;
+    if (st!=='sending' && st!=='working' && Math.abs(s.look.x)>0.22) cs.face=Math.sign(s.look.x);
+    if (st==='sending'||st==='working') cs.face=1;
+    s.fo('face',cs.face??1,0.1);
+    let hr=-s.look.y*0.25, by=0, x=0, w=0, bo=0, tl=0, dark=0, legs=1, flapAmp=0, flapHz=0, happy=0, sq=0;
+    switch(st){
+      case 'idle': {
+        if (!calm){ cs.pk=(cs.pk??5)-dt; if (cs.pk<0){ cs.pkT=0; cs.pk=7+Math.random()*6; } }
+        if (cs.pkT!=null){ cs.pkT+=dt; const u=cs.pkT/0.75; if (u>1) cs.pkT=null; else hr+=0.6*Math.sin(Math.PI*u); }
+        by = calm?0: Math.sin(s.it*1.1)*0.5 - s.notice*s.notice*7;
+        hr -= s.notice*0.3;
+        break;
+      }
+      case 'off': dark=1; hr=0.85; by=3; legs=0.45; break;
+      case 'listening': hr=-0.22-0.12*L+(calm?0:Math.sin(s.T*2)*0.03); tl=L; w=0.08+0.32*L; break;
+      case 'thinking': hr=-0.42; by=calm?0:Math.sin(t*1.6)*0.8; break;
+      case 'talking': bo=Math.pow(A,0.8); by=-A*2; hr=-0.08-A*0.14; break;
+      case 'happy': {
+        happy = t<2.4?1:0;
+        if (!calm){ if (t<1.2){ flapAmp=0.75; flapHz=7; } if (t<1.0) by=-12*Math.abs(Math.sin(Math.PI*t/0.5)); }
+        hr = -0.2; break;
+      }
+      case 'confused': hr=0.5; sq=1; if (!calm) x=2.5*1.6*Math.exp(-t/0.11)*Math.sin(TAU*5.5*t); break;
+      case 'working': hr = calm?0.2: 0.38*Math.pow(Math.max(0,Math.sin(TAU*t/0.85)),6); break;
+      case 'sending': {
+        if (t<0.3){ by=3; hr=0.1; }
+        else if (t<1.25){ flapAmp=0.8; flapHz=6; legs=0.3; }
+        else if (t<2.25){ flapAmp=t<2.05?0.8:0; flapHz=6; legs=t<2.0?0.3:1; }
+        if (t>2.2 && t<3.4) happy=1;
+        break;
+      }
+    }
+    if (flapAmp>0) w = 0.45+flapAmp*Math.sin(TAU*flapHz*t);
+    s.fo('hr',hr,0.09); s.fo('by',by,st==='happy'||st==='idle'?0.03:0.08); s.fo('x',x,0.02);
+    s.fo('w',w,flapAmp>0?0.02:0.09); s.fo('bo',bo,0.03); s.fo('tl',tl,0.06); s.fo('dark',dark,0.25);
+    s.fo('legs',legs,0.08); s.fo('happy',happy,0.06); s.fo('sq',sq,0.3);
+    if (st==='off'){
+      cs.zT=(cs.zT??0.4)-dt;
+      if (cs.zT<=0){ cs.zT=1.8; s.spawn({k:'z',x:16,y:-18,vx:5,vy:-7,max:2.4,r:7,col:C.dim}); }
+    }
+    if (st==='happy' && !cs.burst && t>0.05){
+      cs.burst=1;
+      for (let i=0;i<13;i++) s.spawn({k:'tri',x:rnd(-10,10),y:-18,vx:rnd(-45,45),vy:rnd(-95,-55),g:150,drag:0.6,max:rnd(1.2,1.8),r:rnd(2.5,4),rot:rnd(0,6),vr:rnd(-9,9),col:pick([PAPER.light,C.accent,C.ok,PAPER.mid])});
+    }
+  },
+  draw(o,s){
+    const ctx=o.ctx, p=s.p, st=s.state, t=s.t, calm=s.calm;
+    o.begin();
+    const dk = k => mixc(k,mul(k,0.42),p.dark);
+    const lineW=o.lw(0.9,0.5);
+    /* flight path for sending */
+    let fx=0, fy=0, gone=false, note=false, chk=0;
+    if (st==='sending'){
+      note = t>0.08 && t<1.25;
+      if (!calm){
+        if (t>=0.3 && t<1.25){ const u=(t-0.3)/0.95; fx=115*easeInCubic(u); fy=-55*easeInCubic(u)-6*Math.sin(Math.PI*clamp(u*3)); }
+        else if (t>=1.25 && t<1.55) gone=true;
+        else if (t>=1.55 && t<2.25){ const u=(t-1.55)/0.7; fx=-110*(1-easeOutCubic(u)); fy=-34*Math.pow(1-u,2); }
+      } else note = t<1.25;
+      if (t>2.2) chk=clamp((t-2.2)/0.3)*(1-clamp((t-3.4)/0.3));
+    }
+    const lift = clamp(-(p.by+fy)/30);
+    /* shadow */
+    ctx.fillStyle=rgba([0,0,0],0.32*(1-lift)*(gone?0:1));
+    ctx.beginPath(); ctx.ellipse(fx*0.6,25,20*(1-lift*0.5),3.2,0,0,TAU); ctx.fill();
+    /* working: a sheet being folded */
+    if (st==='working'){
+      const fp = calm? 0.5 : (0.5-0.5*Math.cos(TAU*t/1.7));
+      const sx0=24, sy0=14, S=15;
+      ctx.fillStyle=rgba(PAPER.mid,1); poly(ctx,[[sx0,sy0],[sx0+S,sy0],[sx0+S,sy0+S],[sx0,sy0+S]]); ctx.fill();
+      const cx=sx0+S, cy=sy0, fd=S*0.6*fp+1;
+      ctx.fillStyle=rgba(C.accent,1); poly(ctx,[[cx-fd,cy],[cx,cy+fd],[cx-fd,cy+fd]]); ctx.fill();
+      ctx.fillStyle=rgba(C.bg,0.9); poly(ctx,[[cx-fd,cy],[cx,cy],[cx,cy+fd]]); ctx.fill();
+      ctx.strokeStyle=rgba(PAPER.line,0.6); ctx.lineWidth=lineW; ctx.beginPath(); ctx.moveTo(cx-fd,cy); ctx.lineTo(cx,cy+fd); ctx.stroke();
+    }
+    if (!gone){
+      ctx.save();
+      ctx.translate(-4+p.x+fx, -2+p.by+fy);
+      const face=p.face; const fs=Math.sign(face)||1; ctx.scale(fs*Math.max(Math.abs(face),0.08),1);
+      if (st==='sending' && fx!==0) ctx.rotate(fx>0? -0.25: 0.15);
+      /* crumple jitter */
+      const cj = (st==='confused' && !calm)? Math.exp(-t/0.25)*3.2 : 0;
+      const seed=Math.floor(s.T*30);
+      const J = (pt,i) => cj? [pt[0]+(hash(seed+i*7.1)-0.5)*cj*2, pt[1]+(hash(seed+i*3.3+1)-0.5)*cj*2] : pt;
+      const T0=J([-16,2],1), K=J([-3,-9],2), N2=J([11,-4],3), Cc=J([17,5],4), Bb=J([1,16],5);
+      /* legs */
+      const lg=p.legs;
+      ctx.strokeStyle=rgba(dk(C.dim),1); ctx.lineWidth=o.lw(1.6,0.9); ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(2,14); ctx.lineTo(1,14+9*lg); ctx.lineTo(4,14+9*lg);
+      ctx.moveTo(7,12); ctx.lineTo(8,12+11*lg); ctx.lineTo(11,12+11*lg); ctx.stroke();
+      /* tail */
+      const tl=p.tl;
+      ctx.fillStyle=rgba(dk(PAPER.shade),1); poly(ctx,[T0,J([-37,-11-tl*7],6),J([-31,5-tl*3],7)]); ctx.fill();
+      ctx.strokeStyle=rgba(PAPER.line,0.45); ctx.lineWidth=lineW; ctx.beginPath(); ctx.moveTo(T0[0],T0[1]); ctx.lineTo(-33,-2-tl*5); ctx.stroke();
+      /* body facets */
+      ctx.fillStyle=rgba(dk(PAPER.mid),1); poly(ctx,[T0,K,Bb]); ctx.fill();
+      ctx.fillStyle=rgba(dk(PAPER.light),1); poly(ctx,[K,N2,Cc,Bb]); ctx.fill();
+      ctx.strokeStyle=rgba(PAPER.line,0.4); ctx.lineWidth=lineW; ctx.beginPath(); ctx.moveTo(K[0],K[1]); ctx.lineTo(Bb[0],Bb[1]); ctx.stroke();
+      if (p.sq>0.05){
+        ctx.strokeStyle=rgba(PAPER.line,0.55*p.sq); ctx.beginPath(); ctx.moveTo(-10,0); ctx.lineTo(-4,5); ctx.lineTo(1,0); ctx.lineTo(6,6); ctx.lineTo(12,2); ctx.stroke();
+      }
+      /* head */
+      ctx.save(); ctx.translate(9,-7+p.dark*4); ctx.rotate(p.hr);
+      const H=[J([-4,3],8),J([0,-12],9),J([11,-5],10),J([6,3],11)];
+      ctx.fillStyle=rgba(dk(PAPER.light),1); poly(ctx,H); ctx.fill();
+      ctx.fillStyle=rgba(dk(PAPER.mid),1); poly(ctx,[H[0],H[1],H[3]]); ctx.fill();
+      /* beak */
+      const bo=p.bo;
+      ctx.fillStyle=rgba(dk(C.banked),1); ctx.save(); ctx.translate(10,-1.5); ctx.rotate(bo*0.55); poly(ctx,[[0,-0.5],[8,0.5],[-1,2.5]]); ctx.fill(); ctx.restore();
+      ctx.fillStyle=rgba(dk(C.accent),1); ctx.save(); ctx.translate(10,-1.5); ctx.rotate(-bo*0.25); poly(ctx,[[0,-4.5],[11,-0.8],[0,0.5]]); ctx.fill(); ctx.restore();
+      if (note){ ctx.save(); ctx.translate(18,0); ctx.rotate(0.2); ctx.fillStyle=rgba(C.fg,1); poly(ctx,[[-1,-3],[9,-3],[9,4],[-1,4]]); ctx.fill();
+        ctx.strokeStyle=rgba(C.accent,1); ctx.lineWidth=o.lw(1,0.6); ctx.beginPath(); ctx.moveTo(-1,-3); ctx.lineTo(4,1); ctx.lineTo(9,-3); ctx.stroke(); ctx.restore(); }
+      /* eye */
+      const ex=4.5, ey=-5+(st==='thinking'?-0.8:clamp(s.look.y,-1,1)*0.8);
+      ctx.fillStyle=rgba([30,26,24],1); ctx.strokeStyle=rgba([30,26,24],1); ctx.lineCap='round';
+      const elw=o.lw(1.5,0.9);
+      if (p.happy>0.5){ ctx.lineWidth=elw; ctx.beginPath(); ctx.arc(ex,ey+1.2,2.2,Math.PI*1.15,Math.PI*1.85); ctx.stroke(); }
+      else if (st==='off' || s.blink>0.5){ ctx.lineWidth=elw; ctx.beginPath(); ctx.moveTo(ex-2,ey+0.5); ctx.lineTo(ex+2,ey+0.5); ctx.stroke(); }
+      else { ctx.beginPath(); ctx.arc(ex,ey,Math.max(st==='confused'?1.4:2,o.mw(1)),0,TAU); ctx.fill(); }
+      ctx.restore();
+      /* wing: shows its terracotta inside when raised */
+      const ang=(170+80*p.w)*Math.PI/180, W1=J([-6,-5],12), W2=J([8,-6],13);
+      const tip=[W1[0]+28*Math.cos(ang), W1[1]+28*Math.sin(ang)];
+      const u=clamp((W1[1]-tip[1])/18);
+      ctx.fillStyle=rgba(dk(mixc(PAPER.mid,C.accent,u)),1); poly(ctx,[W1,W2,tip]); ctx.fill();
+      ctx.strokeStyle=rgba(PAPER.line,0.4); ctx.lineWidth=lineW; ctx.beginPath(); ctx.moveTo((W1[0]+W2[0])/2,(W1[1]+W2[1])/2); ctx.lineTo(tip[0],tip[1]); ctx.stroke();
+      ctx.restore();
+    }
+    /* thinking: three little folded triangles */
+    if (st==='thinking'){
+      for (let i=0;i<3;i++){
+        const a=calm?0.8: 0.25+0.75*clamp(Math.sin(t*3-i*0.9)*0.5+0.5);
+        const yy=-30-i*6+(calm?0:Math.sin(t*3-i)*1.5), xx=(p.face>=0?8:-14)+i*7*(p.face>=0?1:-1);
+        ctx.fillStyle=rgba(i===2?C.accent:PAPER.light,a); poly(ctx,[[xx-3,yy+2],[xx+3,yy+2],[xx,yy-3]]); ctx.fill();
+      }
+    }
+    if (st==='listening' && s.L>0.03){
+      const dir = p.face>=0?1:-1;
+      ctx.lineWidth=o.lw(1.4,0.8); ctx.lineCap='round';
+      for (let i=0;i<3;i++){
+        const fr=((s.T*1.4+i/3)%1), R=40-fr*18;
+        ctx.strokeStyle=rgba(C.fg,s.L*(1-fr)*0.9*(fr<0.15?fr/0.15:1));
+        ctx.beginPath(); ctx.arc(5,-8,R,dir>0?-0.5:Math.PI-0.5,dir>0?0.5:Math.PI+0.5); ctx.stroke();
+      }
+    }
+    if (st==='confused'){ drawQ(ctx,-2,-38,14,C.bad,clamp(t/0.2),o.lw(2.2,1.1)); }
+    if (chk>0) drawCheck(ctx,26,-26,16,clamp((t-2.2)/0.3),C.ok,chk,o.lw(2.6,1.3));
+    drawParts(o,s);
+    o.end();
+  }
+};
+
+/* ================================================================
+   4. TYCHO, a one-eyed orrery
+   ================================================================ */
+const Tycho={
+  id:'tycho', name:'Tycho', kind:'one-eyed orrery',
+  line:'A small planet with one curious eye and three moons. The moons do the fidgeting, so the eye can stay calm.',
+  sig:'<b>Working:</b> moons orbit fast and leave a progress arc. <b>Sending:</b> one moon is slung out of orbit as the message, and a new one forms.',
+  enter(s,st){
+    const cs=s.cs; cs.burst=0; cs.shot=0;
+    if (!cs.mo){ cs.mo=[0,0,0]; cs.ma=[1,1,1]; cs.mr=[1,1,1]; }
+    if (st!=='sending'){ cs.ma[0]=Math.max(cs.ma[0],0.01); }
+  },
+  update(s,dt){
+    const st=s.state,t=s.t,cs=s.cs,calm=s.calm,L=s.L,A=s.A;
+    let spd=TAU/20, rx=40, tilt=0.3, rot=-0.2+s.look.x*0.18, temp=0.72, open=1, dil=1, ok=0, bad=0, py=0, park=0, ringA=0.26, happy=0, mouth=0, sx=1, sy=1;
+    switch(st){
+      case 'idle': open=1+s.notice*0.15; dil=1+s.near*0.25+s.notice*0.2; if (calm) spd=0; break;
+      case 'off': spd=0; temp=0.02; open=0; park=1; ringA=0.07; if (s.near>0.6) open=0.32; break;
+      case 'listening': rx=40-8*L; dil=1+0.6*L; open=1.08; temp=0.78+0.3*L; ringA=0.3+0.25*L; spd=TAU/14; break;
+      case 'thinking': spd=TAU/2.2; rot=-0.2+0.28*Math.sin(TAU*0.35*t); tilt=0.3+0.12*Math.sin(TAU*0.22*t+1); dil=0.75; break;
+      case 'talking': rx=40+6*A; mouth=A; open=1-0.15*A; temp=0.78+0.3*A; spd=TAU/10; break;
+      case 'happy': {
+        happy=t<2.4?1:0; ok=t<1.2?0.4:0;
+        if (t<0.9){ rx=calm?44:54; spd=calm?TAU/8:TAU/1.1; } else spd=TAU/12;
+        if (!calm && t<0.6){ py=-9*Math.sin(Math.PI*t/0.6); }
+        break;
+      }
+      case 'confused': {
+        bad=t<0.9?0.9:0.5; dil=0.6; temp=0.6;
+        if (!calm){ rot=-0.2+0.5*Math.exp(-t/0.5)*Math.sin(t*16); tilt=0.3+0.2*Math.exp(-t/0.6)*Math.sin(t*11); }
+        spd=TAU/30; break;
+      }
+      case 'working': spd=TAU/3; temp=0.8; ringA=0.32; break;
+      case 'sending': spd=TAU/9; if (t>1.0 && t<2.6) happy=1; break;
+    }
+    s.fo('rx',rx,0.12); s.fo('tilt',tilt,0.12); s.fo('rot',rot,0.12); s.fo('temp',temp,0.14); s.fo('open',open,0.07);
+    s.fo('dil',dil,0.08); s.fo('ok',ok,0.08); s.fo('bad',bad,0.06); s.fo('py',py,0.03); s.fo('park',park,0.35);
+    s.fo('ringA',ringA,0.2); s.fo('happy',happy,0.06); s.fo('mouth',mouth,0.03); s.fo('spd',spd,0.4);
+    cs.orb=(cs.orb||0)+dt*p_(s,'spd');
+    /* moon offsets for sending: one leaves, the other two re-space, a new one forms */
+    const tmo=[0,0,0], tma=[1,1,1];
+    if (st==='sending'){
+      if (t>0.45 && t<1.7){ tma[0]=0; tmo[2]=-Math.PI/3; }
+      if (t>=1.7){ tma[0]=1; }
+      if (!cs.shot && t>0.45){
+        cs.shot=1;
+        const a=cs.orb+cs.mo[0], R=p_(s,'rx'), r=p_(s,'rot');
+        const x0=R*Math.cos(a), y0=R*p_(s,'tilt')*Math.sin(a);
+        s.spawn({k:'trail',x:x0*Math.cos(r)-y0*Math.sin(r),y:2+x0*Math.sin(r)+y0*Math.cos(r),vx:150,vy:-100,max:1.1,r:3.6,col:C.fg,col2:C.whitehot,force:true});
+        cs.ma[0]=0; cs.mr[0]=0;
+      }
+    }
+    for (let i=0;i<3;i++){
+      cs.mo[i]+=(tmo[i]-cs.mo[i])*(1-Math.exp(-dt/0.35));
+      cs.ma[i]+=(tma[i]-cs.ma[i])*(1-Math.exp(-dt/0.18));
+      cs.mr[i]+=((tma[i]>0.5?1:cs.mr[i])-cs.mr[i])*(1-Math.exp(-dt/0.3));
+    }
+    if (st==='confused' && !calm){ for (let i=0;i<3;i++) cs.mo[i]+=Math.sin(s.T*9+i*2)*0.5*Math.exp(-t/0.6)*dt*6; }
+    if (st==='happy' && !cs.burst && t>0.1){
+      cs.burst=1;
+      for (let i=0;i<10;i++){ const a=rnd(0,TAU); s.spawn({k:'dot',x:Math.cos(a)*24,y:2+Math.sin(a)*24,vx:Math.cos(a)*70,vy:Math.sin(a)*70,drag:2.5,max:0.9,r:1.6,col:pick([C.fg,C.ok,C.hot])}); }
+    }
+  },
+  draw(o,s){
+    const ctx=o.ctx, p=s.p, cs=s.cs, st=s.state, t=s.t;
+    o.begin();
+    const R=22, cy=2+p.py;
+    let col=heat(p.temp); col=mixc(col,C.ok,p.ok*0.6); col=mixc(col,C.bad,p.bad*0.7);
+    const rot=p.rot, ry=p.rx*p.tilt;
+    const ringPt=(a,rad=p.rx)=>{ const x=rad*Math.cos(a), y=rad*p.tilt*Math.sin(a); return [x*Math.cos(rot)-y*Math.sin(rot), cy+x*Math.sin(rot)+y*Math.cos(rot)]; };
+    /* glow */
+    const g=ctx.createRadialGradient(0,cy,6,0,cy,52); g.addColorStop(0,rgba(col,0.12+0.1*(st==='listening'?s.L:0))); g.addColorStop(1,rgba(col,0));
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,cy,52,0,TAU); ctx.fill();
+    /* moons */
+    const parkPos=[[-15,28],[0,31],[15,28]];
+    const moons=[0,1,2].map(i=>{
+      const a=cs.orb+i*TAU/3+cs.mo[i];
+      let [x,y]=ringPt(a); const sinA=Math.sin(a);
+      x=lerp(x,parkPos[i][0],p.park); y=lerp(y,parkPos[i][1],p.park);
+      x=lerp(0,x,cs.mr[i]); y=lerp(cy,y,cs.mr[i]);
+      let rr=3.8*(1+0.18*sinA*(1-p.park));
+      if (st==='listening') rr*=1+0.45*s.histAt(0.12*i,'L');
+      if (st==='talking') rr*=1+0.25*s.A;
+      return {x,y,a,front: p.park>0.5 || sinA>0 , r:rr, al:cs.ma[i]};
+    });
+    const mcol = st==='off'? mixc(C.ash,C.dim,0.4) : [242,230,222];
+    const drawMoon=m=>{ if (m.al<0.02) return; ctx.fillStyle=rgba(mcol,m.al); ctx.beginPath(); ctx.arc(m.x,m.y,Math.max(m.r,o.mw(1.1)),0,TAU); ctx.fill(); };
+    const ringLW=o.lw(1.1,0.6);
+    const trail=(m,len,colr,alpha,lw)=>{
+      const n=8; for (let j=0;j<n;j++){ const a0=m.a-len*(j/n), a1=m.a-len*((j+1)/n); const P0=ringPt(a0), P1=ringPt(a1);
+        ctx.strokeStyle=rgba(colr,alpha*(1-j/n)*m.al); ctx.lineWidth=lw; ctx.beginPath(); ctx.moveTo(P0[0],P0[1]); ctx.lineTo(P1[0],P1[1]); ctx.stroke(); } };
+    /* ring back half */
+    ctx.strokeStyle=rgba(C.fg,p.ringA); ctx.lineWidth=ringLW;
+    ctx.beginPath(); ctx.ellipse(0,cy,p.rx,Math.max(ry,0.5),rot,Math.PI,TAU); ctx.stroke();
+    ctx.lineCap='round';
+    for (const m of moons) if (!m.front){
+      if (st==='thinking') trail(m,0.9,C.fg,0.35,o.lw(2,0.8));
+      if (st==='working' && m===moons[0]) trail(m,1.6,C.accent,0.9,o.lw(2.6,1.1));
+      drawMoon(m);
+    }
+    /* planet */
+    const pg=ctx.createRadialGradient(-7,cy-8,2,0,cy,R);
+    pg.addColorStop(0,rgba(heat(p.temp+0.3),1)); pg.addColorStop(0.6,rgba(col,1)); pg.addColorStop(1,rgba(mixc(heat(p.temp-0.3),[40,24,20],0.35),1));
+    ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(0,cy,R,0,TAU); ctx.fill();
+    /* eye */
+    let lx=s.look.x, ly=s.look.y;
+    if (st==='thinking'){ lx=-0.5; ly=-0.8; }
+    if (st==='sending' && t<1.0){ lx=0.9; ly=-0.5; }
+    if (st==='working'){ lx=Math.cos(cs.orb)*0.7; ly=0.2; }
+    if (st==='confused'){ lx=Math.cos(s.T*9)*0.6; ly=Math.sin(s.T*9)*0.6; }
+    const ex=0, ey=cy-3, er=10;
+    const open = clamp(p.open*(1-s.blink*(st==='off'?0:1)),0,1.2);
+    const ink=[44,20,12];
+    ctx.lineCap='round';
+    if (p.happy>0.5){
+      ctx.strokeStyle=rgba([250,242,236],1); ctx.lineWidth=o.lw(3,1.2);
+      ctx.beginPath(); ctx.arc(ex,ey+4,7,Math.PI*1.12,Math.PI*1.88); ctx.stroke();
+    } else if (open<0.12){
+      ctx.strokeStyle=rgba(st==='off'?[30,27,26]:ink,1); ctx.lineWidth=o.lw(2,1);
+      ctx.beginPath(); ctx.arc(ex,ey-3,7.5,Math.PI*0.2,Math.PI*0.8); ctx.stroke();
+    } else {
+      ctx.save(); ctx.beginPath(); ctx.ellipse(ex,ey,er,er*Math.min(open,1),0,0,TAU);
+      ctx.fillStyle=rgba([250,244,238],1); ctx.fill(); ctx.clip();
+      const pr=4.2*p.dil, px=ex+lx*4.2, pyy=ey+ly*3.6;
+      ctx.fillStyle=rgba([26,16,12],1); ctx.beginPath(); ctx.arc(px,pyy,Math.max(pr,o.mw(1.3)),0,TAU); ctx.fill();
+      if (!o.small){ ctx.fillStyle=rgba([255,255,255],0.9); ctx.beginPath(); ctx.arc(px-1.4,pyy-1.5,1.2,0,TAU); ctx.fill(); }
+      ctx.restore();
+      ctx.strokeStyle=rgba(mixc(col,[40,20,14],0.5),0.8); ctx.lineWidth=o.lw(1,0.5);
+      ctx.beginPath(); ctx.ellipse(ex,ey,er,er*Math.min(open,1),0,0,TAU); ctx.stroke();
+    }
+    /* mouth */
+    if (p.mouth>0.04){
+      ctx.fillStyle=rgba(ink,1); ctx.beginPath(); ctx.ellipse(0,cy+12,2.6+2*p.mouth,0.5+4*p.mouth,0,0,TAU); ctx.fill();
+    } else if (!o.small && st!=='off'){
+      ctx.strokeStyle=rgba(ink,0.7); ctx.lineWidth=o.lw(1.4,0.8);
+      ctx.beginPath(); ctx.arc(0,cy+9.5,st==='confused'?2:3,st==='confused'?Math.PI*1.2:Math.PI*0.2,st==='confused'?Math.PI*1.8:Math.PI*0.8); ctx.stroke();
+    }
+    /* ring front half */
+    ctx.strokeStyle=rgba(C.fg,p.ringA*1.15); ctx.lineWidth=ringLW;
+    ctx.beginPath(); ctx.ellipse(0,cy,p.rx,Math.max(ry,0.5),rot,0,Math.PI); ctx.stroke();
+    for (const m of moons) if (m.front){
+      if (st==='thinking') trail(m,0.9,C.fg,0.35,o.lw(2,0.8));
+      if (st==='working' && m===moons[0]) trail(m,1.6,C.accent,0.9,o.lw(2.6,1.1));
+      drawMoon(m);
+    }
+    drawParts(o,s);
+    if (st==='sending' && t>1.0){ drawCheck(ctx,34,-26,15,clamp((t-1.0)/0.3),C.ok,1-clamp((t-2.6)/0.4),o.lw(2.6,1.3)); }
+    o.end();
+  }
+};
+function p_(s,k){ return s.p[k]; }
+
+/* ================================================================
+   5. HUM, the island's own face
+   ================================================================ */
+const HUM_N=32;
+const Hum={
+  id:'hum', name:'Hum', kind:'the pill itself',
+  line:'No body at all: the island is its face. Two eyes and a mouth made of the voice thread.',
+  sig:'<b>Listening:</b> the mouth is your voice, flowing in. <b>Thinking:</b> the mouth writes little loops. Most quiet of the five.',
+  enter(s,st){ const cs=s.cs; if (!cs.mx){ cs.mx=new Float32Array(HUM_N); cs.my=new Float32Array(HUM_N); cs.my2=new Float32Array(HUM_N); cs.mA=new Float32Array(HUM_N).fill(1); cs.mc=C.fg.slice(); } cs.trim = st==='happy'?0:1; },
+  update(s,dt){
+    const st=s.state,t=s.t,cs=s.cs,calm=s.calm,L=s.L,A=s.A;
+    let open=1, lx=s.look.x, ly=s.look.y, happy=0, rOpen=1, eyeY=0, mcol=C.fg, ma=0.8, glow=0.04, rim=[C.fg,0.09], bounce=0;
+    switch(st){
+      case 'idle': open=1+s.notice*0.25; eyeY=-s.notice*2; glow=0.04+0.03*(calm?0:breath(s.it*0.1)); break;
+      case 'off': open=0.12; eyeY=2.5; ma=0; rim=[C.fg,0.05]; glow=0; if (s.near>0.6) rOpen=4; break;
+      case 'listening': open=1.1+0.15*L; eyeY=-1.5*L; ma=0.95; rim=[C.accent,0.22]; glow=0.05+0.1*L; break;
+      case 'thinking': lx=0.7; ly=-0.85; open=0.85; mcol=C.accent; ma=1; glow=0.06; break;
+      case 'talking': open=1-0.12*A; mcol=C.accent; ma=1; rim=[C.accent,0.18]; glow=0.06+0.16*A; break;
+      case 'happy': happy=t<2.6?1:0; mcol=C.ok; ma=1; glow=0.12*Math.max(0,1-t/1.2); if (!calm && t<0.5) bounce=Math.sin(Math.PI*t/0.5); break;
+      case 'confused': rOpen=0.42; open=1.12; mcol=C.bad; ma=1; rim=[C.bad,0.25]; break;
+      case 'working': ly=0.8; lx=calm?0:Math.sin(TAU*0.5*t)*0.8; open=0.8; mcol=C.dim; ma=0.6; break;
+      case 'sending': {
+        lx = t<0.25?0: t<1.1? clamp((t-0.25)/0.6)*1 : (t<1.6? 1: 0); ly=t<1.6?-0.1:0;
+        if (t>1.6 && t<2.8) happy=1;
+        mcol=t<1.6? C.accent : C.fg; ma=1; break;
+      }
+    }
+    s.fo('open',open,0.07); s.fo('rOpen',rOpen,0.08); s.fo('happy',happy,0.06); s.fo('eyeY',eyeY,0.06);
+    s.fo('lx',lx,0.08); s.fo('ly',ly,0.08); s.fo('glow',glow,0.12); s.fo('ma',ma,0.1); s.fo('bounce',bounce,0.03);
+    cs.rim=rim;
+    const kc=1-Math.exp(-dt/(calm?0.14:0.12)); for (let i=0;i<3;i++) cs.mc[i]+=(mcol[i]-cs.mc[i])*kc;
+    /* mouth generator */
+    const N=HUM_N, km=1-Math.exp(-dt/(calm?0.12:0.06));
+    if (st==='happy') cs.trim = calm?1: Math.min(1,(cs.trim||0)+dt/0.32); else cs.trim=Math.min(1,(cs.trim??1)+dt/0.2);
+    for (let i=0;i<N;i++){
+      const u=i/(N-1); let x=-1+2*u, y=0, y2=null, a=1;
+      switch(st){
+        case 'idle': y=0.12*Math.sin(Math.PI*u); break;
+        case 'off': y=0; break;
+        case 'listening': {
+          const lv=s.histAt(0.36*(1-u),'L'); const wv=Math.pow(Math.sin(Math.PI*u),0.8);
+          y=(0.035+0.42*lv)*wv*Math.sin(TAU*(u*2.4+(calm?0:1.1*s.T))); if (calm){ y=0; a=u<0.35+0.65*s.L?1:0; }
+          break;
+        }
+        case 'thinking': {
+          if (calm){ y=0; a=0.5+0.5*Math.sin(TAU*0.5*t); break; }
+          const ph=t*TAU/0.38*0.5, th=ph+u*3.2*Math.PI, r=1.9, d=4.5;
+          const span=r*3.2*Math.PI+2*d;
+          x = -1+2*((r*(th-ph)-d*Math.sin(th)+d)/span);
+          y = -d*Math.cos(th)/span*1.2;
+          a = Math.pow(u,0.8);
+          break;
+        }
+        case 'talking': {
+          const w=Math.pow(Math.sin(Math.PI*u),1.2), ph=s.T*0.9*(1+1.5*A);
+          const k=0.78+0.22*Math.sin(TAU*(2*u-ph));
+          y=-(0.03+0.32*Math.pow(A,0.7))*w*k; y2=(0.04+0.5*Math.pow(A,0.7))*w*k;
+          if (calm){ y=0; y2=0; a=u<0.2+0.8*A?1:0.15; }
+          break;
+        }
+        case 'happy': {
+          x=-0.75+1.5*u; y = u<0.35 ? 0.42*(u/0.35) : 0.42-0.95*((u-0.35)/0.65);
+          a = u<=cs.trim?1:0; break;
+        }
+        case 'confused': y=0.14*Math.sin(TAU*3.5*u)+0.02; break;
+        case 'working': y=0; a=1; break;
+        case 'sending': {
+          if (t<0.9){ const an=TAU*u; x=0.2*Math.cos(an); y=0.16*Math.sin(an); }
+          else y=0.12*Math.sin(Math.PI*u);
+          break;
+        }
+      }
+      cs.mx[i]+=(x-cs.mx[i])*km; cs.my[i]+=(y-cs.my[i])*km; cs.my2[i]+=((y2===null?y:y2)-cs.my2[i])*km; cs.mA[i]+=(a-cs.mA[i])*Math.min(1,km*2);
+    }
+    if (st==='off'){
+      cs.zT=(cs.zT??0.4)-dt;
+      if (cs.zT<=0){ cs.zT=1.8; s.spawn({k:'z',x:30,y:-14,vx:5,vy:-8,max:2.2,r:7,col:C.dim}); }
+    }
+  },
+  draw(o,s){
+    const ctx=o.ctx, p=s.p, cs=s.cs, st=s.state, t=s.t, calm=s.calm;
+    o.begin();
+    const small=o.small, fs=small?1.45:1;
+    let tx=0;
+    if (st==='confused' && !calm) tx=2.5*1.6*Math.exp(-t/0.11)*Math.sin(TAU*5.5*t);
+    if (!small){
+      const sc=1+0.04*p.bounce;
+      ctx.save(); ctx.scale(sc,sc);
+      pillPath(ctx,-50,-29,100,58); ctx.fillStyle=rgba(C.bg,0.97); ctx.fill();
+      ctx.save(); ctx.clip();
+      if (p.glow>0.005){ const g=ctx.createRadialGradient(0,14,2,0,14,48); g.addColorStop(0,rgba(cs.mc,p.glow)); g.addColorStop(1,rgba(cs.mc,0)); ctx.fillStyle=g; ctx.fillRect(-50,-29,100,58); }
+      ctx.restore();
+      ctx.strokeStyle=rgba(cs.rim[0],cs.rim[1]); ctx.lineWidth=o.mw(1); pillPath(ctx,-50,-29,100,58); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.save(); ctx.translate(tx,-p.bounce*3);
+    /* eyes */
+    const eyeCY = (small?-9:-6)+p.eyeY*fs, ew=9*fs, eh=15*fs;
+    const eyeCol = st==='off'? C.dim : C.fg;
+    for (const sd of [-1,1]){
+      const cx=sd*15*fs+p.lx*5*fs, cy=eyeCY+p.ly*4*fs;
+      let o2=p.open*(sd===1?p.rOpen:1);
+      if (st==='off') o2 = sd===1 && s.near>0.6 ? 0.55 : 0.12;
+      o2*= (1-s.blink*(st==='off'?0:0.9));
+      const h=Math.max(eh*Math.min(o2,1.3),o.mw(1.2));
+      const ha=1-p.happy;
+      if (ha>0.02){
+        ctx.fillStyle=rgba(eyeCol,ha); const r=Math.min(ew/2,h/2);
+        ctx.beginPath(); ctx.moveTo(cx-ew/2+r,cy-h/2); ctx.arcTo(cx+ew/2,cy-h/2,cx+ew/2,cy+h/2,r); ctx.arcTo(cx+ew/2,cy+h/2,cx-ew/2,cy+h/2,r);
+        ctx.arcTo(cx-ew/2,cy+h/2,cx-ew/2,cy-h/2,r); ctx.arcTo(cx-ew/2,cy-h/2,cx+ew/2,cy-h/2,r); ctx.closePath(); ctx.fill();
+      }
+      if (p.happy>0.02){
+        ctx.strokeStyle=rgba(C.fg,p.happy); ctx.lineWidth=o.lw(3*fs,1.2); ctx.lineCap='round';
+        ctx.beginPath(); ctx.arc(cx,cy+3*fs,5*fs,Math.PI*1.15,Math.PI*1.85); ctx.stroke();
+      }
+    }
+    if (st==='confused'){ ctx.strokeStyle=rgba(C.fg,0.8); ctx.lineWidth=o.lw(2*fs,1); ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(15*fs-6*fs,eyeCY-12*fs); ctx.lineTo(15*fs+6*fs,eyeCY-9*fs); ctx.stroke(); }
+    /* mouth: the voice thread */
+    const mW=(small?20:18)*fs/ (small?1.45:1), mY=small?18:13, sx=small?20:18, sy=small?22:18;
+    const N=HUM_N;
+    if (p.ma>0.01){
+      ctx.lineCap='round'; ctx.lineJoin='round';
+      const twoLips = st==='talking' || Math.abs(cs.my2[N>>1]-cs.my[N>>1])>0.02;
+      if (twoLips){
+        ctx.beginPath();
+        for (let i=0;i<N;i++){ const X=cs.mx[i]*sx, Y=mY+cs.my[i]*sy; i?ctx.lineTo(X,Y):ctx.moveTo(X,Y); }
+        for (let i=N-1;i>=0;i--){ ctx.lineTo(cs.mx[i]*sx, mY+cs.my2[i]*sy); }
+        ctx.closePath(); ctx.fillStyle=rgba(cs.mc,0.22*p.ma); ctx.fill();
+      }
+      const lw=o.lw(2.2,1.1);
+      const strokeLine=(arr)=>{
+        for (let i=1;i<N;i++){
+          const a=Math.min(cs.mA[i-1],cs.mA[i])*p.ma; if (a<0.02) continue;
+          ctx.strokeStyle=rgba(cs.mc,a); ctx.lineWidth=lw; ctx.beginPath();
+          ctx.moveTo(cs.mx[i-1]*sx,mY+arr[i-1]*sy); ctx.lineTo(cs.mx[i]*sx,mY+arr[i]*sy); ctx.stroke();
+        }
+      };
+      strokeLine(cs.my); if (twoLips) strokeLine(cs.my2);
+      void mW;
+    }
+    if (st==='working'){
+      const u=(t*0.7)%1, X=-sx+2*sx*u;
+      ctx.fillStyle=rgba(C.accent,1); ctx.beginPath(); ctx.arc(X,mY,o.lw(2.4,1.3),0,TAU); ctx.fill();
+    }
+    ctx.restore();
+    /* sending: the message leaves as a warm dot */
+    if (st==='sending' && t>0.3 && t<1.3){
+      const u=easeInCubic(clamp((t-0.3)/0.9)); const X=lerp(0,small?120:95,u), Y=mY-6*Math.sin(Math.PI*u)*2;
+      ctx.fillStyle=rgba(C.hot,1-clamp((u-0.85)/0.15)); ctx.beginPath(); ctx.arc(X,Y,o.lw(3,1.4),0,TAU); ctx.fill();
+    }
+    if (st==='sending' && t>1.6 && !small) drawCheck(ctx,38,-16,10,clamp((t-1.6)/0.3),C.ok,1-clamp((t-2.8)/0.3),o.lw(2.2,1.1));
+    drawParts(o,s);
+    o.end();
+  }
+};
+
+const CHARS=[Echo,Cinder,Wren,Tycho,Hum];
+
+/* ================================================================
+   States, labels, auto cycle
+   ================================================================ */
+const STATES=[
+  ['idle','idle','Ready, all day: calm and subtle'],
+  ['off','off','Listening off: asleep'],
+  ['listening','listening','Reacts to a simulated mic level'],
+  ['thinking','thinking','Thinking'],
+  ['talking','talking','Synced to a simulated TTS amplitude'],
+  ['happy','happy','Task done: a one-shot celebration'],
+  ['confused','confused','Confused or error'],
+  ['working','working','A background task is running'],
+  ['sending','sending','A Telegram message going out'],
+];
+const CYCLE=[['idle',3.4],['listening',4.2],['thinking',3.2],['talking',4.6],['happy',2.9],['working',3.6],['sending',3.6],['confused',2.8],['off',3.6]];
+const DUR=Object.fromEntries(CYCLE);
+function labelFor(s){
+  switch(s.state){
+    case 'idle': return 'hey claude';
+    case 'off': return 'listening off';
+    case 'listening': return 'listening';
+    case 'thinking': return 'thinking…';
+    case 'talking': return "it's 21° and clear";
+    case 'happy': return 'done · timer set';
+    case 'confused': return "didn't catch that";
+    case 'working': return '2 tasks running';
+    case 'sending': return s.t<1.5? 'sending to Telegram…' : 'sent · Telegram';
+  }
+  return '';
+}
+const REST=new Set(['idle','off']);
+
+/* ================================================================
+   Pill renderer (used by each card and by the island at the top)
+   ================================================================ */
+function springTo(o,key,target,dt,calm){
+  if (o[key]===undefined){ o[key]=target; o[key+'v']=0; o[key+'t']=target; return; }
+  let x=o[key], v=o[key+'v']||0;
+  if (o[key+'t']!==target){ o[key+'p'] = target>x ? 'in':'ex'; o[key+'t']=target; }
+  if (calm){ o[key]=x+(target-x)*(1-Math.exp(-dt/0.055)); o[key+'v']=0; return; }
+  const inh=o[key+'p']==='in', k=inh?380:180, z=inh?0.7:1.0, c=2*z*Math.sqrt(k);
+  const n=Math.max(1,Math.ceil(dt/(1/240))), h=dt/n;
+  for (let i=0;i<n;i++){ v+=(-k*(x-target)-c*v)*h; x+=v*h; }
+  o[key]=x; o[key+'v']=v;
+}
+const FONT='"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif';
+function renderPill(cv,ps,sim,ch,dt,opt){
+  const ctx=cv.getContext('2d'), dpr=cv._dpr||1, W=cv._w||cv.width, H=cv._h||cv.height;
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
+  const zoom=opt.zoom||1, calm=sim.calm;
+  ctx.setTransform(dpr*zoom,0,0,dpr*zoom,0,0);
+  const st=sim.state, rest=REST.has(st);
+  const label=labelFor(sim);
+  if (!ps.labels.length || ps.labels[ps.labels.length-1].text!==label){
+    for (const l of ps.labels) l.out=true;
+    ps.labels.push({text:label,a:0,y:calm?0:3,out:false,col: (st==='idle'||st==='off')? C.dim : C.fg});
+    if (ps.labels.length>3) ps.labels.shift();
+  }
+  const fsz = rest?12:12.5;
+  ctx.font=`500 ${fsz}px ${FONT}`;
+  const tw=ctx.measureText(label).width;
+  const box = rest?22:30;
+  springTo(ps,'h',rest?28:40,dt,calm);
+  springTo(ps,'w',box+(rest?8:10)+12+tw+16,dt,calm);
+  const w=ps.w, h=ps.h;
+  const Wl=W/zoom, Hl=H/zoom;
+  const x0 = opt.leftAlign? 10 : Math.round((Wl-w)/2);
+  const y0 = opt.top!=null? opt.top : Math.round((Hl-h)/2);
+  /* pill body */
+  pillPath(ctx,x0,y0,w,h); ctx.fillStyle=rgba(C.bg,0.97); ctx.fill();
+  ctx.save(); pillPath(ctx,x0,y0,w,h); ctx.clip();
+  /* soft inner warmth behind the character */
+  const gx=x0+(rest?4:5)+box/2, gy=y0+h/2;
+  let ga = st==='off'?0: st==='listening'? 0.08+0.18*sim.L : st==='talking'? 0.07+0.16*sim.A : st==='confused'? 0.07 : 0.05;
+  const gcol = st==='confused'? C.bad : st==='happy' ? mixc(C.accent,C.ok,0.5) : C.accent;
+  const gg=ctx.createRadialGradient(gx,gy,1,gx,gy,40); gg.addColorStop(0,rgba(gcol,ga)); gg.addColorStop(1,rgba(gcol,0));
+  ctx.fillStyle=gg; ctx.fillRect(x0,y0,w,h);
+  /* the character */
+  const o=mkO(ctx,gx,gy,box,true,1);
+  /* mkO works in the current transform: lines need px -> units with the zoom folded in */
+  o.k=box/100; o.mw=px=>px/(o.k*zoom); o.lw=(u,minPx)=>Math.max(u,minPx/(o.k*zoom));
+  if (ch.id==='echo'){
+    /* pixel art wants device pixels: draw it in identity space */
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+    const od=mkO(ctx,gx*dpr*zoom,gy*dpr*zoom,box*dpr*zoom,true,dpr*zoom);
+    ctx.beginPath(); pillPath(ctx,x0*dpr*zoom,y0*dpr*zoom,w*dpr*zoom,h*dpr*zoom); ctx.clip();
+    ch.draw(od,sim); ctx.restore();
+  } else ch.draw(o,sim);
+  /* labels */
+  const lx=x0+(rest?4:5)+box+(rest?7:9);
+  for (const l of ps.labels){
+    if (l.out){ l.a-=dt/0.12; if (!calm) l.y=Math.max(-3,l.y-dt*25); }
+    else { l.a=Math.min(1,l.a+dt/0.22); l.y += (0-l.y)*(1-Math.exp(-dt/0.07)); }
+    if (l.a<=0) continue;
+    ctx.fillStyle=rgba(l.col,clamp(l.a)*(l.col===C.dim?1:0.95)); ctx.textBaseline='middle';
+    ctx.fillText(l.text,lx,y0+h/2+l.y+0.5);
+  }
+  ps.labels=ps.labels.filter(l=>!(l.out&&l.a<=0));
+  ctx.restore();
+  /* rim */
+  let rim=[C.fg,0.086];
+  if (st==='off') rim=[C.fg,0.05]; else if (st==='listening') rim=[C.accent,0.22]; else if (st==='talking') rim=[C.accent,0.18]; else if (st==='confused') rim=[C.bad,0.25];
+  ctx.strokeStyle=rgba(rim[0],rim[1]); ctx.lineWidth=1/zoom; pillPath(ctx,x0+0.5/zoom,y0+0.5/zoom,w-1/zoom,h-1/zoom); ctx.stroke();
+}
+
+/* ================================================================
+   Cards and page wiring
+   ================================================================ */
+let T=0, calmAll=false, loupe=false, syncAuto=null, featured=0;
+const grid=document.getElementById('grid');
+function fit(cv){
+  const r=cv.getBoundingClientRect(), dpr=Math.min(window.devicePixelRatio||1,3);
+  const w=Math.max(1,Math.round(r.width)), h=Math.max(1,Math.round(r.height));
+  if (cv._w!==w||cv._h!==h||cv._dpr!==dpr){ cv._w=w; cv._h=h; cv._dpr=dpr; cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); }
+}
+class Card{
+  constructor(ch,i){
+    this.ch=ch; this.i=i; this.sim=new Sim(ch); this.ps={labels:[]}; this.auto=null; this.visible=true;
+    const el=document.createElement('article'); el.className='card'; el.id='c-'+ch.id;
+    el.innerHTML=`
+      <div class="chead"><div><h2>${ch.name}<small>${ch.kind}</small></h2><p>${ch.line}</p></div><span class="num">0${i+1}</span></div>
+      <div class="stage">
+        <div class="bigwrap"><canvas class="big" aria-label="${ch.name} at 120 pixels"></canvas><span class="cap">desktop · 120 px</span></div>
+        <div class="pillwrap"><canvas class="pill" aria-label="${ch.name} inside the island pill"></canvas><span class="cap">in the island · true size</span><span class="now">idle</span></div>
+      </div>
+      <div class="states" role="group" aria-label="${ch.name} states"></div>
+      <div class="row2"><button class="auto" aria-pressed="false" title="Cycle every state">Auto</button><button class="feat" aria-pressed="false">Show in island</button></div>
+      <p class="sig">${ch.sig}</p>`;
+    grid.appendChild(el);
+    this.el=el; this.big=el.querySelector('canvas.big'); this.pill=el.querySelector('canvas.pill'); this.nowEl=el.querySelector('.now');
+    const sg=el.querySelector('.states'); this.btns={};
+    for (const [key,lab,tip] of STATES){
+      const b=document.createElement('button'); b.textContent=lab; b.title=tip; b.setAttribute('aria-pressed','false');
+      b.addEventListener('click',()=>{ stopSync(); this.stopAuto(); this.set(key); });
+      sg.appendChild(b); this.btns[key]=b;
+    }
+    this.autoBtn=el.querySelector('.auto'); this.featBtn=el.querySelector('.feat');
+    this.autoBtn.addEventListener('click',()=>{ stopSync(); if (this.auto) this.stopAuto(); else this.startAuto(); });
+    this.featBtn.addEventListener('click',()=>setFeatured(this.i));
+    this.set('idle');
+  }
+  set(st){
+    this.sim.set(st);
+    for (const k in this.btns) this.btns[k].setAttribute('aria-pressed',String(k===st));
+    this.nowEl.textContent=st;
+  }
+  startAuto(at){ this.auto={i:0,until:(at??T)+CYCLE[0][1]}; this.set(CYCLE[0][0]); this.autoBtn.setAttribute('aria-pressed','true'); }
+  stopAuto(){ this.auto=null; this.autoBtn.setAttribute('aria-pressed','false'); }
+  tickAuto(){
+    if (!this.auto || T<this.auto.until) return;
+    this.auto.i=(this.auto.i+1)%CYCLE.length; this.auto.until+=CYCLE[this.auto.i][1];
+    if (this.auto.until<T) this.auto.until=T+CYCLE[this.auto.i][1];
+    this.set(CYCLE[this.auto.i][0]);
+  }
+  aim(x,y){
+    const r=this.big.getBoundingClientRect(); const cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const dx=x-cx, dy=y-cy, d=Math.hypot(dx,dy)||1, mag=Math.min(1,d/140);
+    this.sim.lookT={x:dx/d*mag, y:dy/d*mag}; this.sim.nearT=clamp(1-(d-70)/180); this.sim.lastMove=T;
+  }
+  render(dt){
+    fit(this.big); fit(this.pill);
+    const cv=this.big, ctx=cv.getContext('2d'), dpr=cv._dpr;
+    ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
+    const o=mkO(ctx,cv.width/2,(cv._h/2+2)*dpr,120*dpr,false,dpr);
+    this.ch.draw(o,this.sim);
+    renderPill(this.pill,this.ps,this.sim,this.ch,dt,{zoom:loupe?2:1,leftAlign:loupe});
+  }
+}
+const cards=CHARS.map((ch,i)=>new Card(ch,i));
+
+/* global state buttons */
+const gStates=document.getElementById('gStates');
+for (const [key,lab,tip] of STATES){
+  const b=document.createElement('button'); b.textContent=lab; b.title=tip+' (all five)';
+  b.addEventListener('click',()=>{ stopSync(); for (const c of cards){ c.stopAuto(); c.set(key); } });
+  gStates.appendChild(b);
+}
+const gAuto=document.getElementById('gAuto');
+function startSync(){ syncAuto=true; for (const c of cards) c.startAuto(T); gAuto.setAttribute('aria-pressed','true'); }
+function stopSync(){ if (!syncAuto) return; syncAuto=null; for (const c of cards) c.stopAuto(); gAuto.setAttribute('aria-pressed','false'); }
+gAuto.addEventListener('click',()=>{ if (syncAuto) stopSync(); else startSync(); });
+
+/* calm motion */
+const calmBox=document.getElementById('calm');
+const mq=window.matchMedia? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+function setCalm(v){ calmAll=v; calmBox.checked=v; for (const c of cards){ c.sim.calm=v; if (v) c.sim.parts=[]; } }
+setCalm(!!(mq&&mq.matches));
+calmBox.addEventListener('change',()=>setCalm(calmBox.checked));
+if (mq && mq.addEventListener) mq.addEventListener('change',e=>setCalm(e.matches));
+document.getElementById('loupe').addEventListener('change',e=>{ loupe=e.target.checked; });
+
+/* featured character in the island */
+const island=document.getElementById('island'), islCap=document.getElementById('islCap'), islandPS={labels:[]};
+function setFeatured(i){
+  featured=i; islandPS.labels=[]; islandPS.w=undefined;
+  cards.forEach((c,j)=>{ c.el.classList.toggle('featured',j===i); c.featBtn.setAttribute('aria-pressed',String(j===i)); c.featBtn.textContent = j===i? 'In the island' : 'Show in island'; });
+  islCap.textContent = cards[i].ch.name.toLowerCase()+' · island · true size';
+}
+setFeatured(0);
+
+/* pointer: every character can notice it */
+function onPoint(e){ const x=e.clientX, y=e.clientY; for (const c of cards) c.aim(x,y); }
+window.addEventListener('pointermove',onPoint,{passive:true});
+window.addEventListener('pointerdown',onPoint,{passive:true});
+document.addEventListener('pointerleave',()=>{ for (const c of cards){ c.sim.lastMove=-99; } });
+
+/* only draw cards that are on screen */
+if ('IntersectionObserver' in window){
+  const io=new IntersectionObserver(es=>{ for (const e of es){ const c=cards.find(k=>k.el===e.target); if (c) c.visible=e.isIntersecting; } },{rootMargin:'80px'});
+  cards.forEach(c=>io.observe(c.el));
+}
+
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(1/30,Math.max(0,(now-last)/1000)); last=now; T+=dt;
+  for (const c of cards){ c.tickAuto(); c.sim.step(dt,T); if (c.visible) c.render(dt); }
+  fit(island);
+  const fc=cards[featured];
+  renderPill(island,islandPS,fc.sim,fc.ch,dt,{top:12});
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

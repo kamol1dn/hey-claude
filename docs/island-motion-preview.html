@@ -1,0 +1,1389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Island Motion Preview</title>
+<style>
+:root{
+  --page:#0e0d0c; --panel:#161413; --panel-2:#1d1b19; --line:#2b2826; --line-2:#3a3633;
+  --fg:#efeae6; --dim:#9a948f; --faint:#6f6a66; --accent:#D97757; --accent-ink:#f0a487;
+  --accent-soft:rgba(217,119,87,.14); --ok:#6CCB7A;
+  --font:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--page);color:var(--fg);font:14px/1.45 var(--font);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1040px;margin:0 auto;padding:20px 16px 40px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-bottom:14px}
+h1{font-size:19px;font-weight:600;margin:0;letter-spacing:.1px}
+h1 span{color:var(--accent-ink);font-weight:500}
+.sub{color:var(--dim);font-size:13px}
+
+/* mock desktop strip */
+.desk{position:relative;height:250px;border-radius:14px;overflow:hidden;border:1px solid var(--line);
+  user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.desk canvas{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:2}
+.wp{position:absolute;inset:0;z-index:0}
+.wp-dusk{background:
+  radial-gradient(120% 90% at 82% 120%,#3a2a4a 0%,rgba(58,42,74,0) 60%),
+  radial-gradient(90% 80% at 10% 110%,#21364a 0%,rgba(33,54,74,0) 55%),
+  linear-gradient(180deg,#141821 0%,#1b2030 55%,#262234 100%)}
+.wp-light{background:
+  radial-gradient(80% 90% at 15% 0%,#f6efe6 0%,rgba(246,239,230,0) 60%),
+  linear-gradient(160deg,#e9e4dc 0%,#d8dde4 60%,#c9d2dc 100%)}
+.wp-busy{background:
+  radial-gradient(40% 60% at 22% 30%,#e2a04a 0%,rgba(226,160,74,0) 70%),
+  radial-gradient(35% 55% at 70% 20%,#3a8fbf 0%,rgba(58,143,191,0) 70%),
+  radial-gradient(45% 70% at 55% 90%,#b0405a 0%,rgba(176,64,90,0) 70%),
+  linear-gradient(120deg,#2c3b2a,#5a4a2a 40%,#23324a)}
+.win{position:absolute;z-index:1;border-radius:9px;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(2px)}
+.wp-light ~ .win{background:rgba(255,255,255,.55);border-color:rgba(0,0,0,.08)}
+.win i{position:absolute;left:12px;right:30%;height:6px;border-radius:3px;background:rgba(255,255,255,.08)}
+.wp-light ~ .win i{background:rgba(0,0,0,.08)}
+.w1{left:5%;top:96px;width:38%;height:190px}
+.w2{left:47%;top:120px;width:46%;height:170px}
+.w1 i:nth-child(1){top:18px}.w1 i:nth-child(2){top:34px;right:45%}.w1 i:nth-child(3){top:50px;right:38%}
+.w2 i:nth-child(1){top:18px;right:20%}.w2 i:nth-child(2){top:34px;right:52%}
+.chip{position:absolute;z-index:3;left:12px;bottom:10px;font:12px/1 var(--mono);color:rgba(255,255,255,.72);
+  background:rgba(0,0,0,.42);padding:5px 8px;border-radius:7px;pointer-events:none}
+.wp-light ~ .chip{color:rgba(0,0,0,.65);background:rgba(255,255,255,.6)}
+
+/* readout */
+.readout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:8px 16px;align-items:start;
+  margin:12px 2px 4px;font-size:13px}
+.readout b{display:block;font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.6px;margin-bottom:1px}
+.readout .v{font-family:var(--mono);font-size:12.5px;color:var(--fg);word-break:break-word}
+#desc{grid-column:1/-1;color:var(--dim);font-size:13px;min-height:2.9em}
+
+/* controls */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px}
+.grp{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 0}
+.grp + .grp{border-top:1px solid var(--line)}
+.lbl{width:86px;flex:0 0 86px;color:var(--faint);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+button,.seg label{font:inherit;font-size:13px;color:var(--fg);background:var(--panel-2);border:1px solid var(--line-2);
+  border-radius:999px;padding:5px 12px;cursor:pointer;line-height:1.25;transition:border-color .15s,background .15s,color .15s}
+button:hover{border-color:#57504b}
+button:focus-visible,.seg input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
+button.on{border-color:var(--accent);background:var(--accent-soft);color:#fff}
+button.go{border-color:#5a3d31}
+button.go.on{background:var(--accent);color:#170c07;border-color:var(--accent)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:999px;overflow:hidden}
+.seg label{border:0;border-radius:0;padding:0;background:transparent}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:block;padding:5px 11px;cursor:pointer;color:var(--dim)}
+.seg input:checked + span{background:var(--accent-soft);color:#fff}
+.seg label + label span{border-left:1px solid var(--line-2)}
+input[type=range]{accent-color:var(--accent);width:120px;vertical-align:middle}
+.mini{color:var(--faint);font-size:12px}
+.meter{display:inline-block;width:64px;height:6px;border-radius:3px;background:#2a2624;overflow:hidden;vertical-align:middle}
+.meter i{display:block;height:100%;width:0;background:var(--accent)}
+.check{display:inline-flex;gap:6px;align-items:center;color:var(--dim);font-size:13px;cursor:pointer}
+.check input{accent-color:var(--accent)}
+.notes{color:var(--dim);font-size:13px;margin-top:16px}
+.notes h2{font-size:13px;color:var(--fg);margin:0 0 6px;font-weight:600}
+.notes ul{margin:0;padding-left:18px}
+.notes li{margin:3px 0}
+kbd{font:11px var(--mono);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:0 4px;color:var(--fg)}
+@media (max-width:640px){
+  .desk{height:200px}
+  .w1{top:80px}.w2{top:100px}
+  .lbl{width:100%;flex-basis:100%}
+  .readout{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .readout .fpsbox{grid-column:1/-1}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ember <span>&amp;</span> Thread</h1>
+    <div class="sub">hey-claude island · motion preview for M5 · spec in <code>docs/island-motion.md</code></div>
+  </header>
+
+  <div class="desk" id="desk">
+    <div class="wp wp-dusk" id="wp"></div>
+    <div class="win w1"><i></i><i></i><i></i></div>
+    <div class="win w2"><i></i><i></i></div>
+    <canvas id="cv" aria-label="Animated island preview"></canvas>
+    <div class="chip" id="chip">ready</div>
+  </div>
+
+  <div class="readout">
+    <div><b>State</b><span class="v" id="rState">ready</span></div>
+    <div><b>QML driver (target)</b><span class="v" id="rTier">Timer 125 ms · 8 fps</span></div>
+    <div class="fpsbox"><b>Preview</b><span class="v" id="rFps">-- fps</span></div>
+    <div id="desc"></div>
+  </div>
+
+  <div class="panel" id="controls">
+    <div class="grp"><span class="lbl">Rest</span>
+      <button data-s="ready">ready</button><button data-s="off">off</button>
+      <button data-s="paused">paused 1 h</button><button data-s="loading">loading</button>
+    </div>
+    <div class="grp"><span class="lbl">Voice</span>
+      <button data-s="woke">woke</button><button data-s="listening">listening</button>
+      <button data-s="holding">holding</button><button data-s="input">input</button>
+      <button data-s="followup">followup</button>
+    </div>
+    <div class="grp"><span class="lbl">Claude</span>
+      <button data-s="thinking">thinking</button><button data-s="speaking">speaking</button>
+      <button data-a="barge" title="the pill's mic button: interrupt and talk">mic · interrupt</button>
+      <button data-a="hush" title="the pill's square button, or Esc">stop · Esc</button>
+    </div>
+    <div class="grp"><span class="lbl">One-shots</span>
+      <button data-s="error">error</button><button data-s="mismatch">voice didn't match</button>
+      <button data-a="addTask">+ task running</button><button data-a="taskDone">task done</button>
+      <button data-a="badge" id="badgeBtn">badge → cpu</button>
+      <label class="check"><input type="checkbox" id="pin"> show task list</label>
+    </div>
+    <div class="grp"><span class="lbl">Sequence</span>
+      <button class="go" id="demoBtn">▶ auto demo</button>
+      <button id="chaosBtn">chaos (interrupt storm)</button>
+    </div>
+    <div class="grp"><span class="lbl">Motion</span>
+      <div class="seg" role="radiogroup" aria-label="Motion setting">
+        <label><input type="radio" name="motion" value="full" checked><span>full</span></label>
+        <label><input type="radio" name="motion" value="calm"><span>calm</span></label>
+        <label><input type="radio" name="motion" value="off"><span>off</span></label>
+      </div>
+      <span class="mini">calm = reduced motion (Windows "Animation effects" off)</span>
+    </div>
+    <div class="grp"><span class="lbl">Mic level</span>
+      <div class="seg" role="radiogroup" aria-label="Mic simulation">
+        <label><input type="radio" name="mic" value="auto" checked><span>speech</span></label>
+        <label><input type="radio" name="mic" value="silent"><span>silent</span></label>
+        <label><input type="radio" name="mic" value="manual"><span>manual</span></label>
+      </div>
+      <input type="range" id="micSl" min="0" max="100" value="45" aria-label="Manual mic level">
+      <span class="meter" title="smoothed level L"><i id="micM"></i></span>
+    </div>
+    <div class="grp"><span class="lbl">TTS level</span>
+      <div class="seg" role="radiogroup" aria-label="TTS simulation">
+        <label><input type="radio" name="tts" value="auto" checked><span>speech</span></label>
+        <label><input type="radio" name="tts" value="manual"><span>manual</span></label>
+      </div>
+      <input type="range" id="ttsSl" min="0" max="100" value="55" aria-label="Manual TTS level">
+      <span class="meter" title="smoothed amplitude A"><i id="ttsM"></i></span>
+    </div>
+    <div class="grp"><span class="lbl">Wallpaper</span>
+      <div class="seg" role="radiogroup" aria-label="Wallpaper">
+        <label><input type="radio" name="wp" value="dusk" checked><span>dusk</span></label>
+        <label><input type="radio" name="wp" value="light"><span>light</span></label>
+        <label><input type="radio" name="wp" value="busy"><span>busy</span></label>
+      </div>
+      <span class="mini">Keys: in <b>input</b> type, <kbd>Enter</kbd> submits, <kbd>Esc</kbd> cancels · in <b>listening</b> hold <kbd>Ctrl</kbd> · <kbd>Esc</kbd> stops it talking</span>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h2>How to read this</h2>
+    <ul>
+      <li>The <b>ember</b> is Claude's presence; its temperature, breath and glow tell the state. The <b>thread</b> is the voice line: white = you, terracotta = Claude.</li>
+      <li>Every morph is a spring that is only ever <i>retargeted</i>: click any state mid-transition (or run <b>chaos</b>) and the motion carries its velocity into the new shape. Growing springs overshoot slightly (inhale); shrinking ones never do (exhale).</li>
+      <li>The preview runs the same driver tiers as the QML plan: every vsync only while something moves, then a timer tick at rest (ready 8 fps, tasks 10, paused 2, error hold 4), and in off or calm idle the loop stops completely. The <b>Preview</b> readout counts real frames.</li>
+      <li>While Claude thinks or talks, the pill's right end carries two buttons: <b>mic</b> (interrupt and talk: barge-in from the current pose) and <b>stop</b>. <kbd>Esc</kbd> or a click on the speaking pill also stops it.</li>
+      <li>Pause is compressed: 1 hour plays in 12 s, and the pre-warm runs over the last 2 s.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ---------------- colours ---------------- */
+const hex = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+const C = {
+  ash:hex('#5C5652'), banked:hex('#B8664C'), live:hex('#D97757'), hot:hex('#EC9A78'),
+  white:hex('#FFE3D6'), cool:hex('#B38A7A'), user:hex('#F2F2F2'), ok:hex('#6CCB7A'),
+  okCore:hex('#B8F0C1'), bad:hex('#E5646A'), fg:hex('#F2F2F2'), dim:hex('#9A9A9A'), rimW:[255,255,255]
+};
+const mixc = (a,b,t) => [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+const rgba = (c,a=1) => `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a<0?0:a>1?1:a})`;
+
+/* ---------------- easing ---------------- */
+const clamp = (x,a=0,b=1) => x<a?a:x>b?b:x;
+const outCubic = p => 1-Math.pow(1-p,3), inCubic = p => p*p*p, inQuad = p => p*p, outQuad = p => 1-(1-p)*(1-p);
+const outSine = p => Math.sin(p*Math.PI/2), inOutSine = p => .5-.5*Math.cos(Math.PI*p);
+const outBack = s => p => { const c3=s+1; return 1+c3*Math.pow(p-1,3)+s*Math.pow(p-1,2); };
+function bezier(x1,y1,x2,y2){
+  const cx=3*x1, bx=3*(x2-x1)-cx, ax=1-cx-bx, cy=3*y1, by=3*(y2-y1)-cy, ay=1-cy-by;
+  const X=t=>((ax*t+bx)*t+cx)*t, Y=t=>((ay*t+by)*t+cy)*t, dX=t=>(3*ax*t+2*bx)*t+cx;
+  return p => { let t=p; for(let i=0;i<6;i++){ const d=dX(t); if(Math.abs(d)<1e-6) break; t-= (X(t)-p)/d; } return Y(clamp(t)); };
+}
+const nib = bezier(.2,0,0,1);
+
+/* ---------------- seeded rng (golden-frame friendly) ---------------- */
+let seed = 0x9e3779b9;
+const rnd = () => { seed ^= seed<<13; seed ^= seed>>>17; seed ^= seed<<5; return ((seed>>>0)%100000)/100000; };
+
+/* ---------------- motion mode ---------------- */
+let MOTION = 'full';
+let NOW = performance.now();
+// render loop bookkeeping (declared early: wake() can run during setup)
+let rafId=0, toId=0, inFrame=false, lastGap=0, last=performance.now();
+function wake(){ // anything that changes a target restarts full-rate frames
+  if (inFrame || rafId) return;
+  if (toId){ clearTimeout(toId); toId=0; }
+  last=performance.now(); lastGap=0; rafId=requestAnimationFrame(frame);
+}
+
+/* ---------------- springs, followers, tweens, timers ---------------- */
+const PRE = { inhale:{k:380,z:.70}, exhale:{k:180,z:1}, snap:{k:520,z:.60}, soft:{k:120,z:.85} };
+const SPRINGS = [];
+class Spring {
+  constructor(x){ this.x=x; this.v=0; this.t=x; this.k=180; this.c=2*Math.sqrt(180); this.tw=null; this.born=NOW; SPRINGS.push(this); }
+  to(t, pre='dir'){
+    wake();
+    if (MOTION==='off'){ this.x=this.t=t; this.v=0; this.tw=null; return this; }
+    if (MOTION==='calm'){
+      if (t!==this.t || (!this.tw && Math.abs(this.x-t)>1e-3)) this.tw={from:this.x,to:t,t0:NOW,d:160};
+      this.t=t; this.v=0; return this;
+    }
+    if (pre==='dir') pre = t>this.x ? 'inhale' : 'exhale';
+    const p=PRE[pre]; this.k=p.k; this.c=2*p.z*Math.sqrt(p.k); this.t=t; this.tw=null; this.born=NOW; return this;
+  }
+  set(t){ this.x=this.t=t; this.v=0; this.tw=null; wake(); return this; }
+  step(h){ if (this.tw) return; const a=-this.k*(this.x-this.t)-this.c*this.v; this.v+=a*h; this.x+=this.v*h; }
+  tick(){
+    if (this.tw){ const p=clamp((NOW-this.tw.t0)/this.tw.d); this.x=this.tw.from+(this.tw.to-this.tw.from)*outCubic(p); if(p>=1) this.tw=null; }
+    if (!isFinite(this.x)||!isFinite(this.v)){ console.warn('spring NaN, snapped'); this.set(this.t); }
+    if (!this.tw && NOW-this.born>3000 && (Math.abs(this.x-this.t)>.25 || Math.abs(this.v)>2)){ console.warn('spring stalled, snapped'); this.set(this.t); }
+  }
+  settled(){ return !this.tw && Math.abs(this.x-this.t)<.05 && Math.abs(this.v)<.5; }
+}
+const FOLS = [];
+class F {
+  constructor(x,tau=.12){ this.x=x; this.t=x; this.tau=tau; FOLS.push(this); }
+  to(t,tau){ if (t!==this.t) wake(); this.t=t; if(tau!=null) this.tau=tau; if(MOTION==='off') this.x=t; return this; }
+  step(dt){ this.x += (this.t-this.x)*(1-Math.exp(-dt/Math.max(this.tau,.001))); }
+}
+class FC {
+  constructor(c,tau=.12){ this.r=new F(c[0],tau); this.g=new F(c[1],tau); this.b=new F(c[2],tau); }
+  to(c,tau){ this.r.to(c[0],tau); this.g.to(c[1],tau); this.b.to(c[2],tau); return this; }
+  set(c){ this.r.x=this.r.t=c[0]; this.g.x=this.g.t=c[1]; this.b.x=this.b.t=c[2]; }
+  get c(){ return [this.r.x,this.g.x,this.b.x]; }
+}
+let TWEENS = [];
+function T(o,k,to,d,e=outCubic,delay=0){
+  TWEENS = TWEENS.filter(w=>!(w.o===o&&w.k===k)); wake();
+  if (MOTION==='calm') d=Math.min(d,160);
+  if (MOTION==='off' || d<=0){ if(delay<=0){ o[k]=to; return; } d=0; }
+  TWEENS.push({o,k,to,d,e,start:NOW+delay,from:null});
+}
+function runTweens(){
+  TWEENS = TWEENS.filter(w=>{
+    if (NOW<w.start) return true;
+    if (w.from===null) w.from=w.o[w.k];
+    const p = w.d<=0 ? 1 : clamp((NOW-w.start)/w.d);
+    w.o[w.k] = w.from+(w.to-w.from)*w.e(p);
+    return p<1;
+  });
+}
+let TIMERS = [];
+function at(ms,fn,tag='state'){ TIMERS.push({t:NOW+ms,fn,tag}); wake(); }
+function cancel(tag){ TIMERS = TIMERS.filter(x=>x.tag!==tag); }
+function runTimers(){
+  const due = TIMERS.filter(x=>x.t<=NOW);
+  if (!due.length) return;
+  TIMERS = TIMERS.filter(x=>x.t>NOW);
+  due.sort((a,b)=>a.t-b.t).forEach(x=>x.fn());
+}
+
+/* ---------------- canvas + fonts ---------------- */
+const desk=document.getElementById('desk'), cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let DPR=1, CW=600, CH=250, SC=1;
+function fit(){
+  const r=desk.getBoundingClientRect(); CW=r.width; CH=r.height;
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  cv.width=Math.round(CW*DPR); cv.height=Math.round(CH*DPR);
+  SC=Math.min(1,(CW-16)/560); // the widest island (input, list) is 560
+}
+new ResizeObserver(()=>{ fit(); wake(); }).observe(desk); fit(); // resizing clears the canvas: redraw even when idle
+const FAM='"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif';
+const F9='12px '+FAM, F10='13.3px '+FAM;
+const mctx=document.createElement('canvas').getContext('2d');
+const tw=(s,f)=>{ mctx.font=f; return mctx.measureText(s).width; };
+function elide(s,f,max){ if(tw(s,f)<=max) return s; while(s.length>1 && tw(s+'…',f)>max) s=s.slice(0,-1); return s.trimEnd()+'…'; }
+const clampW = w => Math.min(560, Math.max(300, Math.round(w)));
+const oc=document.createElement('canvas'), octx=oc.getContext('2d');
+
+/* ---------------- island model ---------------- */
+const W=new Spring(150), H=new Spring(28), HEAD=new Spring(28), EX=new Spring(18), ER=new Spring(4);
+const TX0=new Spring(18), TX1=new Spring(18), SUFX=new Spring(70), ARC=new Spring(0);
+const EC=new FC(C.live), GC=new FC(C.live), RIMC=new FC(C.rimW), TC=new FC(C.user), CORE=new F(.3);
+const GA=new F(.07), GR=new F(22), RIMA=new F(.086), TW=new F(1.75), TA=new F(0), TAPER=new F(.8), AMPK=new F(1);
+const PATIENCE=new F(1,.7);
+const O = { slash:0, pilotOn:0, arcA:0, field:0, fieldX:6, trim:0, bracket:0, bracketA:0, bracketOff:0,
+  check:0, checkW:1.5, wash:0, washReveal:0, ghost:0, ghostX:0, words:1, ul:0, ulStart:0, satVis:1, progress:0,
+  ctl:0, pressM:0, pressS:0 };
+const K = { r:0, rt:0, g:0, gt:0 };
+const kickR = a => { K.rt += a; wake(); }, kickG = a => { K.gt += a; wake(); };
+const OV = {};
+const ov = (name,c,tau,p) => { if (c) OV[name]={c,tau,p}; else delete OV[name]; wake(); };
+const HOV=new F(0,.06), HM=new F(0,.05), HS=new F(0,.05); // hover: label dim→fg (~180 ms), mic / stop buttons
+const CTRL=66, MAXT=560-90-CTRL; // mic + stop buttons on the right of thinking / speaking; text room left of them
+const topOV = () => { let b=null; for (const k in OV) if (!b || OV[k].p>b.p) b=OV[k]; return b; };
+
+const S = {
+  state:'ready', prev:null, enteredAt:0, lastChange:-1e9, changes:[], floodUntil:0, resting:'ready',
+  breathT0:0, hover:false, listOpen:false, listGeom:false, badge:'gpu (turbo)', done:null,
+  wokeGlow:false, lastWoke:-1e9, pluckT0:-1e9, trem:null, shake:null, baseTau:.12,
+  typed:'', ghost:'', lastKey:-1e9, thinkText:'', errText:'', errW:0, loadText:'loading models…', loadT0:0,
+  pauseT0:0, pauseDur:12000, arcLast:0, fuT0:0, fuDur:5000, fuFrozen:null, fuEnded:false,
+  words:[], speech:null, speakT0:0, wordIdx:-1, speakW:300, lines:1, speakEnd:false, lastRipple:-1e9,
+  silentFor:0, penTheta:0, sparks:[], nextSpark:0, rings:[], rows:[]
+};
+const isRest = s => s==='ready' || s==='off' || s==='paused';
+const flood = () => NOW < S.floodUntil;
+
+/* ---------------- audio simulation ---------------- */
+const AU = { micMode:'auto', ttsMode:'auto', micRaw:0, L:0, A:0, ttsRaw:0, acc:0, accA:0, hist:[], aHist:[],
+             micSpeech:null, micNext:0 };
+const WORDS='so can you check what the weather does tomorrow and then move my standup to ten please remind me later about it okay'.split(' ');
+function buildSpeech(words,t0){
+  const syl=[], starts=[]; let t=t0+120;
+  words.forEach(w=>{
+    starts.push(t);
+    const n=Math.max(1,Math.min(4,Math.round(w.replace(/[^a-z0-9]/gi,'').length/3)));
+    for (let k=0;k<n;k++){ const d=110+rnd()*90; syl.push({t,d,a:(.5+rnd()*.5)*(k?0.85:1)}); t+=d+20+rnd()*40; }
+    t += 50+rnd()*90; if (/[,.:;?!]$/.test(w)) t += 260+rnd()*220;
+  });
+  return {syl,starts,end:t};
+}
+function ampAt(sp,t){ let a=0; for (const s of sp.syl){ if (t>=s.t && t<s.t+s.d){ a=Math.max(a, s.a*Math.pow(Math.sin(Math.PI*(t-s.t)/s.d),.8)); } } return a; }
+const micOpen = () => ['woke','listening','holding','input','followup'].includes(S.state);
+const userTalks = () => S.state==='listening' || S.state==='holding' || (S.state==='woke' && NOW-S.enteredAt>160);
+function audio(dt){
+  // mic: raw samples arrive at 30 Hz, the follower runs per frame
+  AU.acc += dt;
+  if (AU.acc >= 1/30){
+    AU.acc %= 1/30;
+    let raw = 0;
+    if (micOpen()){
+      if (AU.micMode==='manual') raw = micSl.value/100*(.85+rnd()*.3);
+      else if (AU.micMode==='auto' && userTalks()){
+        if (!AU.micSpeech || NOW>AU.micSpeech.end){
+          if (NOW>AU.micNext){
+            const n=4+Math.floor(rnd()*5), ws=[]; for (let i=0;i<n;i++) ws.push(WORDS[Math.floor(rnd()*WORDS.length)]);
+            AU.micSpeech=buildSpeech(ws,NOW); AU.micNext=AU.micSpeech.end+700+rnd()*700;
+          }
+        }
+        raw = AU.micSpeech ? ampAt(AU.micSpeech,NOW)*.85 : 0;
+        raw += rnd()*.03;
+      } else raw = rnd()*.025;
+    }
+    AU.micRaw = raw;
+    // tts
+    let a=0;
+    if (S.state==='speaking'){
+      if (AU.ttsMode==='manual') a = ttsSl.value/100*(.8+rnd()*.4);
+      else if (S.speech) a = ampAt(S.speech,NOW);
+    }
+    AU.ttsRaw=a;
+    AU.aHist.push([NOW,a]); while (AU.aHist.length && NOW-AU.aHist[0][0]>80) AU.aHist.shift();
+    // onset → heat ripple
+    if (S.state==='speaking' && MOTION==='full'){
+      let mn=1; for (const h of AU.aHist) mn=Math.min(mn,h[1]);
+      const alive = S.rings.filter(r=>r.kind==='rip').length;
+      if (a-mn>.18 && a>.25 && NOW-S.lastRipple>160 && alive<2){
+        S.lastRipple=NOW;
+        S.rings.push({kind:'rip',x:EX.x,y:HEAD.x/2,t0:NOW,d:520,r0:5,r1:24,w0:1.5,w1:.5,a0:.30,c:C.live});
+      }
+    }
+  }
+  const g = clamp((AU.micRaw-.02)/.5); const Lt = Math.pow(g,.7);
+  AU.L += (Lt-AU.L)*(1-Math.exp(-dt/(Lt>AU.L?.03:.18)));
+  const At = AU.ttsRaw;
+  AU.A += (At-AU.A)*(1-Math.exp(-dt/(At>AU.A?.025:.14)));
+  AU.hist.push([NOW,AU.L]); while (AU.hist.length && NOW-AU.hist[0][0]>600) AU.hist.shift();
+  micM.style.width=(AU.L*100).toFixed(0)+'%'; ttsM.style.width=(AU.A*100).toFixed(0)+'%';
+}
+function Lat(delay){ // smoothed level `delay` s ago
+  const tt=NOW-delay*1000; const h=AU.hist;
+  for (let i=h.length-1;i>=0;i--) if (h[i][0]<=tt) return h[i][1];
+  return h.length?h[0][1]:0;
+}
+
+/* ---------------- labels ---------------- */
+class Labels {
+  constructor(o){ this.L=[]; this.last=-1e9; this.o=o; }
+  set(spec){
+    wake();
+    const cur=this.L.find(l=>!l.out);
+    if (spec && cur && cur.text===spec.text && cur.x===spec.x){ cur.color=spec.color; return; }
+    if (!spec && !cur) return;
+    if (spec && cur && NOW-this.last<80 && cur.a<.35){ Object.assign(cur,spec); this.last=NOW; return; }
+    for (const l of this.L) if (!l.out){ l.out=true; l.t0=NOW; l.a0=l.a; l.dy0=l.dy; }
+    if (spec){
+      const useNib = spec.nib && MOTION==='full' && !flood();
+      this.L.push({...spec, nib:useNib, a:0, dy:this.o.inDy, t0:NOW, out:false, rev:useNib?0:1,
+        revD: clamp(18*spec.text.length,120,320)});
+    }
+    while (this.L.length>2) this.L.shift();
+    this.last=NOW;
+  }
+  step(){
+    const calm = MOTION!=='full', off = MOTION==='off', o=this.o;
+    this.L = this.L.filter(l=>{
+      if (l.out){
+        const p = off?1:clamp((NOW-l.t0)/o.outD);
+        l.a=l.a0*(1-inQuad(p)); l.dy = calm?0 : l.dy0+(o.outDy-l.dy0)*p;
+        return p<1;
+      }
+      const del = calm?0:o.inDelay, d = calm?120:o.inD;
+      const p = off?1:clamp((NOW-l.t0-del)/d), e=outCubic(p);
+      l.a = l.nib ? Math.min(1,e*1.4) : e; l.dy = calm?0 : o.inDy*(1-e);
+      if (l.nib) l.rev = clamp((NOW-l.t0-del)/l.revD);
+      return true;
+    });
+  }
+  draw(xOff,base){
+    for (const l of this.L){
+      if (l.a<.01) continue;
+      const x=l.x+xOff, y=base+(l.yo||0)+l.dy;
+      const col = l.color===C.dim && HOV.x>.005 ? mixc(C.dim,C.fg,HOV.x) : l.color; // hover lifts idle text
+      if (l.nib && l.rev<1) drawNib(l,x,y);
+      else { ctx.font=l.font; ctx.fillStyle=rgba(col,l.a); ctx.fillText(l.text,x,y); }
+    }
+  }
+}
+function drawNib(l,x,y){ // text revealed behind a 15° slanted pen edge with a 10 px soft falloff
+  const w=Math.ceil(tw(l.text,l.font))+24, h=24, s=DPR*SC;
+  oc.width=Math.ceil(w*s); oc.height=Math.ceil(h*s);
+  octx.setTransform(s,0,0,s,0,0); octx.clearRect(0,0,w,h);
+  octx.font=l.font; octx.fillStyle=rgba(l.color,l.a); octx.fillText(l.text,2,16);
+  octx.globalCompositeOperation='destination-in';
+  octx.setTransform(s,0,-.27*s,s,.27*h*s,0);
+  const edge=l.rev*(w+h*.27+10);
+  const g=octx.createLinearGradient(edge-10,0,edge,0); g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  octx.fillStyle=g; octx.fillRect(-20,-4,w+h+40,h+8);
+  octx.globalCompositeOperation='source-over'; octx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(oc,x-2,y-16,w,h);
+}
+const LB = new Labels({outD:120,outDy:-2,inD:220,inDy:3,inDelay:60});
+const SUF = new Labels({outD:140,outDy:-4,inD:220,inDy:4,inDelay:80});
+
+/* ---------------- tasks ---------------- */
+const TASKS=[]; let taskSeq=0;
+const TASK_NAMES=['refactor audio loop','write wake tests','tidy the roadmap','bump PySide6','profile whisper'];
+const running = () => TASKS.filter(t=>t.status==='running').length;
+function respace(){
+  const rs=TASKS.filter(t=>t.status==='running');
+  rs.forEach((tk,i)=>{ const tgt=i/rs.length*Math.PI*2;
+    if (tk.phase==null) tk.phase=tgt;
+    else { let d=tgt-tk.phase; d=((d+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI; T(tk,'phase',tk.phase+d,600,inOutSine); } });
+}
+function addTask(){
+  if (running()>=3) return;
+  const tk={id:++taskSeq,name:TASK_NAMES[(taskSeq-1)%TASK_NAMES.length],status:'running',t0:NOW,orb:0,a:0,phase:null,fly:null,ra:0,rdy:6};
+  TASKS.push(tk); respace(); T(tk,'orb',9,400,outBack(1.2)); T(tk,'a',1,400,outCubic);
+  if (S.listOpen){ tk.ra=0; T(tk,'ra',1,200,outCubic); T(tk,'rdy',0,200,outCubic); }
+  restLabel(); resize();
+}
+function taskDone(){
+  const tk=TASKS.find(t=>t.status==='running');
+  if (!tk){ addTask(); at(700,taskDone,'g'); return; }
+  cancel('done');
+  const ang=tk.phase+satAngle(), fromX=EX.x+Math.cos(ang)*tk.orb, fromY=HEAD.x/2+Math.sin(ang)*tk.orb;
+  tk.status='done'; tk.doneAt=NOW;
+  at(12000,()=>{ const i=TASKS.indexOf(tk); if (i>=0) TASKS.splice(i,1); if (isRest(S.state)){ restLabel(); resize(); } },'g');
+  const rest=isRest(S.state);
+  if (!rest || MOTION==='off'){ // inside a voice state: absorb + tint only, no label takeover
+    ov('done',mixc(C.live,C.ok,.6),.08,3); at(600,()=>{ ov('done'); },'done'); respace(); return;
+  }
+  if (MOTION==='calm'){
+    ov('done',C.ok,.08,3); O.check=0; T(O,'check',1,150,t=>t); S.done=tk.name; restLabel(); resize();
+    at(800,()=>ov('done'),'done');
+    at(3600,()=>{ T(O,'check',0,150,t=>t); S.done=null; restLabel(); resize(); respace(); },'done');
+    return;
+  }
+  tk.fly={t0:NOW,x:fromX,y:fromY};
+  at(220,()=>{ tk.fly=null; ov('done',C.ok,.08,3); kickR(1.6); GC.to(C.ok,.05); kickG(.22); at(480,()=>GC.to(C.live,.25),'done'); respace(); },'done');
+  at(240,()=>{ O.check=0; T(O,'check',1,240,nib); O.checkW=1.5; },'done');
+  at(300,()=>{ S.done=tk.name; restLabel(); resize(); },'done');
+  at(480,()=>{ T(O,'checkW',2.2,90,outQuad); at(90,()=>T(O,'checkW',1.75,220,outCubic),'done'); },'done');
+  at(700,()=>{ ov('done'); OV_TAU_BACK(.4); },'done');
+  at(3600,()=>{ T(O,'check',0,300,inCubic); S.done=null; restLabel(); resize(); },'done');
+}
+function OV_TAU_BACK(t){ S.baseTau=t; at(t*3000,()=>{ S.baseTau=.12; },'g'); }
+const satAngle = () => { const t = isRest(S.state)&&MOTION!=='off' ? Math.floor(NOW/100)/10 : NOW/1000; return MOTION==='full' ? t/10*Math.PI*2 : 0; };
+
+/* ---------------- size / labels per state ---------------- */
+function restLabel(){
+  const st=S.state, n=running();
+  if (!isRest(st) && st!=='mismatch') return;
+  if (st==='mismatch'){ LB.set({text:'not your voice?',x:30,font:F9,color:C.dim}); SUF.set(null); return; }
+  if (S.done){ LB.set({text:'done · '+S.done,x:46,font:F9,color:C.fg,nib:true}); SUF.set(null); return; }
+  if (st==='ready'){
+    const main = n ? `${n} task${n>1?'s':''} running` : 'hey claude';
+    LB.set({text:main,x:30,font:F9,color:n?C.fg:C.dim}); SUFX.to(tw(main,F9),'soft');
+    SUF.set({text:' · '+S.badge,x:30,font:F9,color:n?C.fg:C.dim});
+  } else if (st==='off'){
+    LB.set({text:n?`off · ${n} running`:'listening off',x:30,font:F9,color:C.dim}); SUF.set(null);
+  } else if (st==='paused'){
+    LB.set({text:'paused',x:30,font:F9,color:C.dim}); SUFX.to(tw('paused',F9),'soft');
+  }
+}
+function readyW(){
+  if (S.done) return tw('done · '+S.done,F9)+16+46;
+  if (S.state==='mismatch') return tw('not your voice?',F9)+46;
+  const n=running(); const main=n?`${n} task${n>1?'s':''} running`:'hey claude';
+  return tw(main+' · '+S.badge,F9)+46;
+}
+function rowsN(){ return Math.min(4,TASKS.length); }
+function resize(pre='dir'){
+  const st=S.state; let w=300, head=40;
+  switch(st){
+    case 'ready': case 'mismatch': head=28; w=Math.max(120,readyW()); break;
+    case 'off': head=28; w=(running()||S.done)?Math.max(170,S.done?readyW():0):130; break;
+    case 'paused': head=28; w=S.done?Math.max(170,readyW()):170; break;
+    case 'loading': w=clampW(tw(S.loadText,F9)+80); break;
+    case 'input': w=560; head=46; break;
+    case 'thinking': w=Math.min(560, Math.max(300, tw(S.thinkText,F10)+90)+CTRL); break;
+    case 'speaking': w=S.speakW; break;
+    case 'error': w=clampW(tw(S.errText,F10)+56); break;
+  }
+  let h = head + (st==='speaking' && S.lines>1 ? 20 : 0);
+  if (S.listGeom){ w=Math.max(w,460); h=head+12+30*rowsN(); }
+  W.to(w,pre); H.to(h,pre); HEAD.to(head,pre);
+  EX.to(head>=46?22:head>=40?20:18,'soft');
+}
+
+/* ---------------- state machine ---------------- */
+function go(st,o={}){
+  NOW=performance.now();
+  if (st==='woke' && NOW-S.lastWoke<600 && ['woke','listening','holding'].includes(S.state)){ kickG(.15); return; }
+  if (st!=='woke' && NOW-S.lastChange<60){
+    S.pend=[st,o]; if (!S.pendT) S.pendT=setTimeout(()=>{ S.pendT=0; const [a,b]=S.pend; enter(a,b); }, 60-(NOW-S.lastChange));
+    return;
+  }
+  if (S.pendT){ clearTimeout(S.pendT); S.pendT=0; }
+  enter(st,o);
+}
+function finishOneShots(){ for (const r of S.rings) r.d=Math.min(r.d,(NOW-r.t0)+90); S.trem=null; S.shake=null; S.sparks=[]; }
+function enter(st,o={}){
+  NOW=performance.now();
+  S.changes.push(NOW); S.changes=S.changes.filter(t=>NOW-t<1000);
+  if (S.changes.length>4) S.floodUntil=NOW+500;
+  const prev=S.state;
+  cancel('state');
+  // --- exits ---
+  if (prev==='off' && st!=='off') T(O,'slash',0,160,inCubic);
+  if (prev==='paused' && st!=='paused'){ T(O,'pilotOn',0,200,outCubic); T(O,'arcA',0,250,outCubic); SUF.set(null); }
+  if (prev==='holding' && st!=='holding'){ T(O,'bracketOff',6,200,outQuad); T(O,'bracketA',0,200,outQuad); TAPER.to(.8,.07); }
+  if (prev==='input' && st!=='input'){ T(O,'field',0,120,inQuad); }
+  if (prev==='speaking' && st!=='speaking'){ T(O,'words',0,160,inQuad); }
+  if (prev==='followup' && st!=='followup'){ T(O,'wash',0,200,outQuad); }
+  if (prev==='error' && st!=='error'){ ov('error'); GC.to(C.live,.2); }
+  if (prev==='mismatch' && st!=='mismatch'){ ov('mm'); ov('wake'); }
+  if (st!=='woke'){ ov('wake'); S.wokeGlow=false; }
+  if (st==='woke') S.trem=null;
+  if (st==='off'||st==='paused') finishOneShots();
+  if (S.done && st!==prev){ S.done=null; cancel('done'); ov('done'); T(O,'check',0,150,inCubic); }
+  if (!isRest(st) && st!=='mismatch'){ SUF.set(null); }
+  // mic + stop buttons: in once the geometry is most of the way there, out first on any exit
+  if (st==='thinking'||st==='speaking') T(O,'ctl',1,200,outCubic,O.ctl>.5?0:140);
+  else if (O.ctl>0) T(O,'ctl',0,120,inQuad);
+  S.prev=prev; S.state=st; S.enteredAt=NOW; S.lastChange=NOW; S.baseTau=.12;
+  if (st==='ready'||st==='off') S.resting=st; if (st==='paused') S.resting='off';
+  (ENTER[st]||(()=>{}))(prev,o);
+  if (st!=='woke' && st!=='mismatch') resize();
+  updateUI();
+}
+function setGen(g){ if (g===GEN) return; SX.set(DX); SY.set(DY); SA.set(DA); GEN=g; blendT0=NOW; }
+function rekindle(){
+  if (MOTION!=='full'){ return; }
+  at(100,()=>{ ov('kindle',C.hot,.06,2); kickR(.6); kickG(.10); },'state');
+  at(360,()=>ov('kindle'),'state');
+}
+const TRANSCRIPTS=["what's on my calendar tomorrow?","move standup to ten","how long until the build finishes?"];
+const ANSWERS=[
+  "You have two meetings tomorrow: design review at ten, and a one-on-one with Sam at three.",
+  "Done. Standup now starts at ten, and I told the team.",
+  "About four minutes. I'll ping you when it's green."];
+let ansIdx=0;
+
+const ENTER = {
+  ready(prev){
+    ER.to(4.0); setGen('rest'); TA.to(0,.1); RIMC.to(C.rimW,.15); RIMA.to(.086,.15); GC.to(C.live,.2);
+    CORE.to(.3); AMPK.to(1);
+    S.breathT0 = Math.floor(NOW/125)*125/1000 - .7/.10; // phase starts at the exhale midpoint
+    if (prev==='off'||prev==='paused') rekindle();
+    if (prev==='loading' && MOTION==='full') kickR(1.4);
+    if (prev==='followup' && MOTION==='full') kickR(-.4);
+    O.satVis===1 || T(O,'satVis',1,300,outCubic);
+    restLabel();
+  },
+  off(){
+    ER.to(3.0); S.baseTau=.14; setGen('rest'); TA.to(0,.1); RIMC.to(C.rimW,.15); RIMA.to(.05,.2);
+    T(O,'slash',1,220,outCubic,180); T(O,'satVis',1,300,outCubic); restLabel();
+  },
+  paused(){
+    ER.to(3.0); S.baseTau=.14; setGen('rest'); TA.to(0,.1); RIMC.to(C.rimW,.15); RIMA.to(.05,.2);
+    S.pauseT0=NOW; S.arcLast=NOW;
+    if (O.arcA<.01) ARC.set(0); else ARC.to(0,'exhale'); // re-entered mid-exit: no snap
+    T(O,'pilotOn',1,600,outCubic,400); T(O,'arcA',.35,300,outCubic,300);
+    T(O,'satVis',1,300,outCubic); restLabel(); SUF.set({text:' · 60m',x:30,font:F9,color:C.dim,yo:0});
+  },
+  loading(){
+      S.loadText='loading models…';
+    ER.to(3.4); setGen('rest'); TA.to(0,.1); S.loadT0=NOW; S.nextSpark=NOW+200; S.sparks=[]; O.progress=0;
+    RIMC.to(C.rimW); RIMA.to(.086); T(O,'satVis',0,200,outQuad);
+    LB.set({text:S.loadText,x:34,font:F9,color:C.dim});
+  },
+  woke(prev,o){
+    const fl=flood(); S.lastWoke=NOW; T(O,'satVis',0,150,outQuad);
+    LB.set(null); SUF.set(null); RIMC.to(C.live,.1); RIMA.to(.22,.1); GC.to(C.live,.1); AMPK.to(1);
+    if (MOTION!=='full'){
+      ov('wake',C.hot,.03,4); W.to(300); H.to(40); HEAD.to(40); EX.to(20,'soft'); ER.to(5);
+      TX0.set(40); TX1.set(208); setGen('wave'); TC.to(C.user,.05); TA.to(1,.05); TW.to(1.75);
+      LB.set({text:'listening',x:216,font:F9,color:C.dim});
+      at(160,()=>ov('wake'));
+      at(420,()=>{ S.state='listening'; updateUI(); });
+      return;
+    }
+    ov('wake',C.white,.04,4); CORE.to(1,.05);
+    ER.to(3.2,'snap'); S.wokeGlow=true; GA.to(.22,.05); GR.to(30,.06);
+    if (!fl && HEAD.x<=30){ HEAD.to(26,'snap'); H.to(26,'snap'); }
+    at(80,()=>{ ER.to(6.5,'snap'); W.to(300,'snap'); HEAD.to(40,'snap'); H.to(40,'snap'); EX.to(20,'soft');
+      GA.to(.42,.06); GR.to(90,.06); });
+    if (!fl) at(120,()=>S.rings.push({kind:'ring',x:20,y:20,t0:NOW,d:320,r0:6,r1:40,w0:2,w1:.5,a0:.5,c:C.live}));
+    at(140,()=>ov('wake',C.hot,.09,4));
+    at(160,()=>{ ER.to(5.0,'soft'); S.wokeGlow=false; TW.to(1.75);
+      if (GEN==='wave' && TA.x>.3){ TC.to(C.live,.04); TX0.to(40); TX1.to(208); } // repeat wake over a live wave: no snap
+      else { TC.set(C.live); TX0.set(EX.x); TX1.set(EX.x); TX0.to(40,'inhale'); TX1.to(208,'inhale'); }
+      setGen('wave'); TA.to(1,.04); });
+    at(200,()=>LB.set({text:'listening',x:216,font:F9,color:C.dim,nib:true}));
+    at(220,()=>{ ov('wake'); TC.to(C.user,.045); });
+    if (!fl) at(260,()=>{ S.pluckT0=NOW; });
+    at(420,()=>{ S.state='listening'; updateUI(); });
+  },
+  listening(prev){
+    if (prev==='holding'){ if (MOTION==='full'){ W.to(304,'snap'); at(90,()=>resize(),'state'); } }
+    if (prev!=='followup' && prev!=='holding' && prev!=='woke'){ TX0.to(40); TX1.to(208); }
+    if (prev==='followup'){ TX0.to(40); TX1.to(208); }
+    setGen('wave'); TC.to(C.user,.07); TA.to(1,.06); TW.to(1.75); TAPER.to(.8,.07); AMPK.to(1,.15);
+    RIMC.to(C.live,.1); RIMA.to(.22,.1); GC.to(C.live,.2); T(O,'satVis',0,150,outQuad);
+    LB.set({text:'listening',x:216,font:F9,color:C.dim});
+  },
+  holding(){
+    TX0.to(40); TX1.to(208); setGen('wave'); TC.to(C.user,.07); TA.to(1,.06); TW.to(1.75); TAPER.to(.45,.07); AMPK.to(1,.15);
+    RIMC.to(C.live,.1); RIMA.to(.40,.1); T(O,'satVis',0,150,outQuad);
+    if (O.bracketA<.01){ O.bracketOff=0; O.bracketA=1; O.bracket=0; }
+    else { T(O,'bracketOff',0,140,outCubic); T(O,'bracketA',1,140,outCubic); } // re-grip mid-release: from current
+    T(O,'bracket',1,140,outBack(1.2));
+    if (MOTION==='full' && !flood()){ at(0,()=>{ W.to(294,'snap'); at(90,()=>resize('snap'),'state'); },'state'); }
+    LB.set({text:'holding',x:224,font:F9,color:C.live});
+  },
+  input(){
+    LB.set(null); S.typed=''; S.lastKey=NOW; O.trim=0; T(O,'trim',1,260,nib,40);
+    if (O.field<.01) O.fieldX=6; T(O,'field',1,180,outCubic,120); T(O,'fieldX',0,180,outCubic,120);
+    setGen('base'); TC.to(C.user,.07); TA.to(.25,.08); TW.to(1);
+    RIMC.to(C.live,.1); RIMA.to(.40,.1); GC.to(C.live,.2); T(O,'satVis',0,150,outQuad);
+    if (demo.on) autoType();
+  },
+  followup(prev){
+    S.fuT0=NOW; S.fuFrozen=null; S.fuEnded=false;
+    TX0.to(40); TX1.to(208); setGen('wave'); TC.to(C.user,.07); TA.to(1,.06); TW.to(1.75); TAPER.to(.8); AMPK.to(.7,.15);
+    if (O.wash<.01){ O.washReveal=0; O.wash=1; } else T(O,'wash',1,120,outCubic); // re-entry: from current
+    T(O,'washReveal',1,260,outCubic);
+    RIMC.to(C.live,.1); RIMA.to(.22,.1); T(O,'satVis',0,150,outQuad);
+    LB.set({text:'go on',x:216,font:F9,color:C.fg});
+  },
+  thinking(prev,o){
+    S.thinkText = elide(o.text || TRANSCRIPTS[ansIdx%TRANSCRIPTS.length], F10, MAXT);
+    TX0.to(34,'exhale'); TX1.to(70,'exhale'); setGen('cursive'); TC.to(C.live,.07); TA.to(1,.06); TW.to(1.75);
+    RIMC.to(C.rimW,.15); RIMA.to(.086,.15); GC.to(C.live,.2); CORE.to(.5);
+    S.penTheta=0; PATIENCE.x=PATIENCE.t=1; T(O,'satVis',0,150,outQuad);
+    LB.set({text:S.thinkText,x:80,font:F10,color:C.dim});
+  },
+  speaking(prev,o){
+    const sentence = o.text || ANSWERS[ansIdx++%ANSWERS.length];
+    layoutWords(sentence);
+    S.speech = buildSpeech(S.words.map(w=>w.w), NOW+120); S.speakT0=NOW; S.wordIdx=-1; S.speakEnd=false;
+    O.words=1; LB.set(null);
+    TX0.to(34); TX1.to(74); setGen('speak'); TC.to(C.live,.07); TA.to(1,.06); TW.to(2.0);
+    RIMC.to(C.live,.1); RIMA.to(.18,.12); GC.to(C.live,.2); CORE.to(1); T(O,'satVis',0,150,outQuad);
+  },
+  error(prev,o){
+    S.errText = elide(o.text || "couldn't reach the model · retrying", F10, 480); S.errW=tw(S.errText,F10);
+    ov('error',C.bad,.06,5); RIMC.to(C.bad,.06); RIMA.to(.25,.08); GC.to(C.bad,.06); T(O,'satVis',0,150,outQuad);
+    LB.set(null);
+    if (MOTION==='full'){
+      ER.to(3.2,'snap'); S.trem={t0:NOW,amp:2.5,tau:.11,f:5.5,dur:360};
+      kickG(.08); at(400,()=>ER.to(4.0,'soft'));
+    } else ER.to(4.0);
+    O.ul=0; O.ulStart=0; TX0.to(34); TX1.to(34); setGen('uline'); TC.to(C.bad,.06); TA.to(.6,.06); TW.to(1);
+    at(120,()=>LB.set({text:S.errText,x:34,font:F10,color:C.fg}));
+    at(MOTION==='full'?400:150,()=>T(O,'ul',1,MOTION==='full'?220:150,MOTION==='full'?nib:t=>t));
+    at(4000,()=>{ T(O,'ulStart',1,200,inCubic); ov('error'); S.baseTau=.6; GC.to(C.live,.2); RIMC.to(C.rimW,.2); });
+    at(4600,()=>go(S.resting));
+  },
+  mismatch(prev){
+    LB.set(null); SUF.set(null); S.lastWoke=NOW;
+    if (MOTION==='full'){ ov('wake',C.white,.04,4); ER.to(3.2,'snap'); if (HEAD.x<=30 && !flood()){ HEAD.to(26,'snap'); H.to(26,'snap'); } }
+    const reject = MOTION==='full'?140:0;
+    at(reject,()=>{
+      ov('wake'); ov('mm',C.cool,.12,5); ER.to(3.6); HEAD.to(28,'exhale'); H.to(28,'exhale'); resize('exhale');
+      if (MOTION==='full') S.shake={t0:NOW,amp:2,tau:.16,f:6,dur:420};
+      at(60,()=>restLabel());
+    });
+    at(reject+1800,()=>{ ov('mm'); go('ready'); });
+    setGen('rest'); TA.to(0,.1); RIMC.to(C.rimW); RIMA.to(.086);
+  }
+};
+
+function layoutWords(sentence){
+  const ws=sentence.split(' '), sp=tw(' ',F10), total=tw(sentence,F10);
+  S.lines = total>MAXT ? 2 : 1;
+  const limit = S.lines>1 ? Math.min(MAXT,total/2+20) : 1e9;
+  let x=0, line=0, maxW=0; S.words=[];
+  for (const w of ws){
+    const ww=tw(w,F10);
+    if (line===0 && x>0 && x+ww>limit){ line=1; x=0; }
+    if (line===1 && x+ww>MAXT){ const p=S.words[S.words.length-1]; if (p) p.w+='…'; break; } // too long: elide
+    S.words.push({w,x,line,t:null}); x+=ww+sp; maxW=Math.max(maxW,x-sp);
+  }
+  S.speakW = Math.min(560, Math.max(300, maxW+90)+CTRL); // measured once from the whole sentence
+}
+let autoTyping=null;
+function autoType(){
+  const txt='remind me to stretch at four'; let i=0;
+  clearInterval(autoTyping);
+  autoTyping=setInterval(()=>{
+    if (S.state!=='input'){ clearInterval(autoTyping); return; }
+    if (i<txt.length){ typeKey(txt[i++]); } else { clearInterval(autoTyping); setTimeout(()=>{ if (S.state==='input') submit(); },700); }
+  },70+Math.floor(rnd()*30));
+}
+function typeKey(ch){ S.typed+=ch; S.lastKey=performance.now(); if (MOTION==='full'){ kickR(.6); kickG(.04); } }
+function submit(){
+  if (S.state!=='input') return;
+  const txt=S.typed.trim(); if (!txt){ go('ready'); return; }
+  NOW=performance.now();
+  S.ghost=S.typed; S.typed=''; O.ghost=1; O.ghostX=0;
+  T(O,'ghost',0,220,inCubic); T(O,'ghostX',-10,220,inCubic);
+  at(200,()=>{ if (MOTION==='full'){ kickR(1.2); kickG(.22); } },'g');
+  at(220,()=>{ if (S.state==='input') go('thinking',{text:txt}); },'g');
+}
+
+/* ---------------- thread (48 samples, snapshot blending) ---------------- */
+const N=48;
+const DX=new Float32Array(N), DY=new Float32Array(N), DA=new Float32Array(N);
+const GX=new Float32Array(N), GY=new Float32Array(N), GAa=new Float32Array(N);
+const SX=new Float32Array(N), SY=new Float32Array(N), SA=new Float32Array(N);
+let GEN='rest', blendT0=-1e9;
+DX.fill(18); DY.fill(14);
+function genFill(){
+  const t=NOW/1000, cy=HEAD.x/2, L=AU.L, A=AU.A, calm=MOTION!=='full', ex=EX.x;
+  const x0=TX0.x, x1=TX1.x;
+  switch(GEN){
+    case 'rest': for (let i=0;i<N;i++){ GX[i]=ex; GY[i]=cy; GAa[i]=0; } break;
+    case 'wave': {
+      const pt=(NOW-S.pluckT0)/1000, pluck = pt>=0&&pt<.2 ? 4*Math.exp(-pt/.09)*Math.sin(2*Math.PI*7*pt) : 0;
+      const taut = S.state==='holding' && S.silentFor>.4;
+      for (let i=0;i<N;i++){
+        const u=i/(N-1);
+        if (calm){ GX[i]=x0+u*(x1-x0)*(.35+.65*L); GY[i]=cy; GAa[i]=.5+.5*L; continue; }
+        const x=x0+u*(x1-x0), w=Math.pow(Math.sin(Math.PI*u),TAPER.x);
+        const Ad=Math.min(11,.6+10.5*Lat(.36*(1-u)))*AMPK.x;
+        const trav=Math.sin(2*Math.PI*(x/22+1.1*t));
+        let y = taut ? (Ad-.6)*w*trav + .6*Math.sin(Math.PI*u*3)*Math.cos(2*Math.PI*.5*t) : Ad*w*trav;
+        y += pluck*w;
+        GX[i]=x; GY[i]=cy+y; GAa[i]=1;
+      }
+      break; }
+    case 'speak': {
+      S.phi = (S.phi||0);
+      for (let i=0;i<N;i++){
+        const u=i/(N-1);
+        if (calm){ GX[i]=x0+u*(x1-x0)*(.3+.7*A); GY[i]=cy; GAa[i]=.6+.4*A; continue; }
+        const w=Math.pow(Math.sin(Math.PI*u),1.2), amp=Math.min(8.5,.8+8*Math.pow(A,.7));
+        GX[i]=x0+u*(x1-x0);
+        GY[i]=cy+amp*w*(Math.sin(2*Math.PI*(2*u-S.phi))+.35*Math.sin(2*Math.PI*(4.6*u-1.6*S.phi)));
+        GAa[i]=1;
+      }
+      break; }
+    case 'cursive': {
+      if (calm){ for (let i=0;i<N;i++){ GX[i]=x0; GY[i]=cy; GAa[i]=0; } break; }
+      const r=1.9*(1+.08*Math.sin(2*Math.PI*.3*t)), d=4.5, span=6*Math.PI, win=3.2*Math.PI;
+      const cyc=span+win, th=S.penTheta%cyc;
+      const scale=(x1-x0)/(span*1.9);
+      for (let i=0;i<N;i++){
+        const q=i/(N-1), the=th-win*(1-q);
+        if (the<0||the>span){ const c=clamp(the,0,span); GX[i]=x0+(r*c-d*Math.sin(c))*scale; GY[i]=cy-d*Math.cos(c); GAa[i]=0; continue; }
+        GX[i]=x0+(r*the-d*Math.sin(the))*scale; GY[i]=cy-d*Math.cos(the); GAa[i]=Math.pow(q,.8);
+      }
+      break; }
+    case 'base': {
+      const bx0=44, bx1=bx0+(W.x-16-bx0)*O.trim, by=H.x-8, cx=(44+W.x-16)/2;
+      for (let i=0;i<N;i++){
+        const u=i/(N-1), x=bx0+u*(bx1-bx0); let y=by;
+        if (!calm && Math.abs(x-cx)<60){ const hn=.5+.5*Math.cos(Math.PI*(x-cx)/60); y+=Math.pow(L,.6)*3*hn*Math.sin(2*Math.PI*(x/14+1.4*t)); }
+        GX[i]=x; GY[i]=y; GAa[i]=1;
+      }
+      break; }
+    case 'uline': {
+      const ux0=34+S.errW*O.ulStart, ux1=34+S.errW*O.ul, uy=cy+9;
+      for (let i=0;i<N;i++){ const u=i/(N-1); GX[i]=ux0+u*(ux1-ux0); GY[i]=uy; GAa[i]=O.ul>.01?1:0; }
+      break; }
+  }
+}
+function thread(){
+  genFill();
+  let s=(NOW-blendT0)/220; s = (s>=1||MOTION==='off') ? 1 : outCubic(clamp(s));
+  for (let i=0;i<N;i++){ DX[i]=SX[i]+(GX[i]-SX[i])*s; DY[i]=SY[i]+(GY[i]-SY[i])*s; DA[i]=SA[i]+(GAa[i]-SA[i])*s; }
+}
+
+/* ---------------- per-frame state logic ---------------- */
+function breath(t,f){ const p=((t*f)%1+1)%1; if (p<.4) return outSine(p/.4); return 1-inOutSine((p-.4)/.6); }
+const R = { rAdd:0, rScale:1, alpha:1 };
+function logic(dt){
+  const st=S.state, t=NOW/1000, L=AU.L, A=AU.A, calm=MOTION!=='full';
+  let base=C.live, rAdd=0, rScale=1, ga=.1, gr=26, gtau=.12, core=.35, alpha=1;
+  S.silentFor = L<.05 ? S.silentFor+dt : 0;
+  switch(st){
+    case 'ready': case 'mismatch': {
+      const b = calm ? .5 : breath(Math.floor(t*8)/8 - S.breathT0, .10); // stepped at 8 fps, like the QML timer
+      base=mixc(C.banked,C.live,b); rScale=calm?1:.96+.10*b; ga=.05+.05*b; gr=18+8*b; core=.3; gtau=.15;
+      if (S.hover) ga+=.04;
+      break; }
+    case 'off': base=C.ash; ga=0; core=0; break;
+    case 'paused': {
+      const e=clamp((NOW-S.pauseT0)/S.pauseDur), rem=S.pauseDur*(1-e), warm=clamp(1-rem/2000);
+      base=mixc(C.ash,C.banked,warm); ga=0; core=0;
+      if (NOW-S.arcLast>1000 || e>=1){ S.arcLast=NOW; ARC.to(e,'soft'); }
+      if (warm>0) O.arcA = .35+.35*warm;
+      const mins = Math.max(5,Math.ceil(rem/S.pauseDur*12)*5);
+      const suf = warm>0 ? ' · resuming' : ` · ${mins}m`;
+      if (!SUF.L.find(l=>!l.out&&l.text===suf)) SUF.set({text:suf,x:30,font:F9,color:C.dim});
+      if (e>=1){ go('ready'); }
+      break; }
+    case 'loading': {
+      base=C.banked; ga=.07; gr=26; core=.3;
+      O.progress = clamp((NOW-S.loadT0)/4500);
+      if (!calm && NOW>=S.nextSpark && O.progress<.92){ S.nextSpark=NOW+466; S.sparks.push({t0:NOW,side:S.sparks.length%2?1:-1}); }
+      if (O.progress>=1) go('ready');
+      break; }
+    case 'woke':
+      base=C.live; core=1;
+      if (!S.wokeGlow){ ga=.10+.22*L; gr=26+34*L; gtau=.06; } else ga=null;
+      if (NOW-S.enteredAt>160) rAdd=2.5*L;
+      break;
+    case 'listening': case 'holding':
+      base=C.live; core=L>.35?1:.45; gtau=.06;
+      if (calm){ rAdd=.5+1*L-.5; ga=.08+.08*L; gr=26; }
+      else { rAdd=2.5*L; ga=.10+.22*L; gr=26+34*L; if (L<.04 && st==='listening') rAdd+=.4*Math.sin(2*Math.PI*.6*t); }
+      break;
+    case 'input':
+      base=C.live; rAdd=(calm?.6:1.5)*L; ga=.08+.10*L; gr=30; core=.45; gtau=.08;
+      break;
+    case 'followup': {
+      let rem;
+      if (L>.15 && !S.fuEnded){ go('listening'); break; }
+      rem = S.fuDur-(NOW-S.fuT0);
+      const u=clamp(rem/S.fuDur);
+      base = u<.4 ? mixc(C.banked,C.live,u/.4) : C.live;
+      rAdd = calm?.6*L:.7*2.5*L; ga=.06+.14*u+(calm?0:.1*L); gr=10+40*u; gtau=.1; core=.4;
+      if (rem<=0 && !S.fuEnded){ S.fuEnded=true; if (MOTION==='full') kickR(.6); at(160,()=>go('ready')); }
+      break; }
+    case 'thinking': {
+      const el=(NOW-S.enteredAt)/1000;
+      PATIENCE.to(el>30?.65:el>8?.8:1, .7);
+      base=C.live; ga=.10; gr=30; core=.5;
+      if (calm) alpha=.85+.15*Math.sin(2*Math.PI*.5*t);
+      else rAdd=.3*Math.sin(2*Math.PI*.4*t);
+      S.penTheta += dt*PATIENCE.x*(2*Math.PI/.38);
+      break; }
+    case 'speaking': {
+      base=C.live; core=1; gtau=.05;
+      S.phi = (S.phi||0) + dt*.9*(1+1.5*A);
+      if (calm){ rAdd=1*A; ga=.08+.08*A; gr=24; }
+      else { rAdd=3*A; ga=.08+.18*A; gr=24+30*A; if (A<.05) rAdd+=.25*Math.sin(2*Math.PI*.5*t); }
+      // word reveal, synced to the syllable timeline (manual: one word per 230 ms)
+      const manual = AU.ttsMode==='manual';
+      const next=S.wordIdx+1;
+      if (next<S.words.length){
+        const due = manual ? S.speakT0+120+next*230 : S.speech.starts[next];
+        if (NOW>=due){ S.wordIdx=next; S.words[next].t=NOW; }
+      }
+      const end = manual ? S.speakT0+120+S.words.length*230+500 : S.speech.end+400;
+      if (!S.speakEnd && NOW>end){ S.speakEnd=true; go('followup'); }
+      break; }
+    case 'error': {
+      base=C.bad; ga=.06; gr=28; core=.3;
+      if (!calm && NOW-S.enteredAt>400) rAdd=.3*Math.sin(2*Math.PI*.25*t);
+      if (NOW-S.enteredAt<400 && !calm) ga=.14-.08*clamp((NOW-S.enteredAt-60)/340);
+      break; }
+  }
+  const o=topOV();
+  EC.to(o?o.c:base, o?o.tau:S.baseTau);
+  if (ga!=null){ GA.to(ga,gtau); GR.to(gr,gtau); }
+  CORE.to(core,.1);
+  HOV.to(S.hover && (isRest(st)||st==='mismatch') ? 1 : 0);
+  HM.to(S.ctlHover==='mic'?1:0); HS.to(S.ctlHover==='stop'?1:0);
+  R.rAdd=rAdd; R.rScale=rScale; R.alpha=alpha;
+  // kicks
+  K.rt*=Math.exp(-dt/.22); K.r+=(K.rt-K.r)*(1-Math.exp(-dt/.02));
+  K.gt*=Math.exp(-dt/.30); K.g+=(K.gt-K.g)*(1-Math.exp(-dt/.03));
+  // hover list
+  const want = (S.hover||pinEl.checked) && TASKS.length>0 && isRest(st);
+  if (want!==S.listOpen){
+    S.listOpen=want; cancel('list');
+    if (want){ S.listGeom=true; resize(); TASKS.forEach((tk,i)=>{ tk.ra=0; tk.rdy=6; T(tk,'ra',1,200,outCubic,35*i); T(tk,'rdy',0,200,outCubic,35*i); }); }
+    else { TASKS.forEach(tk=>T(tk,'ra',0,120,inQuad)); at(120,()=>{ S.listGeom=false; resize(); },'list'); }
+  }
+}
+
+/* ---------------- drawing ---------------- */
+function rr(c,x,y,w,h,r){ r=Math.max(0,Math.min(r,h/2,w/2)); c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+function offsetOf(sh){ if (!sh) return 0; const tt=(NOW-sh.t0)/1000; if (tt*1000>sh.dur) return 0; return sh.amp*Math.exp(-tt/sh.tau)*Math.sin(2*Math.PI*sh.f*tt); }
+function draw(){
+  ctx.setTransform(DPR,0,0,DPR,0,0); ctx.clearRect(0,0,CW,CH);
+  ctx.save(); ctx.scale(SC,SC);
+  const w=W.x, h=Math.max(8,H.x), head=Math.min(HEAD.x,h), cy=head/2;
+  const X=(CW/SC-w)/2, Y=10/SC;
+  ctx.translate(X,Y);
+  const rad=Math.min(h/2, S.listGeom?18:20);
+  S.pill={x:X*SC,y:Y*SC,w:w*SC,h:h*SC};
+
+  rr(ctx,0,0,w,h,rad); ctx.fillStyle='rgba(8,8,8,.97)'; ctx.fill();
+  ctx.save(); rr(ctx,0,0,w,h,rad); ctx.clip();
+
+  const trem=offsetOf(S.trem); if (S.trem && NOW-S.trem.t0>S.trem.dur) S.trem=null;
+  const shake=offsetOf(S.shake); if (S.shake && NOW-S.shake.t0>S.shake.dur) S.shake=null;
+  const ex=EX.x+trem+shake, er=Math.max(.5, ER.x*R.rScale+R.rAdd+K.r);
+
+  // followup wash (drains into the ember)
+  if (O.wash>.01 && (S.state==='followup' || S.prev==='followup')){
+    let u=1;
+    if (S.state==='followup'){
+      const rem=S.fuDur-(NOW-S.fuT0); u=clamp(rem/S.fuDur);
+      if (rem<600 && MOTION!=='off'){ u = (600/S.fuDur)*(1-inCubic(clamp((600-rem)/600))); }
+      S.lastU=u;
+    } else u=S.lastU||0;
+    const full=20+(w-26)*u, wx=ex+(full-ex)*O.washReveal, a=(.10+.08*u)*O.wash;
+    const g=ctx.createLinearGradient(Math.max(0,wx-18),0,wx,0);
+    g.addColorStop(0,rgba(C.live,a)); g.addColorStop(1,rgba(C.live,0));
+    ctx.fillStyle=rgba(C.live,a); ctx.fillRect(0,0,Math.max(0,wx-18),h);
+    ctx.fillStyle=g; ctx.fillRect(Math.max(0,wx-18),0,Math.min(18,wx),h);
+  }
+  // loading progress wash
+  if (S.state==='loading'){ ctx.fillStyle=rgba(C.live,.07); ctx.fillRect(0,0,w*O.progress,h); }
+
+  // inner glow: gaussian on the ember, clipped to the pill
+  const gA=Math.min(.5,GA.x+K.g), gR=Math.max(4,GR.x);
+  if (gA>.004){
+    const g=ctx.createRadialGradient(ex,cy,0,ex,cy,gR*2), gc=GC.c;
+    for (let k=0;k<=8;k++){ const d=k/8*2; g.addColorStop(k/8, rgba(gc,gA*Math.exp(-d*d))); }
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  }
+  // rings (heat ring on woke, ripples on speech onsets)
+  S.rings=S.rings.filter(r=>{
+    const p=clamp((NOW-r.t0)/r.d); if (p>=1) return false;
+    const e=outCubic(p); ctx.beginPath(); ctx.arc(r.kind==='rip'?ex:r.x, r.kind==='rip'?cy:r.y, r.r0+(r.r1-r.r0)*e, 0, Math.PI*2);
+    ctx.strokeStyle=rgba(r.c, r.a0*(1-p)); ctx.lineWidth=r.w0+(r.w1-r.w0)*e; ctx.stroke(); return true;
+  });
+  // loading sparks (kindling)
+  S.sparks=S.sparks.filter(s=>{
+    const p=clamp((NOW-s.t0)/1400); if (p>=1){ kickR(.35); return false; }
+    const e=inQuad(p), sx=ex+26, sy=cy+6*s.side, cx=ex+14, ccy=cy+10*s.side;
+    const x=(1-e)*(1-e)*sx+2*(1-e)*e*cx+e*e*ex, y=(1-e)*(1-e)*sy+2*(1-e)*e*ccy+e*e*cy;
+    ctx.beginPath(); ctx.arc(x,y,1,0,Math.PI*2); ctx.fillStyle=rgba(C.live,.8*Math.sin(Math.PI*p)); ctx.fill(); return true;
+  });
+
+  // thread
+  drawThread(trem);
+
+  // brackets (holding)
+  if (O.bracketA>.01){
+    const bh=6*O.bracket; ctx.strokeStyle=rgba(C.live,O.bracketA); ctx.lineWidth=1.5; ctx.lineCap='round';
+    for (const sd of [-1,1]){
+      const x = sd<0 ? 34-O.bracketOff : 214+O.bracketOff, tick=3*sd*-1;
+      ctx.beginPath(); ctx.moveTo(x+tick,cy-bh); ctx.lineTo(x,cy-bh); ctx.lineTo(x,cy+bh); ctx.lineTo(x+tick,cy+bh); ctx.stroke();
+    }
+  }
+  // done check
+  if (O.check>.01){
+    const x0=ex+10, pts=[[x0,cy],[x0+3,cy+3],[x0+9.4,cy-3.4]], l1=Math.hypot(3,3), l2=Math.hypot(6.4,6.4), L=(l1+l2)*O.check;
+    ctx.strokeStyle=rgba(C.ok,MOTION==='calm'?O.check:1); ctx.lineWidth=O.checkW; ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
+    if (L<=l1){ const f=L/l1; ctx.lineTo(x0+3*f,cy+3*f); }
+    else { ctx.lineTo(pts[1][0],pts[1][1]); const f=(L-l1)/l2; ctx.lineTo(x0+3+6.4*f,cy+3-6.4*f); }
+    ctx.stroke();
+  }
+
+  // ember: disc + hot core
+  const ec=EC.c;
+  ctx.globalAlpha=R.alpha;
+  ctx.beginPath(); ctx.arc(ex,cy,er,0,Math.PI*2); ctx.fillStyle=rgba(ec,1); ctx.fill();
+  if (CORE.x>.02){
+    const okT = OV.done ? C.okCore : (OV.wake ? C.white : C.hot);
+    const g=ctx.createRadialGradient(ex,cy,0,ex,cy,er*.75); g.addColorStop(0,rgba(okT,CORE.x)); g.addColorStop(1,rgba(okT,0));
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(ex,cy,er,0,Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  // off slash (2 px over a 3 px underlay)
+  if (O.slash>.01){
+    const ax=ex-5, ay=cy+5, bx=ax+10*O.slash, by=ay-10*O.slash;
+    ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by);
+    ctx.strokeStyle='rgb(8,8,8)'; ctx.lineWidth=3.2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.strokeStyle=rgba(C.dim,1); ctx.lineWidth=2; ctx.stroke();
+  }
+  // paused: pilot light + resume arc
+  if (O.pilotOn>.01 || O.arcA>.01){
+    const e=clamp((NOW-S.pauseT0)/S.pauseDur), warm=clamp(1-S.pauseDur*(1-e)/2000);
+    const f = warm>0 ? .10 : .05, q = MOTION==='full' ? Math.floor(NOW/500)/2 : 0;
+    const b = MOTION==='full' ? breath(q,f) : .5;
+    ctx.beginPath(); ctx.arc(ex,cy,1.5,0,Math.PI*2); ctx.fillStyle=rgba(C.live,O.pilotOn*(.25+.25*b)+warm*.3*O.pilotOn); ctx.fill();
+    if (O.arcA>.01){
+      ctx.beginPath(); ctx.arc(ex,cy,7.5,0,Math.PI*2); ctx.strokeStyle=rgba(C.ash,.5*O.arcA/.35*.5); ctx.lineWidth=1; ctx.stroke();
+      const fill=clamp(ARC.x);
+      if (fill>.002){ ctx.beginPath(); ctx.arc(ex,cy,7.5,-Math.PI/2,-Math.PI/2+fill*Math.PI*2); ctx.strokeStyle=rgba(C.live,O.arcA); ctx.lineWidth=1.2; ctx.lineCap='round'; ctx.stroke(); }
+    }
+  }
+  // task satellites
+  if (O.satVis>.01){
+    const ang0=satAngle(), offish = S.state==='off'||S.state==='paused';
+    for (const tk of TASKS){
+      let x,y,sz=1.25,a=tk.a*O.satVis;
+      if (tk.status==='done' && !tk.fly) continue;
+      if (tk.fly){ const p=clamp((NOW-tk.fly.t0)/220), e=inCubic(p); x=tk.fly.x+(ex-tk.fly.x)*e; y=tk.fly.y+(cy-tk.fly.y)*e; sz=1.25-.5*e; }
+      else { const an=tk.phase+ang0; x=ex+Math.cos(an)*tk.orb; y=cy+Math.sin(an)*tk.orb; }
+      const g=ctx.createRadialGradient(x,y,0,x,y,sz*2);
+      const cc = offish ? C.ash : C.hot, oc2 = offish ? C.ash : C.live;
+      g.addColorStop(0,rgba(cc,a)); g.addColorStop(.5,rgba(oc2,a*.9)); g.addColorStop(1,rgba(oc2,0));
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,sz*2,0,Math.PI*2); ctx.fill();
+    }
+  }
+
+  // labels
+  const base9=cy+4.2, base10=cy+4.6;
+  ctx.textBaseline='alphabetic';
+  LB.draw(0, LB.L.length && LB.L[LB.L.length-1].font===F10 ? base10 : base9);
+  SUF.draw(SUFX.x, base9);
+  if (S.state==='followup' && LB.L.find(l=>l.text==='go on'&&!l.out)){
+    const l=LB.L.find(l=>l.text==='go on'&&!l.out), dx=216+tw('go on',F9)+2;
+    for (let i=0;i<3;i++){
+      const a = MOTION==='full' ? .3+.7*(.5+.5*Math.sin(2*Math.PI*(NOW/1200-i*.2/1.2))) : .7;
+      ctx.beginPath(); ctx.arc(dx+i*4.5,base9-1,1.1,0,Math.PI*2); ctx.fillStyle=rgba(C.fg,a*l.a); ctx.fill();
+    }
+  }
+  // speaking words: only the newest word is warm
+  if (S.words.length && O.words>.01 && (S.state==='speaking'||S.prev==='speaking')){
+    ctx.font=F10;
+    const two=S.lines>1;
+    for (const wd of S.words){
+      if (wd.t==null) continue;
+      const age=NOW-wd.t, cal=MOTION!=='full';
+      const a=clamp(age/160)*O.words, rise=cal?0:1.5*(1-clamp(age/160));
+      const col= cal ? C.fg : mixc(C.hot,C.fg,outSine(clamp(age/400)));
+      const by = two ? (wd.line?42:24) : base10;
+      ctx.fillStyle=rgba(col,a); ctx.fillText(wd.w,84+wd.x,by+rise);
+    }
+  }
+  // input field
+  if (O.field>.01){
+    ctx.font=F10; const fx=44+O.fieldX, by=HEAD.x/2+4.6-3;
+    if (!S.typed){ ctx.fillStyle=rgba(C.dim,O.field); ctx.fillText('type or talk…',fx,by); }
+    else { ctx.fillStyle=rgba(C.fg,O.field); ctx.fillText(S.typed,fx,by); }
+    if (S.state==='input'){
+      const since=(NOW-S.lastKey)/1000, ca = MOTION==='full' ? (.675+.325*Math.cos(2*Math.PI*since)) : 1;
+      const cxp=fx+(S.typed?tw(S.typed,F10):0)+1.5;
+      ctx.fillStyle=rgba(C.live,ca*O.field); ctx.fillRect(cxp,by-11,1.5,14);
+    }
+  }
+  // mic + stop buttons (thinking / speaking): 24 px circles, 14 px from the right end, 6 px apart
+  S.ctlCy = Math.min(h,60)/2;
+  if (O.ctl>.01){
+    const a=O.ctl, cyB=S.ctlCy, sc=MOTION==='full' ? .85+.15*a : 1; // calm: crossfade only
+    for (const [k,cx] of [['mic',w-56],['stop',w-26]]){
+      const hv = k==='mic'?HM.x:HS.x, pr = k==='mic'?O.pressM:O.pressS;
+      ctx.save(); ctx.translate(cx,cyB); ctx.scale(sc*(1-.1*pr),sc*(1-.1*pr));
+      ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fillStyle=rgba(C.rimW,(.08+.10*hv+.12*pr)*a); ctx.fill();
+      ctx.fillStyle=rgba(C.fg,a); ctx.strokeStyle=rgba(C.fg,a);
+      if (k==='mic'){ // capsule + cradle + stem
+        rr(ctx,-3,-7,6,10,3); ctx.fill();
+        ctx.lineWidth=1.6; ctx.lineCap='round';
+        ctx.beginPath(); ctx.ellipse(0,.5,6,4.5,0,Math.PI*20/180,Math.PI*160/180); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,5); ctx.lineTo(0,8); ctx.stroke();
+      } else { rr(ctx,-5,-5,10,10,2); ctx.fill(); } // stop: rounded square
+      ctx.restore();
+    }
+  }
+  if (O.ghost>.01 && S.ghost){
+    ctx.save(); ctx.font=F10; const by=HEAD.x/2+1.6;
+    ctx.translate(44+O.ghostX,by); const sc=.96+.04*O.ghost; ctx.scale(sc,sc);
+    ctx.fillStyle=rgba(C.fg,O.ghost); ctx.fillText(S.ghost,0,0); ctx.restore();
+  }
+  // hover task list
+  if (TASKS.some(tk=>tk.ra>.01)){
+    ctx.font=F9; const n=rowsN();
+    TASKS.slice(0,n).forEach((tk,i)=>{
+      if (tk.ra<.01) return;
+      const ry=head+6+i*30, ryc=ry+15+tk.rdy, a=tk.ra;
+      if (i>0){ ctx.fillStyle=rgba(C.rimW,.05*a); ctx.fillRect(14,ry,w-28,1); }
+      if (tk.status==='running'){
+        const b = MOTION==='full' ? breath(NOW/1000+i*.7,.5) : .5;
+        ctx.beginPath(); ctx.arc(18,ryc,2.5+.5*b,0,Math.PI*2); ctx.fillStyle=rgba(mixc(C.banked,C.live,b),a); ctx.fill();
+      } else {
+        ctx.strokeStyle=rgba(C.ok,a); ctx.lineWidth=1.5; ctx.lineCap='round'; ctx.beginPath();
+        ctx.moveTo(14.5,ryc); ctx.lineTo(17,ryc+2.5); ctx.lineTo(22,ryc-2.5); ctx.stroke();
+      }
+      ctx.fillStyle=rgba(C.fg,a); ctx.fillText(elide(tk.name,F9,200),34,ryc+4);
+      ctx.fillStyle=rgba(C.dim,a); ctx.fillText(tk.status==='running'?'running':'done',w-150,ryc+4);
+      const el=Math.floor(((tk.doneAt||NOW)-tk.t0)/1000), es=`${Math.floor(el/60)}:${String(el%60).padStart(2,'0')}`;
+      ctx.textAlign='right'; ctx.fillText(es,w-14,ryc+4); ctx.textAlign='left';
+    });
+  }
+  ctx.restore();
+  // rim hairline
+  rr(ctx,.5,.5,w-1,h-1,rad-.5); ctx.strokeStyle=rgba(RIMC.c,RIMA.x); ctx.lineWidth=1; ctx.stroke();
+  ctx.restore();
+}
+function drawThread(dx){
+  const ta=TA.x; if (ta<.01) return;
+  let mx=0, mn=1; for (let i=0;i<N;i++){ if (DA[i]>mx) mx=DA[i]; if (DA[i]<mn) mn=DA[i]; }
+  if (mx<.01) return;
+  const col=TC.c; ctx.lineWidth=TW.x+(GEN==='wave'&&MOTION==='full'?.5*AU.L:0); ctx.lineJoin='round';
+  if (mx-mn<.02){
+    ctx.lineCap='round'; ctx.strokeStyle=rgba(col,ta*mx); ctx.beginPath(); ctx.moveTo(DX[0]+dx,DY[0]);
+    for (let i=1;i<N;i++) ctx.lineTo(DX[i]+dx,DY[i]); ctx.stroke();
+  } else {
+    ctx.lineCap='butt';
+    for (let i=0;i<N-1;i++){
+      const a=Math.min(DA[i],DA[i+1])*ta; if (a<.01) continue;
+      ctx.strokeStyle=rgba(col,a); ctx.beginPath(); ctx.moveTo(DX[i]+dx,DY[i]); ctx.lineTo(DX[i+1]+dx,DY[i+1]); ctx.stroke();
+    }
+  }
+}
+
+/* ---------------- readout ---------------- */
+const DESC = {
+  ready:'Wake word armed. The ember breathes once every 10 s (stepped at 8 fps); nothing else moves.',
+  off:'Mic closed. Ember cooled to ash, a 2 px slash, no glow. Fully still: 0 fps.',
+  paused:'Pilot light plus a resume arc that fills like a dawn. Last minute pre-warms, then it rekindles by itself.',
+  loading:'Kindling: sparks drift into the ember and feed it; a warm wash shows progress.',
+  woke:'The catch: anticipation (squash, ember pulls in), release on a snap spring, heat ring, then Claude hands you the pen.',
+  listening:'Your white thread flows in toward the ember; loudness travels in from the far end. Hums when silent.',
+  holding:'Ctrl held: brackets grip the wave; in pauses it goes taut instead of humming.',
+  input:'Talk or type: the thread becomes the baseline and still carries the mic. Keys feed the ember; the caret breathes.',
+  followup:'"go on": a warm wash drains back into the ember. Speak and it relabels to listening.',
+  thinking:'Claude\'s terracotta pen writes cursive loops; the pace slows after 8 s and 30 s. Mic and stop buttons sit on the right.',
+  speaking:'Terracotta wave flows out toward the words; onsets throw small heat ripples; only the newest word is warm. Mic interrupts, stop (or Esc) hushes.',
+  error:'Flinch and settle: contents tremor (never the pill), red ember plus an underline under the message.',
+  mismatch:'A polite shrug: only the ember shakes its head; cool colour, no red.'
+};
+function tier(){
+  const st=S.state, unsettled = [W,H,HEAD,ER,EX].some(s=>!s.settled()) || TWEENS.length || S.rings.length;
+  if (MOTION!=='full' && isRest(st)) return unsettled ? 'FrameAnimation · until settled, then 0 fps' : 'nothing running · 0 fps';
+  if (isRest(st) && unsettled) return 'FrameAnimation · settling, then Timer';
+  switch(st){
+    case 'off': return running()?'Timer 100 ms · 10 fps (satellites)':'nothing running · 0 fps';
+    case 'ready': return running()?'Timer 100 ms · 10 fps':'Timer 125 ms · 8 fps';
+    case 'paused': return 'Timer 500 ms · 2 fps';
+    case 'mismatch': return 'FrameAnimation · ≤ 0.7 s burst';
+    case 'loading': return 'FrameAnimation · 30 fps gate';
+    case 'thinking': return (NOW-S.enteredAt>30000)?'FrameAnimation · 30 fps gate':'FrameAnimation · 60 fps';
+    case 'error': return NOW-S.enteredAt>900 ? 'hold · 4 fps breath' : 'FrameAnimation · 60 fps';
+    default: return 'FrameAnimation · 60 fps';
+  }
+}
+const rState=document.getElementById('rState'), rTier=document.getElementById('rTier'), rFps=document.getElementById('rFps'),
+  descEl=document.getElementById('desc'), chip=document.getElementById('chip');
+let lastShown='';
+function updateUI(){
+  const st=S.state;
+  document.querySelectorAll('[data-s]').forEach(b=>b.classList.toggle('on', b.dataset.s===st));
+  if (st!==lastShown){ lastShown=st; descEl.textContent=DESC[st]||''; }
+}
+
+/* ---------------- frame loop ---------------- */
+// Driver tiers, as in the QML plan: every vsync while anything moves; a slow timer tick for rest
+// states (ready 8 fps, tasks 10, paused 2, error hold 4); nothing at all in off / calm idle.
+const FT=[]; let uiAcc=0;
+function readout(fpsText){
+  rState.textContent=S.state+(flood()?'  (flood guard: flourishes skipped)':'');
+  chip.textContent=S.state; rTier.textContent=tier(); rFps.textContent=fpsText; updateUI();
+}
+function frame(ts){
+  rafId=0; inFrame=true;
+  try {
+    NOW=ts; const raw=Math.max(0,(ts-last)/1000); last=ts;
+    const dt=Math.min(raw, lastGap ? Math.min(.6,lastGap/1000+.05) : 1/30); // live: clamp 1/30 s; timer ticks: whole gap
+    FT.push(ts); while (FT.length && FT[0]<ts-1000) FT.shift();
+    runTimers();
+    audio(dt);
+    logic(dt);
+    const n=Math.max(1,Math.ceil(dt*240)), h=dt/n;
+    for (let k=0;k<n;k++) for (const s of SPRINGS) s.step(h);
+    for (const s of SPRINGS) s.tick();
+    for (const f of FOLS) f.step(dt);
+    runTweens(); LB.step(); SUF.step(); thread(); draw();
+    uiAcc+=raw; if (uiAcc>.25){ uiAcc=0; readout(FT.length+' fps'); }
+  } finally { inFrame=false; }
+  schedule();
+}
+function busy(){ // a transition or one-shot is alive: render every vsync
+  if (TWEENS.length || S.rings.length || S.sparks.length || S.trem || S.shake || S.pendT) return true;
+  if (NOW-blendT0<240 || TASKS.some(t=>t.fly)) return true;
+  if (Math.abs(K.r)>.01 || Math.abs(K.rt)>.01 || Math.abs(K.g)>.002 || Math.abs(K.gt)>.002) return true; // below a visible step
+  for (const s of SPRINGS) if (s!==ARC && !s.settled()) return true; // the pause arc creeps at the 2 fps tick
+  for (const lb of [LB,SUF]) for (const l of lb.L) if (l.out || l.a<.999 || Math.abs(l.dy)>.01 || (l.nib&&l.rev<1)) return true;
+  return false;
+}
+function still(){ // nothing to animate: let the followers land, then stop entirely
+  const fl = FOLS.every(f=>Math.abs(f.x-f.t) < (Math.abs(f.t)>2 ? .5 : .002));
+  return fl && AU.L<.003 && AU.A<.003 ? Infinity : 100;
+}
+function frameGap(){ // ms to the next frame: 0 = every vsync, Infinity = stopped
+  const st=S.state, el=NOW-S.enteredAt, full=MOTION==='full';
+  if (busy()) return 0;
+  switch(st){
+    case 'ready': return full ? (running()?100:125) : still();
+    case 'off': return full && running() ? 100 : still();
+    case 'paused': return full ? 500 : 1000;
+    case 'loading': return 33;
+    case 'thinking': return el>30000 ? 33 : 0;
+    case 'error': return el<900 ? 0 : full ? 250 : still();
+    case 'input': return NOW-S.lastKey>2000 && AU.L<.03 && !O.ghost ? 66 : 0;
+    default: return 0;
+  }
+}
+function schedule(){
+  if (rafId || toId) return;
+  let gap=frameGap();
+  if (gap===Infinity){ readout('0 fps · loop stopped'); FT.length=0; } // wake() restarts it
+  if (gap && TIMERS.length){ let nt=Infinity; for (const x of TIMERS) nt=Math.min(nt,x.t); gap=Math.min(gap,Math.max(0,nt-performance.now())); }
+  if (!gap){ lastGap=0; rafId=requestAnimationFrame(frame); return; }
+  if (gap===Infinity) return; // fully still, no timer pending
+  lastGap=gap; toId=setTimeout(()=>{ toId=0; rafId=requestAnimationFrame(frame); }, gap);
+}
+
+/* ---------------- controls ---------------- */
+const micSl=document.getElementById('micSl'), ttsSl=document.getElementById('ttsSl'),
+  micM=document.getElementById('micM'), ttsM=document.getElementById('ttsM'), pinEl=document.getElementById('pin');
+const demoBtn=document.getElementById('demoBtn'), chaosBtn=document.getElementById('chaosBtn'), badgeBtn=document.getElementById('badgeBtn');
+const demo={on:false,tok:0};
+function stopDemo(){ demo.on=false; demo.tok++; demoBtn.classList.remove('on'); demoBtn.textContent='▶ auto demo'; }
+function wait(ms,tok){ return new Promise((res,rej)=>setTimeout(()=>tok===demo.tok?res():rej('x'),ms)); }
+function until(fn,tok,max=30000){ return new Promise((res,rej)=>{ const t0=performance.now(); const f=()=>{ if (tok!==demo.tok) return rej('x'); if (fn()||performance.now()-t0>max) return res(); requestAnimationFrame(f); }; f(); }); }
+async function runDemo(){
+  const tok=++demo.tok; demo.on=true; demoBtn.classList.add('on'); demoBtn.textContent='■ stop demo';
+  try{
+    while (true){
+      go('ready'); await wait(2400,tok);
+      go('woke'); await wait(3400,tok);
+      go('thinking',{text:TRANSCRIPTS[ansIdx%TRANSCRIPTS.length]}); await wait(2300,tok);
+      go('speaking'); await until(()=>S.state==='followup',tok); await until(()=>S.state==='ready',tok);
+      await wait(1800,tok);
+      addTask(); await wait(2800,tok);
+      taskDone(); await wait(4400,tok);
+      go('off'); await wait(2800,tok);
+      go('paused'); await until(()=>S.state==='ready',tok,20000);
+      await wait(2200,tok);
+    }
+  }catch(e){}
+}
+demoBtn.addEventListener('click',()=>{ if (demo.on){ stopDemo(); } else runDemo(); });
+const CHAOS=['ready','woke','listening','holding','thinking','speaking','followup','input','off','error','mismatch','paused','loading'];
+let chaosT=0;
+chaosBtn.addEventListener('click',()=>{
+  stopDemo(); clearTimeout(chaosT); chaosBtn.classList.add('on'); const end=performance.now()+5000;
+  const step=()=>{
+    if (performance.now()>end){ chaosBtn.classList.remove('on'); go('ready'); return; }
+    const r=rnd();
+    if (r<.06) addTask(); else if (r<.10) taskDone(); else go(CHAOS[Math.floor(rnd()*CHAOS.length)]);
+    chaosT=setTimeout(step,50+rnd()*250);
+  };
+  step();
+});
+document.querySelectorAll('[data-s]').forEach(b=>b.addEventListener('click',()=>{ stopDemo(); clearTimeout(chaosT); chaosBtn.classList.remove('on'); go(b.dataset.s); }));
+document.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click',()=>{
+  stopDemo(); NOW=performance.now();
+  const a=b.dataset.a;
+  if (a==='addTask') addTask();
+  else if (a==='taskDone') taskDone();
+  else if (a==='badge') swapBadge();
+  else if (a==='barge') pressCtl('mic');
+  else if (a==='hush') pressCtl('stop');
+}));
+// mic = interrupt and talk (barge-in: woke from the current pose); stop = hush, exhale to ready
+function pressCtl(k){
+  stopDemo(); NOW=performance.now();
+  const key = k==='mic' ? 'pressM' : 'pressS';
+  if (S.state==='thinking'||S.state==='speaking'){ O[key]=1; T(O,key,0,220,outCubic); }
+  if (k==='mic') go('woke'); else go(S.resting==='off' ? 'off' : 'ready');
+}
+function ctlHit(e){
+  if (!(O.ctl>.5 && (S.state==='thinking'||S.state==='speaking')) || !S.pill) return null;
+  const b=cv.getBoundingClientRect(), x=e.clientX-b.left, y=e.clientY-b.top, p=S.pill, cy=p.y+S.ctlCy*SC, r=15*SC;
+  if (Math.hypot(x-(p.x+p.w-26*SC),y-cy)<=r) return 'stop';
+  if (Math.hypot(x-(p.x+p.w-56*SC),y-cy)<=r) return 'mic';
+  return null;
+}
+function swapBadge(){
+  const down = S.badge==='gpu (turbo)';
+  S.badge = down ? 'cpu (gpu busy)' : 'gpu (turbo)';
+  badgeBtn.textContent = down ? 'badge → gpu' : 'badge → cpu';
+  if (S.state==='ready'){
+    SUF.set({text:' · '+S.badge,x:30,font:F9,color:running()?C.fg:C.dim}); resize('soft');
+    if (MOTION==='full'){
+      if (down){ ov('badge',C.cool,.13,2); at(1000,()=>{ ov('badge'); OV_TAU_BACK(.27); },'g'); }
+      else { kickR(.6); kickG(.06); }
+    }
+  }
+}
+document.querySelectorAll('input[name=motion]').forEach(r=>r.addEventListener('change',()=>{ MOTION=r.value; resize(); }));
+document.querySelectorAll('input[name=mic]').forEach(r=>r.addEventListener('change',()=>{ AU.micMode=r.value; }));
+document.querySelectorAll('input[name=tts]').forEach(r=>r.addEventListener('change',()=>{ AU.ttsMode=r.value; }));
+micSl.addEventListener('input',()=>{ const m=document.querySelector('input[name=mic][value=manual]'); m.checked=true; AU.micMode='manual'; });
+ttsSl.addEventListener('input',()=>{ const m=document.querySelector('input[name=tts][value=manual]'); m.checked=true; AU.ttsMode='manual'; });
+document.querySelectorAll('input[name=wp]').forEach(r=>r.addEventListener('change',()=>{ document.getElementById('wp').className='wp wp-'+r.value; }));
+function inPill(e){ const b=cv.getBoundingClientRect(), p=S.pill; if (!p) return false; const x=e.clientX-b.left, y=e.clientY-b.top; return x>=p.x&&x<=p.x+p.w&&y>=p.y&&y<=p.y+p.h; }
+cv.addEventListener('pointermove',e=>{
+  const hv=inPill(e), ch=ctlHit(e);
+  if (hv!==S.hover || ch!==S.ctlHover){ S.hover=hv; S.ctlHover=ch; wake(); }
+  cv.style.cursor = ch || (hv && (S.state==='speaking' || (S.state==='ready' && !TASKS.length))) ? 'pointer' : '';
+});
+cv.addEventListener('pointerleave',()=>{ if (S.hover||S.ctlHover){ S.hover=false; S.ctlHover=null; wake(); } cv.style.cursor=''; });
+cv.addEventListener('click',e=>{
+  const ch=ctlHit(e);
+  if (ch){ pressCtl(ch); return; }
+  if (!inPill(e)) return;
+  if (S.state==='speaking'){ pressCtl('stop'); return; }          // a click anywhere on it hushes it, like the app
+  if (S.state==='ready' && !TASKS.length){ stopDemo(); go('woke'); }
+});
+pinEl.addEventListener('change',wake);
+window.addEventListener('keydown',e=>{
+  if (e.target && e.target.tagName==='INPUT' && e.target.type!=='radio' && e.target.type!=='checkbox') return;
+  if (S.state==='input'){
+    if (e.key==='Enter'){ e.preventDefault(); submit(); return; }
+    if (e.key==='Escape'){ e.preventDefault(); go('ready'); return; }
+    if (e.key==='Backspace'){ e.preventDefault(); S.typed=S.typed.slice(0,-1); S.lastKey=performance.now(); return; }
+    if (e.key.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey){ e.preventDefault(); stopDemo(); typeKey(e.key); return; }
+  }
+  if (e.key==='Escape' && (S.state==='speaking'||S.state==='thinking')){ e.preventDefault(); pressCtl('stop'); return; }
+  if (e.key==='Control' && S.state==='listening' && !e.repeat){ stopDemo(); go('holding'); }
+});
+window.addEventListener('keyup',e=>{ if (e.key==='Control' && S.state==='holding'){ go('listening'); } });
+
+if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches){
+  MOTION='calm'; document.querySelector('input[name=motion][value=calm]').checked=true;
+}
+// start
+NOW=performance.now();
+S.breathT0=NOW/1000-.7/.10;
+W.set(Math.max(120,readyW())); restLabel();
+for (const l of LB.L){ l.a=1; l.dy=0; l.t0=NOW-1000; } for (const l of SUF.L){ l.a=1; l.dy=0; l.t0=NOW-1000; }
+SUFX.set(tw('hey claude',F9));
+updateUI();
+wake();
+setTimeout(()=>{ if (!demo.on && S.state==='ready' && S.changes.length===0) runDemo(); }, 1500);
+})();
+</script>
+</body>
+</html>

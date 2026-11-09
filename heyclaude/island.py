@@ -15,8 +15,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QObject, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QEasingCurve, QObject, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMenu, QPlainTextEdit, QPushButton, QVBoxLayout,
                                QWidget)
 
@@ -34,6 +34,7 @@ class Bridge(QObject):
     tasks = Signal(list)            # list[dict]
     listening = Signal(bool, float)  # wake word on/off, paused-until epoch (0 = not paused)
     talk = Signal()                 # global hotkey pressed (from the hotkey thread)
+    hush = Signal()                 # stop key pressed while it talks (from the hotkey thread)
     stt = Signal(str)               # active speech-to-text device, e.g. "gpu (turbo)"
     heard = Signal(str)             # the hotkey session's spoken request was transcribed ("" = nothing)
     partial = Signal(str)           # live transcript while you talk ("" = none yet)
@@ -43,6 +44,8 @@ class Bridge(QObject):
 
 ROW_H = 30
 PILL_H = 40
+CTRL_W = 66        # mic + stop buttons on the right while it thinks or talks
+BTN_R = 12
 INPUT_W, INPUT_H, INPUT_LINE = 560, 46, 18
 
 
@@ -77,6 +80,7 @@ class _Entry(QPlainTextEdit):
 class Island(QWidget):
     activate = Signal()             # user clicked the pill to talk
     stop_speaking = Signal()
+    interrupt_talk = Signal()       # mic button while it talks: stop and listen to the user
     quit_requested = Signal()
 
     def __init__(self, bridge: Bridge, cfg: dict, task_manager=None, wake_label: str = "hey jarvis"):
@@ -132,6 +136,21 @@ class Island(QWidget):
         sel = self.cfg.get("screen", "primary")
         s = screens[int(sel)] if str(sel).isdigit() and int(sel) < len(screens) else QGuiApplication.primaryScreen()
         return s.geometry()
+
+    def _top_band(self) -> int:
+        """Height of a taskbar docked at the top of the island's screen (0 if none)."""
+        screens = QGuiApplication.screens()
+        sel = self.cfg.get("screen", "primary")
+        s = screens[int(sel)] if str(sel).isdigit() and int(sel) < len(screens) else QGuiApplication.primaryScreen()
+        return max(0, s.availableGeometry().y() - s.geometry().y())
+
+    def _top_offset(self, h: int) -> int:
+        """`island.top_margin`: a number of px, or "auto" (default): centred in a top taskbar, else 8 px."""
+        m = self.cfg.get("top_margin", "auto")
+        if str(m).strip().lstrip("-").isdigit():
+            return int(m)
+        band = self._top_band()
+        return max(0, (band - h) // 2) if band >= 20 else 8
 
     # -- hotkey input field ------------------------------------------------------
     def attach_input(self, open_mic, cancel_mic, submit, closed=None):
@@ -233,6 +252,8 @@ class Island(QWidget):
             w, h = 300, PILL_H
         elif self.mode in ("thinking", "speaking", "loading", "error"):
             w = min(560, max(300, fm.horizontalAdvance(self.text) + 80))
+            if self.mode in ("thinking", "speaking"):
+                w += CTRL_W                     # room for the mic and stop buttons
             h = PILL_H if fm.horizontalAdvance(self.text) < 480 else PILL_H + 20
         else:
             w, h = 200, PILL_H
@@ -252,7 +273,7 @@ class Island(QWidget):
     def _place(self, immediate=False):
         w, h = self._target_size()
         sr = self._screen_rect()
-        target = QRectF(sr.x() + (sr.width() - w) / 2, sr.y() + int(self.cfg.get("top_margin", 8)), w, h)
+        target = QRectF(sr.x() + (sr.width() - w) / 2, sr.y() + self._top_offset(h), w, h)
         if immediate:
             self._apply_geom(target)
             return
@@ -484,7 +505,8 @@ class Island(QWidget):
             c = QColor(ACCENT)
             c.setAlphaF(a)
             self._dot(p, 16 + i * 10, cy, 3.2, c)
-        self._text(p, QRectF(54, 0, head.width() - 66, head.height()), self.text, DIM)
+        self._text(p, QRectF(54, 0, head.width() - 66 - CTRL_W, head.height()), self.text, DIM)
+        self._paint_controls(p, head)
 
     def _paint_speaking(self, p, head, t):
         cy = head.center().y()
@@ -493,7 +515,42 @@ class Island(QWidget):
         for i in range(4):
             hh = 6 + 10 * abs(math.sin(t * 7 + i * 1.3))
             p.drawRoundedRect(QRectF(14 + i * 7, cy - hh / 2, 4, hh), 2, 2)
-        self._text(p, QRectF(54, 0, head.width() - 66, head.height()), self.text, FG)
+        self._text(p, QRectF(54, 0, head.width() - 66 - CTRL_W, head.height()), self.text, FG)
+        self._paint_controls(p, head)
+
+    def _ctrl_rects(self, head=None):
+        """(mic, stop) button circles at the right end of the head row."""
+        h = head.height() if head is not None else self._head_h()
+        cy = min(h, PILL_H) / 2
+        stop = QRectF(self.width() - 14 - 2 * BTN_R, cy - BTN_R, 2 * BTN_R, 2 * BTN_R)
+        mic = stop.translated(-(2 * BTN_R + 6), 0)
+        return mic, stop
+
+    def _paint_controls(self, p, head):
+        mic, stop = self._ctrl_rects(head)
+        hover = self.mapFromGlobal(QCursor.pos()) if self.hover else None
+        for r in (mic, stop):
+            on = hover is not None and r.contains(hover.toPointF())
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(255, 255, 255, 46 if on else 20))
+            p.drawEllipse(r)
+        # mic: capsule + cradle + stem
+        c = mic.center()
+        p.setBrush(FG)
+        p.drawRoundedRect(QRectF(c.x() - 3, c.y() - 7, 6, 10), 3, 3)
+        p.setPen(QPen(FG, 1.6))
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(QRectF(c.x() - 6, c.y() - 4, 12, 9), 200 * 16, 140 * 16)
+        p.drawLine(QPointF(c.x(), c.y() + 5), QPointF(c.x(), c.y() + 8))
+        # stop: rounded square
+        s = stop.center()
+        p.setPen(Qt.NoPen)
+        p.setBrush(FG)
+        p.drawRoundedRect(QRectF(s.x() - 5, s.y() - 5, 10, 10), 2, 2)
+
+    def mouseMoveEvent(self, e):
+        if self.mode in ("thinking", "speaking"):
+            self.update()                       # button hover highlight
 
     def _paint_loading(self, p, head, t):
         self._paint_thinking(p, head, t)
@@ -562,6 +619,14 @@ class Island(QWidget):
             if 0 <= i < len(rows):
                 self.open_log(rows[i])
             return
+        if self.mode in ("thinking", "speaking") and pos.y() <= PILL_H:
+            mic, stop = self._ctrl_rects()
+            if mic.adjusted(-3, -3, 3, 3).contains(pos):
+                self.interrupt_talk.emit()
+                return
+            if stop.adjusted(-3, -3, 3, 3).contains(pos):
+                self.stop_speaking.emit()
+                return
         if self.mode == "speaking":
             self.stop_speaking.emit()
         elif self.mode in ("idle", "off"):

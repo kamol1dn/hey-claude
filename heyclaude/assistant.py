@@ -172,6 +172,15 @@ class Assistant:
         self.manual.set()
         self._wakeup.set()
 
+    def hush(self):
+        """Stop talking and drop the answer in progress (stop button, Esc). Listening carries on."""
+        self.gen += 1                       # in-flight answers check gen and give up
+        self.speaker.stop()
+        self.followup.cancel()
+        if getattr(self, "mode", None) in ("speaking", "thinking"):
+            print("[hush] stopped by the user")
+            self.rest()
+
     def stop(self):
         self.stopping = True
         self._abort_rec.set()

@@ -1,0 +1,20 @@
+{
+ "note": "a real answer, recorded once from the pinned server (public places only)",
+ "server": "@dangahagan/weather-mcp@1.35.8",
+ "recorded": "2026-11-09 (London/Berlin/Almaty evening)",
+ "tool": "get_alerts",
+ "args": {
+  "latitude": 43.24,
+  "longitude": 76.95
+ },
+ "env": {
+  "WEATHER_UNITS": "metric",
+  "WEATHER_TIME_FORMAT": "24h"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# Weather Alerts\n\n**Location:** 43.2400, 76.9500\n\nWeather alerts are not yet available for Kazakhstan.\n\nCurrent alert coverage: the United States (NOAA National Weather Service), Canada (Environment and Climate Change Canada), the European MeteoAlarm member countries (matched at country level), and — via their national CAP feeds — the Philippines (PAGASA) and Indonesia (BMKG), matched by alert polygon, and India (NDMA SACHET), matched at country level; and Japan (JMA), matched to your point by warning area.\n"
+  }
+ ]
+}

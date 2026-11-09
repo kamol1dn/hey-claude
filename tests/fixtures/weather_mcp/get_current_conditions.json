@@ -1,0 +1,20 @@
+{
+ "note": "a real answer, recorded once from the pinned server (public places only)",
+ "server": "@dangahagan/weather-mcp@1.35.8",
+ "recorded": "2026-11-09 (London/Berlin/Almaty evening)",
+ "tool": "get_current_conditions",
+ "args": {
+  "latitude": 51.5074,
+  "longitude": -0.1278
+ },
+ "env": {
+  "WEATHER_UNITS": "metric",
+  "WEATHER_TIME_FORMAT": "24h"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# Current Weather Conditions\n\n**Time:** Nov 9, 2026, 19:30\n\n**Conditions:** Overcast\n**Temperature:** 8°C\n**Feels Like:** 5°C\n**Today's Range:** High 10°C / Low 6°C\n**Dewpoint:** 6°C\n**Humidity:** 87%\n**Wind:** 12 km/h from 52°, gusting to 25 km/h\n**Pressure:** 1015 hPa\n**Cloud Cover:** 100%\n\n---\n*Data source: Open-Meteo (Global) — model-interpolated values, not station observations*\n"
+  }
+ ]
+}

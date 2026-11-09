@@ -5,7 +5,11 @@
      "icon": "partly", "feels": 20, "high": 24, "low": 13, "wind": 11,
      "hourly": [{"time": "15:00", "temp": 22, "icon": "sun"}, ... 6],
      "days": [{"day": "Tue", "low": 13, "high": 24, "icon": "partly"}, ... 3],
-     "source": "Open-Meteo"}
+     "sun": {"rise": "07:08", "set": "16:52"}, "source": "Open-Meteo"}
+
+`detail=True` (the local weather route's fallback, heyclaude/weather_mcp) adds
+"_hours" (the next 24 h with rain chances), "_days" (with sunrise, sunset, UV
+and rain chance) and the place's "_date"/"_time"; the card never sees them.
 
 Places are looked up with Open-Meteo's geocoding API. Answers are cached for
 10 minutes per place, so asking again doesn't hit the network. The tool agent
@@ -83,33 +87,40 @@ def geocode(place: str, fetch=_get) -> dict:
 
 
 def forecast(place: str = "", *, lat: float | None = None, lon: float | None = None, unit: str = "C",
-             now: float | None = None, fetch=_get) -> dict:
-    """Current conditions, the next 6 hours and 3 days, as the weather widget's data."""
+             now: float | None = None, fetch=_get, days: int = 3, detail: bool = False) -> dict:
+    """Current conditions, the next 6 hours and 3 days, as the weather widget's data
+    (`days` up to 16 are fetched for `detail`; the card shows 3)."""
     unit = "F" if str(unit).upper().startswith("F") else "C"
     if lat is None or lon is None:
         g = geocode(place, fetch)
         lat, lon, label = g["lat"], g["lon"], g["label"]
     else:
         label = place or f"{lat:.2f}, {lon:.2f}"
-    key = (round(float(lat), 3), round(float(lon), 3), unit)
+    days = max(3, min(16, int(days)))
+    key = (round(float(lat), 3), round(float(lon), 3), unit, days)
     t = now if now is not None else time.time()
     hit = _cache.get(key)
     if hit and t - hit[0] < TTL_S:
-        return dict(hit[1], location=label, cached=True)
-    p = {"latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 3,
+        return _detail(dict(hit[1], location=label, cached=True), detail)
+    p = {"latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": days,
          "current": "temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m",
-         "hourly": "temperature_2m,weather_code,is_day",
-         "daily": "weather_code,temperature_2m_max,temperature_2m_min"}
+         "hourly": "temperature_2m,weather_code,is_day,precipitation_probability",
+         "daily": "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,"
+                  "precipitation_probability_max"}
     if unit == "F":
         p["temperature_unit"] = "fahrenheit"
         p["wind_speed_unit"] = "mph"
     r = fetch(FORECAST_URL, p)
-    out = to_widget(r, label, unit)
+    out = to_widget(r, label, unit, detail=True)
     _cache[key] = (t, out)
-    return out
+    return _detail(out, detail)
 
 
-def to_widget(r: dict, label: str, unit: str = "C") -> dict:
+def _detail(d: dict, keep: bool) -> dict:
+    return d if keep else {k: v for k, v in d.items() if not k.startswith("_")}
+
+
+def to_widget(r: dict, label: str, unit: str = "C", detail: bool = False) -> dict:
     cur = r.get("current") or {}
     is_day = bool(cur.get("is_day", 1))
     cond, icon = describe(cur.get("weather_code"), is_day)
@@ -146,4 +157,33 @@ def to_widget(r: dict, label: str, unit: str = "C") -> dict:
                      "high": round(float(daily["temperature_2m_max"][i])), "icon": ic})
     if days:
         out["days"] = days[:3]
+    sr, ss = daily.get("sunrise") or [], daily.get("sunset") or []
+    if sr and ss and sr[0] and ss[0]:
+        out["sun"] = {"rise": str(sr[0])[11:16], "set": str(ss[0])[11:16]}
+    if detail:
+        out.update(_extra(r, cur, hourly, daily, start))
     return out
+
+
+def _extra(r: dict, cur: dict, hourly: dict, daily: dict, start: int) -> dict:
+    """The fuller picture for the local weather route's spoken summary (not card data)."""
+    def col(d, k, i, default=None):
+        v = d.get(k) or []
+        return v[i] if i < len(v) else default
+    times = hourly.get("time") or []
+    hrs = []
+    for i in range(start, min(start + 24, len(times))):
+        cond, ic = describe(col(hourly, "weather_code", i), bool(col(hourly, "is_day", i, 1)))
+        h = {"date": times[i][:10], "time": times[i][11:16], "temp": col(hourly, "temperature_2m", i),
+             "condition": cond, "icon": ic, "pop": col(hourly, "precipitation_probability", i)}
+        hrs.append({k: v for k, v in h.items() if v is not None})
+    ds = []
+    for i, d in enumerate(daily.get("time") or []):
+        cond, ic = describe(col(daily, "weather_code", i), True)
+        x = {"date": d, "high": col(daily, "temperature_2m_max", i), "low": col(daily, "temperature_2m_min", i),
+             "condition": cond, "icon": ic, "pop": col(daily, "precipitation_probability_max", i),
+             "uv": col(daily, "uv_index_max", i),
+             "sunrise": str(col(daily, "sunrise", i) or "")[11:16], "sunset": str(col(daily, "sunset", i) or "")[11:16]}
+        ds.append({k: v for k, v in x.items() if v not in (None, "")})
+    now_s = str(cur.get("time") or "")
+    return {"_hours": hrs, "_days": ds, "_date": now_s[:10], "_time": now_s[11:16]}

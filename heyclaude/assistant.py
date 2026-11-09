@@ -918,6 +918,10 @@ class Assistant:
                         self._late_filler(filler, late, gen)
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
+                elif kind == "weather":
+                    # M5b: a plain weather question, answered locally: the card, then the summary
+                    tier = "weather"
+                    self._weather(ev[1], gen, timing)
                 elif kind == "undo":
                     tier = "local"
                     self._say(self.undo())
@@ -995,6 +999,32 @@ class Assistant:
         self._speaking_text = text
         self._reply.append(text + " ")
         self.speaker.feed(text + " ")
+
+    def _weather(self, wq, gen, timing):
+        """M5b, the local weather route: weather-mcp's data (or the built-in Open-Meteo
+        tool's) -> the card at once, and a summary built from the same data spoken right
+        behind it. No model hop, so nothing is made up."""
+        tool = {"id": f"wx{gen}", "name": "mcp__weather-mcp__get_weather_summary", "phase": "start",
+                "input": {"city_name": "" if wq.home else wq.place}}
+        fired = []
+        shown = threading.Timer(0.25, lambda: (fired.append(1), self._ui_emit("tool", tool)))  # the glyph, if slow
+        shown.daemon = True
+        shown.start()
+        try:
+            spec, speech = self.brain.wx.answer(wq)
+        finally:
+            shown.cancel()
+            shown.join(0.5)
+            if fired:
+                self._ui_emit("tool", {"id": tool["id"], "phase": "end"})
+        if gen != self.gen:
+            return
+        if spec is not None:
+            timing["card"] = time.perf_counter()
+            self._tool_widget = (gen, spec["widget"])          # a later model card doesn't replace it
+            self._ui_emit("widget", spec)
+        timing.setdefault("answer", time.perf_counter())
+        self._say(speech)
 
     def _stream(self, chunks, gen, timing):
         """Speak a streamed answer (tool agent, task question)."""
@@ -1134,6 +1164,7 @@ class Assistant:
             wake_to_first_audio=d("wake", "first_audio"),
             speech_end_to_first_audio=d("speech_end", "first_audio"),
             speech_end_to_lookup_answer=d("speech_end", "answer"),
+            speech_end_to_card=d("speech_end", "card"),
             vad_tail=d("speech_end", "vad_done"), stt=d("vad_done", "stt_done"),
             first_token=round(tm["first_token"], 3) if tm.get("first_token") else None,
             tts_start=round(tm["first_audio"] - tm["llm_start"] - (tm.get("first_token") or 0), 3)

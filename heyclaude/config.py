@@ -39,6 +39,7 @@ LIVE = (
     "conversation.",                 # read per request (save: the agent's next lookup)
     "island.",
     "app.",                          # hotkey re-registered, autostart toggled, guard re-read
+    "weather.local_route", "weather.mcp.timeout_s", "weather.mcp.fallback", "weather.mcp.cache_s",  # per question
 )
 
 

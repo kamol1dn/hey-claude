@@ -837,7 +837,10 @@ function logic(dt) {
     K.rt *= Math.exp(-dt / 0.22); K.r += (K.rt - K.r) * (1 - Math.exp(-dt / 0.02));
     K.gt *= Math.exp(-dt / 0.30); K.g += (K.gt - K.g) * (1 - Math.exp(-dt / 0.03));
     // hover list (and auto-pop on a status change)
-    var want = (S.hover || env.pinList || NOW < (S.listUntil || 0)) && (TASKS.length > 0 || S.usageRow) && (isRest(st)) && !S.extraH;
+    // the hover list needs a hover that began after the panel collapsed (a pointer that was
+    // resting over the answer would otherwise pop it open the moment the panel is gone)
+    var hovered = S.hover && (S.hoverSince || 0) > (S.collapsedAt || -1);
+    var want = (hovered || env.pinList || NOW < (S.listUntil || 0)) && (TASKS.length > 0 || S.usageRow) && (isRest(st)) && !S.extraH;
     if (want !== S.listOpen) {
         S.listOpen = want; cancel('list');
         if (want) { S.listGeom = true; resize(); TASKS.forEach(function (tk, i) { tk.ra = 0; tk.rdy = 6; T(tk, 'ra', 1, 200, outCubic, 35 * i); T(tk, 'rdy', 0, 200, outCubic, 35 * i); }); S.usageA = 0; T(S, 'usageA', 1, 200, outCubic, 35 * TASKS.length); }
@@ -1211,6 +1214,7 @@ function setExtra(h, w, animating) {
     h = Math.max(0, Math.round(h)); w = Math.max(0, Math.round(w || 0));
     S.extraAnimating = !!animating;
     if (h === S.extraH && w === S.extraW) { if (animating) wake(); return; }
+    if (h === 0 && S.extraH > 0) S.collapsedAt = NOW;      // a pointer left over the panel isn't a hover on the pill
     S.extraH = h; S.extraW = w; resize(); wake();
 }
 function setPaused(untilMs) {
@@ -1219,7 +1223,7 @@ function setPaused(untilMs) {
 }
 function setHideIdle(on) { S.hideIdle = !!on; wake(); }
 function setPeek(on) { S.peek = !!on; wake(); }
-function setHover(on) { NOW = env.now(); if (S.hover === !!on) return; S.hover = !!on; S.lastActivity = NOW; wake(); }
+function setHover(on) { NOW = env.now(); if (S.hover === !!on) return; S.hover = !!on; if (on) S.hoverSince = NOW; S.lastActivity = NOW; wake(); }
 function setCtlHover(k) { if (S.ctlHover === k) return; S.ctlHover = k; wake(); }
 function setDrop(on) { NOW = env.now(); S.drop = !!on; T(O, 'drop', on ? 1 : 0, 160, outCubic); if (on) kickG(0.08); wake(); }
 function setUsageRow(on) { NOW = env.now(); on = !!on; if (on === !!S.usageRow) return; S.usageRow = on; if (S.listGeom) resize(); wake(); }

@@ -1,0 +1,12 @@
+name: volume_undo
+desc: a Windows setting (volume 30), then "undo that"; the volume is restored afterwards anyway
+steps:
+  - check_volume: {}
+  - ask: "Set the volume to thirty."
+  - until: {what: answer, timeout: 90}
+  - until: {what: idle, timeout: 30}
+  - wait: 1.0
+  - ask: "Undo that."
+  - until: {what: answer, timeout: 60}
+  - check_volume: {}
+expect: {effect: volume, answer: true}

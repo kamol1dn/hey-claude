@@ -46,8 +46,11 @@ def _elapsed(t) -> str:
 
 class Assistant:
     def __init__(self, cfg: dict, bridge, stt_device: str | None = None, simulate: str | None = None,
-                 text_mode=False, exit_when_done=False):
+                 text_mode=False, exit_when_done=False, mic_factory=None):
         self.cfg, self.ui = cfg, bridge
+        # A stand-in for the microphone (tools/ux_stress.py: WavSource.live over a SimRoom);
+        # everything else runs exactly as with the real mic.
+        self.mic_factory = mic_factory
         self.stt_override = normalize_device(stt_device) if stt_device else None   # --gpu / --cpu
         self.simulate, self.text_mode = simulate, text_mode
         self.exit_when_done = exit_when_done
@@ -596,7 +599,7 @@ class Assistant:
                 continue
             one_shot = not self.listening.is_set()      # "talk now" while off: one request, then close
             self._abort_rec.clear()
-            src = MicSource(self.cfg["listen"]["device"])
+            src = (self.mic_factory or MicSource)(self.cfg["listen"]["device"])
             src.start()
             self.mic_open = True
             print("[mic] open" + (" for one request" if one_shot else ""))

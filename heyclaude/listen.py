@@ -6,6 +6,7 @@ frames inside each block.
 """
 from __future__ import annotations
 
+import collections
 import os
 import queue
 import re
@@ -110,12 +111,21 @@ class WavSource:
         pass
 
     def close(self):
-        pass
+        if self._closed is not None:
+            self._closed.set()
 
     def drain(self):
         pass
 
+    room: "SimRoom | None" = None
+    _closed: "threading.Event | None" = None
+
     def __iter__(self):
+        if self.room is not None:
+            return self._live_iter()
+        return self._files_iter()
+
+    def _files_iter(self):
         t0 = time.perf_counter()
         n = 0                                    # blocks yielded, for real-time pacing
         silence = np.zeros(BLOCK, np.int16)
@@ -146,6 +156,134 @@ class WavSource:
             self.played = k + 1
         while True:   # after the files: endless silence, so tasks can finish
             yield tick(silence)
+
+    # -- live mode: a simulated room (tools/ux_stress.py) -------------------------------
+    @classmethod
+    def live(cls, room: "SimRoom") -> "WavSource":
+        """A microphone stand-in that listens to `room` in real time: whatever is
+        said there (room.say), its background noise and the echo of the
+        assistant's own voice. Like a MicSource it can be closed and a new one
+        opened later; what was said while it was closed is not heard."""
+        src = cls.__new__(cls)
+        src.clips, src.names, src.ready = [], [], (lambda: True)
+        src.lead, src.tail, src.gap = 0.0, 0.0, 0.0
+        src.audio_end_t, src.played, src.audio = None, 0, np.zeros(0, np.int16)
+        src.room, src._closed = room, threading.Event()
+        return src
+
+    def _live_iter(self):
+        room = self.room
+        n = room.block_index()                   # start "now", like opening a real mic
+        while not self._closed.is_set():
+            delay = room.block_time(n + 1) - time.perf_counter()
+            if delay > 0:
+                time.sleep(delay)
+            elif delay < -0.5:                   # consumer stalled (a GIL hog): drop, like a full mic queue
+                n = room.block_index()
+                continue
+            yield room.block(n)
+            n += 1
+
+
+
+class SimRoom:
+    """The world a simulated microphone hears (tools/ux_stress.py, --simulate's
+    live mode): a shared clock, scheduled speech, background noise, and the echo
+    of the assistant's own voice coming back from the speakers.
+
+    Everything is in 80 ms blocks on one timeline (block n starts at
+    t0 + n * 0.08 s), so a mic that is closed and opened again joins the room
+    "now". `say()` and `echo_push()` are thread-safe.
+    """
+
+    def __init__(self, noise_dbfs: float | None = -62.0, echo_gain: float = 0.0, echo_delay_s: float = 0.06,
+                 seed: int = 1, clock=time.perf_counter):
+        self.clock = clock
+        self.t0 = clock()
+        self.noise_dbfs = noise_dbfs
+        self.echo_gain, self.echo_delay = float(echo_gain), float(echo_delay_s)
+        self._rng = np.random.default_rng(seed)
+        self._lock = threading.Lock()
+        self._speech: list[list] = []            # [start_sample, int16 pcm, label]
+        self._echo: collections.deque = collections.deque()   # (start_sample, float32) of the speaker's output
+        self._echo_pos = 0                       # next free sample on the echo timeline
+        self.log: list[dict] = []                # what was said: {"label", "t0", "t1"} (perf_counter)
+        self.extra_noise: tuple[float, float, float] | None = None   # (dbfs, t_from, t_to): a noisy stretch
+
+    # -- the timeline ----------------------------------------------------------------
+    def block_index(self) -> int:
+        return int((self.clock() - self.t0) * RATE / BLOCK)
+
+    def block_time(self, n: int) -> float:
+        return self.t0 + n * BLOCK / RATE
+
+    def sample_now(self) -> int:
+        return int((self.clock() - self.t0) * RATE)
+
+    # -- inputs ----------------------------------------------------------------------
+    def say(self, pcm: np.ndarray, label: str = "", lead_s: float = 0.0) -> tuple[float, float]:
+        """Schedule speech to start `lead_s` from now (never on top of earlier
+        scheduled speech by the same call). Returns (t_start, t_end) in clock()
+        time."""
+        pcm = np.asarray(pcm, np.int16)
+        with self._lock:
+            start = (self.block_index() + 1) * BLOCK + int(lead_s * RATE)
+            self._speech.append([start, pcm, label])
+        t_start = self.t0 + start / RATE
+        t_end = t_start + len(pcm) / RATE
+        self.log.append({"label": label, "t0": t_start, "t1": t_end})
+        return t_start, t_end
+
+    def busy_until(self) -> float:
+        """clock() time when the last scheduled speech ends."""
+        with self._lock:
+            ends = [s[0] + len(s[1]) for s in self._speech]
+        return self.t0 + max(ends) / RATE if ends else self.clock()
+
+    def echo_push(self, samples: np.ndarray):
+        """What the speakers play (16 kHz int16, as aec.FarEnd gets it), as it plays."""
+        if self.echo_gain <= 0:
+            return
+        s = np.asarray(samples, np.int16).astype(np.float32) * self.echo_gain
+        with self._lock:
+            now = self.sample_now() + int(self.echo_delay * RATE)
+            start = max(now, self._echo_pos)
+            self._echo.append((start, s))
+            self._echo_pos = start + len(s)
+
+    # -- output ------------------------------------------------------------------------
+    def block(self, n: int) -> np.ndarray:
+        a, b = n * BLOCK, (n + 1) * BLOCK
+        out = np.zeros(BLOCK, np.float32)
+        t = self.t0 + a / RATE
+        db = self.noise_dbfs
+        if self.extra_noise and self.extra_noise[1] <= t < self.extra_noise[2]:
+            db = self.extra_noise[0] if db is None else max(db, self.extra_noise[0])
+        if db is not None:
+            amp = 32768.0 * 10 ** (db / 20)
+            white = self._rng.standard_normal(BLOCK + 16).astype(np.float32)
+            out += amp * np.convolve(white, np.ones(16, np.float32) / 4.0, "valid")[:BLOCK]   # soft, room-like
+        with self._lock:
+            keep = []
+            for s in self._speech:
+                start, pcm = s[0], s[1]
+                end = start + len(pcm)
+                if end <= a:
+                    continue                     # over (or the mic missed it)
+                keep.append(s)
+                lo, hi = max(a, start), min(b, end)
+                if lo < hi:
+                    out[lo - a:hi - a] += pcm[lo - start:hi - start]
+            self._speech = keep
+            while self._echo and self._echo[0][0] + len(self._echo[0][1]) <= a:
+                self._echo.popleft()
+            for start, s in self._echo:
+                if start >= b:
+                    break
+                lo, hi = max(a, start), min(b, start + len(s))
+                if lo < hi:
+                    out[lo - a:hi - a] += s[lo - start:hi - start]
+        return np.clip(out, -32768, 32767).astype(np.int16)
 
 
 STOCK_FALLBACK = "hey_jarvis"     # used when the configured model is missing or broken

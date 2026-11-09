@@ -1157,3 +1157,18 @@ function snapshotForTest() {
     return { state: S.state, w: W.x, h: H.x, wt: W.t, ht: H.t, head: HEAD.x, labels: LB.L.map(function (l) { return { text: l.text, a: l.a, out: l.out }; }),
         tweens: TWEENS.length, timers: TIMERS.length, rings: S.rings.length, gen: GEN };
 }
+// What the UX recorder (heyclaude/ux_probe.py) samples ~30 times a second: cheap, no arrays copied
+// except the label texts. `said` = the words of the answer revealed so far in the head.
+function probeForUx() {
+    var lb = '', i;
+    for (i = LB.L.length - 1; i >= 0; i--) if (!LB.L[i].out) { lb = LB.L[i].text; break; }
+    var said = '';
+    if (S.state === 'speaking' && S.words) {
+        var parts = [];
+        for (i = 0; i <= S.wordIdx && i < S.words.length; i++) parts.push(S.words[i].w);
+        said = parts.join(' ');
+    }
+    return { state: S.state, w: W.x, h: H.x, wt: W.t, ht: H.t, head: HEAD.t, label: lb, tool: S.toolLabel || '',
+             said: said, words: S.words ? S.words.length : 0, wordIdx: S.wordIdx, speakText: S.state === 'speaking' ? S.speakText : '',
+             extraH: S.extraH || 0, hide: HIDE.x, partial: S.partial || '' };
+}

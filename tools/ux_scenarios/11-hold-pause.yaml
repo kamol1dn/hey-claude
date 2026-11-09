@@ -1,0 +1,10 @@
+name: hold_pause
+desc: a long pause in the middle of a question, held with Ctrl
+steps:
+  - wake: {}
+  - hold: down
+  - say: {parts: ["Remind me, what is", {pause: 3.5}, "the tallest mountain in Europe?"], voice: bf_emma}
+  - wait: 0.4
+  - hold: up
+  - until: {what: answer, timeout: 40}
+expect: {answer: true}

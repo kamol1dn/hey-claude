@@ -71,7 +71,19 @@ Item {
         rest.stop()
         frames.start()
     }
+    // Frame pacing for the UX recorder: while the engine wants every frame (live tier),
+    // ticks further apart than ~2 frames are hitches. Bounded; drained by takeHitches().
+    property real lastTickMs: 0
+    property var hitches: []
+    property int liveTicks: 0
     function tick() {
+        var tnow = Date.now()
+        if (root.lastGap >= 0 && root.lastGap <= 40 && root.lastTickMs > 0) {   // live tier (60 fps, or 30 on battery/software)
+            root.liveTicks++
+            var dms = tnow - root.lastTickMs
+            if (dms > 2 * Math.max(16, root.lastGap) + 2 && root.hitches.length < 4000) root.hitches.push([tnow, dms])
+        }
+        root.lastTickMs = tnow
         var gap = E.frame()
         root.o = E.out
         root.oChanged()                         // same object every frame: tell the bindings
@@ -565,6 +577,11 @@ Item {
     function busyWhy() { return E.busyWhy() + " | frames.running " + frames.running + " rest " + rest.running + "/" + rest.interval }
     function extrasInfo() { var i = extras.info(); i.pillW = o.w; i.pillH = o.h; i.head = o.head; return i }
     function hit(x, y) { return hitCtl(x, y) }
+    function probeUx() { var p = E.probeForUx(); var i = extras.info(); p.question = i.question; p.answer = i.answer;
+        p.widget = i.widget; p.widgetReady = i.widgetReady; p.pending = i.pending; p.extrasH = i.height; p.tier = root.lastGap === Infinity ? -1 : root.lastGap
+        p.ctl = o.ctl || 0; p.notme = o.notme || 0; p.ctlCy = o.ctlCy; p.pillX = root.pillX; p.pillY = root.pillY; p.ow = o.w; p.oh = o.h
+        return p }
+    function takeHitches() { var h = root.hitches; root.hitches = []; var n = root.liveTicks; root.liveTicks = 0; return { hitches: h, live: n } }
     function probe() { return { er: o.er, w: o.w, h: o.h, state: o.state, glowA: o.glowA, hide: o.hide } }
     function measure(s, big) { return (big ? fm10 : fm9).advanceWidth(s) }
 }

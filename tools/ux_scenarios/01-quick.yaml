@@ -1,0 +1,6 @@
+name: quick
+desc: a quick question (fast tier), wake word then question
+steps:
+  - ask: "How far away is the moon?"
+  - until: {what: answer, timeout: 30}
+expect: {answer: true}

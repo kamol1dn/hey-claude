@@ -1,0 +1,9 @@
+name: wake_during_thinking
+desc: a new wake + question while it is still thinking about the first one
+steps:
+  - ask: {text: "Can you check what the weather is going to be like at the weekend?", voice: bf_emma}
+  - until: {what: thinking, timeout: 30}
+  - wait: 1.2
+  - ask: {text: "Actually, what's two plus two?", voice: am_adam}
+  - until: {what: answer, timeout: 60}
+expect: {answer: true}

@@ -15,6 +15,16 @@ from .tasks import TaskManager
 from .tts import Speaker
 
 
+class _AnyEvent:
+    """is_set() if any of the events is set (record_utterance takes one stop_event)."""
+
+    def __init__(self, events):
+        self.events = events
+
+    def is_set(self) -> bool:
+        return any(e.is_set() for e in self.events)
+
+
 def _elapsed(t) -> str:
     s = int((t.ended or time.time()) - t.started)
     return f"{s // 60}:{s % 60:02d}"
@@ -49,6 +59,9 @@ class Assistant:
         self.stt: SpeechToText | None = None
         self.hold = None                        # holdkey.HoldKey, set by __main__ (mic runs only)
         self.wake_gate = SpeakingGate(cfg["wake"])   # no wake triggers while it talks (+ a short tail)
+        # Hotkey "talk or type" session (inputbox.InputSession drives these).
+        self.input_open = False
+        self._cancel_utt = threading.Event()    # typing / Esc cuts the session's recording short
 
     # -- UI helpers -----------------------------------------------------------
     def set_mode(self, mode, text=""):
@@ -94,6 +107,39 @@ class Assistant:
         """Hold key went down/up (hook thread). Only shown while listening."""
         if self.mode in ("listening", "holding"):
             self.set_mode("holding" if held else "listening")
+
+    # -- hotkey input session (talk or type) -----------------------------------
+    def begin_input(self):
+        """The input field opened: listen for one request, no wake word needed."""
+        self.input_open = True
+        self._cancel_utt.clear()
+        self.talk_now()
+
+    def cancel_input_mic(self):
+        """The user started typing (or cancelled): stop the session's recording."""
+        self._cancel_utt.set()
+        self.manual.clear()
+
+    def end_input(self):
+        self.input_open = False
+        self.cancel_input_mic()
+
+    def submit_text(self, text: str):
+        """A typed request: same router and tiers as a spoken one."""
+        text = " ".join(text.split()) if "\n" not in text else text.strip()
+        if not text:
+            return
+        print(f"[typed] {text!r}")
+        self.speaker.stop()
+        self.gen += 1
+        now = time.perf_counter()
+        timing = dict(wake=now, speech_end=now, vad_done=now, stt_done=now, audio_s=0, text=text)
+        threading.Thread(target=self.converse, args=(text, self.gen, timing), daemon=True).start()
+
+    def _heard(self, text: str):
+        sig = getattr(self.ui, "heard", None)
+        if sig is not None:
+            sig.emit(text)
 
     def talk_now(self):
         """Same as clicking the island: listen for one request without the wake
@@ -265,15 +311,22 @@ class Assistant:
         source ends, listening is switched off, or (one_shot) after one request."""
         blocks = iter(src)
         cooldown_until = 0.0
+        first = True
         for block in blocks:
             if self.stopping:
                 return
+            if one_shot and first and not self.manual.is_set():
+                return                          # the request was cancelled before the mic opened
+            first = False
             if not (one_shot or self.simulate or self.listening.is_set() or self.manual.is_set()):
                 return                          # listening switched off: release the mic
-            hit = False if one_shot else self.wake.hit(block)
+            # No wake word while the input field is open (you might be typing).
+            hit = False if (one_shot or self.input_open) else self.wake.hit(block)
+            from_input = False
             if self.manual.is_set():
                 self.manual.clear()
                 hit = True
+                from_input = self.input_open
             if not hit or time.perf_counter() < cooldown_until:
                 continue
             t_wake = time.perf_counter()
@@ -284,14 +337,19 @@ class Assistant:
             if hold:
                 hold.arm()
             try:
+                stops = [] if self.simulate else ([] if one_shot else [self._abort_rec])
+                if from_input:
+                    stops.append(self._cancel_utt)
                 audio, t_end = record_utterance(blocks, self.cfg["listen"], on_level=self.ui.level.emit,
-                                                stop_event=None if (self.simulate or one_shot) else self._abort_rec,
+                                                stop_event=_AnyEvent(stops) if stops else None,
                                                 hold=hold.state if hold else None)
             finally:
                 if hold:
                     hold.disarm()
             self.wake.reset()
             if audio is None:
+                if from_input:
+                    self._heard("")
                 self.rest()
                 if self.simulate or one_shot:
                     return
@@ -301,6 +359,8 @@ class Assistant:
             text = self.stt.transcribe(audio)
             t_stt = time.perf_counter()
             print(f"[heard] {text!r}")
+            if from_input:
+                self._heard(text)
             cooldown_until = time.perf_counter() + float(self.cfg["wake"]["cooldown"])
             if not text.strip():
                 self.rest()

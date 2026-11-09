@@ -493,6 +493,38 @@ the user's top misheard words in a simulated test.
 **Done when:** each widget type renders from a simulated reply; 60 fps
 transitions measured; no focus stealing.
 
+## M5b: Widget packs
+
+**Goal:** more answers show as a small live card instead of only speech. Each
+widget is a plug-in (`widgets/<id>/`: `widget.json` with its data schema and
+triggers, plus `Widget.qml`), loaded by M5's widget registry. New ones can come
+by PR, with an unknown widget falling back to text. M5 ships the first packs:
+weather (keyless Open-Meteo tool, animated conditions), calendar agenda,
+timer, task card, link/file, code, image, and the Telegram set.
+
+Next packs, each with its own small animation:
+- **Now playing:** album art, progress, controls (M9's media tools).
+- **System:** battery, CPU/GPU load and VRAM, with hey-claude's own devices
+  shown ("stt: gpu (turbo)").
+- **Timetable:** next class, room and time left; reads the user's existing
+  timetable data (`D:\coding\inha_timetable`), read-only.
+- **Deadlines:** a countdown list from the user's own deadline notes. It's
+  personal, so it never goes into the public repo.
+- **Unit / currency conversion, quick maths**, with the working shown.
+- **Definition / translation** (en / ru / uz).
+- **Directions / place:** a map snippet, time and distance.
+- **News / sports headlines:** a short list from web search.
+- **Reminders and alarms:** a list with countdowns, once timers exist (M9 §4).
+- **Email digest:** unread count and the top senders (Gmail connector).
+- **Clipboard / screenshot preview** (M9).
+- Rules for every pack:
+  - data comes from a tool result, never made up by the model;
+  - widgets render under the idle frame-rate budget;
+  - private data (deadlines, email, Telegram) fades when the island collapses.
+
+**Done when:** each pack renders from a recorded real tool result, has a
+schema test, and passes the M5 frame-budget check.
+
 ## M6: Characters as plug-ins (pick one in Settings, add new ones by PR)
 
 **Goal:** the character is a swappable pack behind one interface. All five (Echo, Cinder, Wren, Tycho, Hum)

@@ -110,6 +110,14 @@ the `gh release create` command from the PR. **Not measured yet:** real
 voices (no donated clips) and the user's lecture audio (`tools/wake_eval.py`).
 See README "Wake word".
 
+**v2 (2026-11-09):** Piper's multi-speaker LibriTTS-R voice (904 audiobook
+readers, `piper-tts` 1.8) is now a second voice source next to Kokoro (half
+of every synthetic set; 45 speakers held out). On the same held-out data:
+Kokoro voices 96.5% → 95.2%, Piper speakers 77.5% → 97.5%, 24 real
+recordings of one person 50% → 87.5%, false wakes unchanged at 0.28/h.
+Staged in `dist/wake-model-v2/`, **not published**. Still to do: real clips
+from more people, lecture audio.
+
 **Goal:** new users never train anything. The wake word detects the phrase,
 not the person, so one model trained once works for anyone who says "hey
 claude".

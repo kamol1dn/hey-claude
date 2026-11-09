@@ -27,6 +27,7 @@ from heyclaude.wake_train import augment as A  # noqa: E402
 from heyclaude.wake_train import download as D  # noqa: E402
 from heyclaude.wake_train import head as H  # noqa: E402
 from heyclaude.wake_train import pipeline as P  # noqa: E402
+from heyclaude.wake_train import piper_voice as PV  # noqa: E402
 from heyclaude.wake_train import synth as S  # noqa: E402
 from heyclaude.wake_train.features import ensure_feature_models  # noqa: E402
 
@@ -109,6 +110,183 @@ def test_render_parallel_keeps_order_and_reports_progress():
     single = S.Synth(FakeKokoro()).render(utts)
     assert all(np.array_equal(a, b) for a, b in zip(out, single))
     assert sum(len(e.calls) for e in eng) == 25
+
+
+# -- Piper (second voice source; TTS mocked) ------------------------------------------------------
+class _SynCfg:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class FakePiperVoice:
+    """Stands in for piper.PiperVoice: 22.05 kHz, 904 speakers; audio length follows length_scale."""
+
+    def __init__(self):
+        self.config = _SynCfg(sample_rate=22050, num_speakers=904)
+        self.phonemized, self.cfgs = [], []
+
+    def phonemize(self, text):
+        self.phonemized.append(text)
+        return [list("hˈeɪ"), list("klˈɔːd")] if text != "boom" else []
+
+    def phonemes_to_ids(self, phonemes):
+        self.last_phonemes = list(phonemes)
+        return [1] + [ord(c) % 200 for c in phonemes] + [2]
+
+    def phoneme_ids_to_audio(self, ids, cfg):
+        if len(ids) <= 2:
+            raise ValueError("no phonemes")
+        self.cfgs.append(cfg)
+        n = int(11025 * cfg.length_scale)
+        return (0.2 * np.sin(2 * np.pi * (100 + cfg.speaker_id) * np.arange(n) / 22050)).astype(np.float32)
+
+
+def _raises(exc, fn, match=""):
+    try:
+        fn()
+    except exc as e:
+        assert match in str(e), e
+        return
+    raise AssertionError(f"{exc.__name__} not raised")
+
+
+def test_piper_engine_fits_the_synth_interface():
+    v = FakePiperVoice()
+    eng = PV.PiperEngine(v, syn_config=_SynCfg)
+    a, rate = eng.create("hey claude", voice="piper:123", speed=1.25, lang="en-gb", is_phonemes=False)
+    assert rate == 22050 and a.dtype == np.float32 and len(a) == int(11025 * 0.8)    # speed -> length_scale 0.8
+    c = v.cfgs[-1]
+    assert c.speaker_id == 123 and abs(c.length_scale - 0.8) < 1e-9 and c.normalize_audio is False
+    assert 0.45 <= c.noise_scale <= 0.85 and 0.5 <= c.noise_w_scale <= 1.0
+    assert v.last_phonemes == list("hˈeɪ") + [" "] + list("klˈɔːd")                   # sentences joined by a space
+    eng.create("hey claude", voice="piper:123", speed=1.25)
+    assert (v.cfgs[-1].noise_scale, v.cfgs[-1].noise_w_scale) == (c.noise_scale, c.noise_w_scale)   # repeatable
+    eng.create("hey claude", voice="piper:124", speed=1.25)
+    assert v.cfgs[-1].noise_scale != c.noise_scale                                    # varies per clip
+    n_ph = len(v.phonemized)
+    eng.create("hˈeɪ klˈɔt", voice="piper:5", is_phonemes=True)                        # IPA: no espeak, one id per char
+    assert len(v.phonemized) == n_ph and v.last_phonemes == list("hˈeɪ klˈɔt")
+    _raises(ValueError, lambda: eng.create("hey", voice="piper:904"))                                          # out of range
+
+
+def test_mixed_engine_routes_piper_voices_and_synth_renders_them():
+    kok, pv = FakeKokoro(), FakePiperVoice()
+    mixed = PV.MixedEngine(kok, PV.PiperEngine(pv, syn_config=_SynCfg))
+    assert mixed.voices is kok.voices                                                  # blends still work
+    u = [S.Utterance("x", "hey claude", False, "piper:7", 1.0, 0.0),
+         S.Utterance("x", "hey claude", False, "af_heart+jm_kumo@0.25", 1.0, 0.0),
+         S.Utterance("x", "hˈeɪ klˈɑːd", True, "piper:900", 1.0, 1.0),
+         S.Utterance("x", "boom", False, "piper:1", 1.0, 0.0)]
+    out = P.render_parallel(u, [mixed])
+    assert len(out[0]) == 8000 and len(out[1]) == 8000                                 # 22.05 / 24 kHz -> 16 kHz
+    assert 0 < len(out[2]) < 8000 and len(out[3]) == 0                                 # pitch up; failure skipped
+    assert [c.speaker_id for c in pv.cfgs] == [7, 900] and len(kok.calls) == 1
+    _raises(RuntimeError, lambda: PV.MixedEngine(kok, None).create("hey", voice="piper:1"))
+
+
+def test_plan_mixed_shares_and_never_blends_piper():
+    v = S.phrase_variants("hey claude")
+    kok = [x for x in S.KOKORO_ALL if x not in S.HELD_OUT_VOICES]
+    pip = [PV.voice_name(s) for s in PV.train_speakers()]
+    a = S.plan_mixed(random.Random(3), 400, v, kok, pip, 0.5)
+    assert [u.key() for u in a] == [u.key() for u in S.plan_mixed(random.Random(3), 400, v, kok, pip, 0.5)]
+    p = [u for u in a if u.voice.startswith("piper:")]
+    assert len(p) == 200 and not any("+" in u.voice for u in p)
+    assert len({u.voice for u in p}) > 150                                             # many different speakers
+    assert any("+" in u.voice for u in a if not u.voice.startswith("piper:"))          # Kokoro blends as before
+    assert {u.label for u in p} >= {"hey claude", "hey klod", "hey klawd"}             # the accent spellings too
+    # no Piper (or share 0): exactly the old Kokoro-only plan
+    old = [u.key() for u in S.plan(random.Random(3), 100, v, kok)]
+    assert [u.key() for u in S.plan_mixed(random.Random(3), 100, v, kok, [], 0.5)] == old
+    assert [u.key() for u in S.plan_mixed(random.Random(3), 100, v, kok, pip, 0.0)] == old
+    # a Kokoro voice is never blended with a Piper speaker, even from a mixed list
+    m = S.plan(random.Random(1), 300, v, kok[:3] + pip[:3], blend_p=1.0)
+    assert all(u.voice.startswith("piper:") == ("piper" in u.voice) for u in m)
+    assert any("+" in u.voice for u in m)
+
+
+def test_piper_held_out_speakers_never_train_the_default_model():
+    held, train = PV.held_out_speakers(), PV.train_speakers()
+    assert len(held) == 45 and not set(held) & set(train) and len(held) + len(train) == PV.N_SPEAKERS
+    job = P.Job(mode="default", sizes=dict(n_pos=600, n_held=40, n_held_piper=60, n_look=300, n_sent=100,
+                                           n_words=100))
+    sets = P.plan_sets(job, random.Random(1), S.phrase_variants("hey claude"), set(S.HELD_OUT_VOICES),
+                       [x for x in S.KOKORO_ALL if x not in S.HELD_OUT_VOICES], use_piper=True)
+    hp = {PV.voice_name(s) for s in held}
+    for name in ("pos", "look", "sent", "words"):
+        voices = [u.voice for u in sets[name]]
+        assert not set(voices) & hp, name
+        assert sum(x.startswith("piper:") for x in voices) == len(voices) // 2, name
+    assert {u.voice for u in sets["held_piper"]} <= hp and len(sets["held_piper"]) == 60
+    assert not any(u.voice.startswith("piper:") for u in sets["held"])
+    # personal mode (the wizard) stays Kokoro-only unless asked
+    pj = P.Job(mode="personal", sizes=dict(n_pos=50, n_look=20, n_sent=10, n_words=10))
+    ps = P.plan_sets(pj, random.Random(1), S.phrase_variants("hey claude"), set(), list(S.KOKORO_ALL),
+                     use_piper=pj.size("piper") > 0)
+    assert "held_piper" not in ps and not any(u.voice.startswith("piper:") for v in ps.values() for u in v)
+
+
+def test_piper_voice_download_resumes_and_checks_sha256(tmp_path):
+    blob, cfg = bytes(range(256)) * 20, b'{"num_speakers": 904}'
+    good = hashlib.sha256(blob).hexdigest()
+    real = PV.FILES
+    PV.FILES = (("v.onnx", len(blob), good), ("v.onnx.json", len(cfg), None))
+    try:
+        _piper_download(tmp_path, blob, cfg)
+    finally:
+        PV.FILES = real
+
+
+def _piper_download(tmp_path, blob, cfg):
+    served = {"v.onnx": blob, "v.onnx.json": cfg}
+    urls = []
+
+    def opener(req, timeout):
+        urls.append((req.full_url, req.get_header("Range")))
+        name = req.full_url.rsplit("/", 1)[1]
+        a, b = req.get_header("Range")[6:].split("-")
+        return _Resp(served[name][int(a):int(b) + 1])
+    (tmp_path / "v.onnx.part").write_bytes(blob[:1000])                                   # an interrupted download
+    assert PV.have_bytes(tmp_path) == 1000 and PV.plan_bytes() == len(blob) + len(cfg)
+    got, logs = [], []
+    out = PV.ensure_voice(tmp_path, lambda d, t: got.append((d, t)), opener=opener, log=logs.append)
+    assert out == tmp_path / "v.onnx" and out.read_bytes() == blob and (tmp_path / "v.onnx.json").read_bytes() == cfg
+    assert urls[0][1] == f"bytes=1000-{len(blob) - 1}"                                   # resumed
+    assert all(u.startswith(PV.REPO + PV.REVISION + "/" + PV.VOICE_DIR + "/") for u, _ in urls)
+    assert got[-1] == (len(blob) + len(cfg),) * 2 and "to download" in logs[0]
+    n = len(urls)
+    PV.ensure_voice(tmp_path, opener=opener, log=logs.append)                              # all there: no requests
+    assert len(urls) == n
+    for f in tmp_path.iterdir():
+        f.unlink()
+    served["v.onnx"] = bytes(len(blob))                                                    # corrupted on the server
+    _raises(OSError, lambda: PV.ensure_voice(tmp_path, opener=opener, log=logs.append), "SHA-256")
+    assert not (tmp_path / "v.onnx").exists()
+
+
+def test_default_sizes_mix_in_piper_and_estimate_its_download():
+    assert P.SIZES["default"]["piper"] == 50 and P.SIZES["personal"]["piper"] == 0
+    with_p = P.estimates(P.Job(mode="default"), "cpu", 0)
+    without = P.estimates(P.Job(mode="default", sizes={"piper": 0}), "cpu", 0)
+    assert with_p["download"] > without["download"]
+
+
+def test_wake_compare_scores_held_out_sources_and_false_wakes():
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    import wake_compare as C
+
+    def model(x):                                   # score = the mean of the newest frame
+        return x[:, -1].mean(1)
+    ev = np.zeros((6, 4, 16, 96), np.float32)
+    ev[[0, 1, 3], 2, -1] = 0.9                       # one of the four offsets scores high
+    got = C.held_out_hits(model, ev, ["kokoro", "kokoro", "kokoro", "piper", "piper", "piper"], 0.5)
+    assert got["kokoro"] == dict(n=3, hit=0.6667) and got["piper"] == dict(n=3, hit=0.3333)
+    assert got["all"] == dict(n=6, hit=0.5)
+    frames = np.zeros((4500, 96), np.float32)        # 6 minutes
+    frames[1000:1003] = 0.8                          # one burst = one false wake (refractory)
+    frames[3000] = 0.8
+    v = C.false_wakes(model, frames, 0.5, chunk=1000)
+    assert v["false_wakes"] == 2 and v["hours"] == 0.1 and v["fph"] == 20.0
 
 
 # -- augmentation ---------------------------------------------------------------------------

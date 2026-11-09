@@ -26,6 +26,14 @@ from heyclaude.wake_models import DEFAULT_MODEL, RELEASE_TAG, sha256  # noqa: E4
 REPO = "kamol1dn/hey-claude"
 
 
+def voices(report: dict) -> str:
+    share = report.get("sizes", {}).get("piper", 0)
+    if not share:
+        return "54 Kokoro voices and blends"
+    return (f"54 Kokoro voices and blends, and {share}% of the clips from Piper's multi-speaker LibriTTS-R voice "
+            "(904 audiobook readers)")
+
+
 def notes(report: dict, digest: str, size: int) -> str:
     a = report.get("at_0_5", {})
     hit = a.get("hit", {})
@@ -36,14 +44,15 @@ def notes(report: dict, digest: str, size: int) -> str:
         f"`{digest}`",
         "",
         "Trained locally with `python -m heyclaude.wake_train default` on **synthetic voices only** "
-        "(54 Kokoro voices and blends, with American, British and accented pronunciations: "
+        f"({voices(report)}, with American, British and accented pronunciations: "
         "hey claude / klod / clod / klawd / klode and Russian/Uzbek-style variants), look-alike phrases, "
         "and a sample of openWakeWord's ACAV100M negative features. No real person's recordings.",
         "",
         "Measured (threshold 0.5, the calibrated default):",
     ]
     for k, v in hit.items():
-        lines.append(f"- hit rate on {v['n']} held-out {k} clips (voices never trained on): {v['hit_at_0_5'] * 100:.1f}%")
+        who = {"kokoro": "Kokoro", "piper": "Piper LibriTTS-R"}.get(k, k)
+        lines.append(f"- hit rate on {v['n']} held-out {who} clips (voices never trained on): {v['hit_at_0_5'] * 100:.1f}%")
     if "fph" in a:
         lines.append(f"- false wakes on openWakeWord's {report.get('validation_hours')} h validation set: "
                      f"{a['false_wakes']} ({a['fph']:.2f} per hour)")
@@ -87,7 +96,7 @@ def main(argv=None):
     print(f"expected URL: {DEFAULT_MODEL['url'].replace(RELEASE_TAG, args.tag)}")
     print("\nNot published. To publish (after the PR is merged):\n")
     print(f'gh release create {args.tag} {" ".join(rel(f) for f in files)} --repo {REPO} '
-          f'--title "hey claude wake model v1" --notes-file {rel(out / "NOTES.md")}')
+          f'--title "hey claude wake model {args.tag.rsplit("-", 1)[-1]}" --notes-file {rel(out / "NOTES.md")}')
     return 0
 
 

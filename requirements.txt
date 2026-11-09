@@ -12,6 +12,17 @@ psutil>=5.9          # CPU load, same
 anthropic>=0.40      # the direct API path for quick answers (only with an API key)
 kokoro-onnx>=0.6     # tts.engine: kokoro (bundles espeak-ng; no system install)
 livekit>=1.2         # WebRTC echo cancellation (AEC3) for barge-in
+# M9: the Windows settings MCP server (heyclaude/mcp_windows). Pure Python or
+# small wheels (~5 MB together); none of them touches the GPU stack.
+mcp>=1.9             # MCP server SDK (FastMCP; MCPServer in 2.x)
+pycaw>=20240316      # Core Audio: volume, mute, per-app volume, output devices
+monitorcontrol>=3.1  # DDC/CI brightness of external monitors
+winrt-runtime>=2.0   # WinRT: media sessions (album art, next/previous) and radios
+winrt-Windows.Foundation>=2.0
+winrt-Windows.Foundation.Collections>=2.0
+winrt-Windows.Media.Control>=2.0
+winrt-Windows.Storage.Streams>=2.0
+winrt-Windows.Devices.Radios>=2.0
 # Kokoro on the GPU needs onnxruntime-gpu. It installs the same `onnxruntime`
 # module as the CPU package (which openWakeWord and kokoro-onnx pull in), so
 # install it after this file, and again after any later `pip install -r`:

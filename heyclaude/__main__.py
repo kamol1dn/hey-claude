@@ -214,6 +214,10 @@ def main():
         # Mic button while it talks: stop, then listen (same as the hotkey: the talk-or-type field).
         island.interrupt_talk.connect(lambda: (asst.hush(), bridge.talk.emit()))
         island.quit_requested.connect(app.quit)
+        # M9: tool effects. Undo runs locally; sleep/restart/shutdown only ever on this click.
+        island.effect_undo.connect(asst.undo_clicked)
+        island.effect_confirm.connect(asst.confirm_clicked)
+        island.effect_cancel.connect(asst.cancel_clicked)
 
         def attach_tm():
             asst.ready.wait()

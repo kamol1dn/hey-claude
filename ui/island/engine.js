@@ -62,7 +62,8 @@ var inFrame = false;            // retargets made by frame() itself don't count:
 function wake() { if (!inFrame) awake = true; }
 
 /* ---------------- springs, followers, tweens, timers ---------------- */
-var PRE = { inhale: { k: 380, z: 0.70 }, exhale: { k: 180, z: 1 }, snap: { k: 520, z: 0.60 }, soft: { k: 120, z: 0.85 } };
+var PRE = { inhale: { k: 380, z: 0.70 }, exhale: { k: 180, z: 1 }, snap: { k: 520, z: 0.60 }, soft: { k: 120, z: 0.85 },
+            glide: { k: 320, z: 1 } };   // width: critically damped, so the pill's edges (and the text on them) never swing back
 var SPRINGS = [];
 function Spring(x) { this.x = x; this.v = 0; this.t = x; this.k = 180; this.c = 2 * Math.sqrt(180); this.tw = null; this.born = NOW; SPRINGS.push(this); }
 Spring.prototype.to = function (t, pre) {
@@ -139,6 +140,11 @@ function elideLeft(s, big, max) {
 }
 function clampW(w) { return Math.min(560, Math.max(300, Math.round(w))); }
 var CTRL = 66, MAXT = 560 - 90 - CTRL;
+// While a turn's panel is open (question, card, answer under the head) the pill keeps one
+// width from the question to the collapse: nothing moves sideways during a turn.
+var TURN_W = 440, ROW_X = 26, ROW_PAD = 16, ROW_LINES = 3;
+function turnW() { return Math.max(TURN_W, S.extraW || 0); }
+function rowW() { return turnW() - ROW_X - ROW_PAD; }
 var NOTME_W = 70;
 
 /* ---------------- island model ---------------- */
@@ -169,7 +175,8 @@ function makeModel() {
         silentFor: 0, penTheta: 0, phi: 0, sparks: [], nextSpark: 0, rings: [], partial: '', notMe: false,
         flash: '', flashUntil: 0, extraH: 0, extraW: 0, hideIdle: false, peek: false, lastU: 0, pend: null,
         inputLines: 1, ctlCy: 20, enteredRestAt: 0, slowSince: 0, readyFastSince: 0, toolLabel: '', drop: false,
-        lastFrameAt: 0, emaFt: 0, slowFrames: 0, calmByGpu: false, sync: false, plans: [], sentEnd: 0 };
+        lastFrameAt: 0, emaFt: 0, slowFrames: 0, calmByGpu: false, sync: false, plans: [], sentEnd: 0,
+        turn: false, rowTop: 0, rowLines: 0 };
     AU = { L: 0, A: 0, micRaw: 0, ttsRaw: 0, hist: [], aHist: [], micOpen: false, ttsT: -1e9, micT: -1e9 };
     TASKS = [];
 }
@@ -321,7 +328,8 @@ function rowsN() { return Math.min(5, TASKS.length); }
 function listRowsH() { return 30 * rowsN() + (S.usageRow ? 30 : 0); }
 function headFor(st) {
     switch (st) {
-        case 'ready': case 'mismatch': case 'off': case 'paused': return 28;
+        case 'ready': return S.turn ? 40 : 28;
+        case 'mismatch': case 'off': case 'paused': return 28;
         case 'input': return 46 + 18 * (S.inputLines - 1);
         default: return 40;
     }
@@ -345,11 +353,12 @@ function resize(pre) {
         case 'speaking': w = S.speakW; break;
         case 'error': w = clampW(tw(S.errText, true) + 56); break;
     }
-    var h = head + (st === 'speaking' && S.lines > 1 ? 20 : 0);
+    if (S.turn && ['woke', 'listening', 'holding', 'followup', 'thinking', 'speaking', 'ready', 'error'].indexOf(st) >= 0) w = turnW();
+    var h = head + (st === 'speaking' && S.lines > 1 && !S.turn ? 20 : 0);
     if (S.extraW) w = Math.max(w, S.extraW);
     if (S.extraH) h += S.extraH;
     if (S.listGeom) { w = Math.max(w, 460); h = head + 12 + listRowsH() + (S.extraH || 0); }
-    W.to(w, pre); H.to(h, pre); HEAD.to(head, pre);
+    W.to(Math.round(w), pre === 'snap' ? 'snap' : 'glide'); H.to(Math.round(h), pre); HEAD.to(head, pre);
     EX.to(head >= 46 ? 22 : head >= 40 ? 20 : 18, 'soft');
 }
 
@@ -381,7 +390,11 @@ function enter(st, o) {
     if (prev === 'paused' && st !== 'paused') { T(O, 'pilotOn', 0, 200, outCubic); T(O, 'arcA', 0, 250, outCubic); SUF.set(null); }
     if (prev === 'holding' && st !== 'holding') { T(O, 'bracketOff', 6, 200, outQuad); T(O, 'bracketA', 0, 200, outQuad); TAPER.to(0.8, 0.07); T(O, 'muted', 0, 160, outQuad); }
     if (prev === 'input' && st !== 'input') T(O, 'field', 0, 120, inQuad);
-    if (prev === 'speaking' && st !== 'speaking') T(O, 'words', 0, 160, inQuad);
+    if (prev === 'speaking' && st !== 'speaking') {
+        // in a turn the row keeps exactly what was said (a stop mid-answer leaves no blank lines)
+        if (S.turn) { if (S.wordIdx < S.words.length - 1) { S.words = S.words.slice(0, S.wordIdx + 1); S.rowLines = S.words.length ? S.words[S.words.length - 1].line + 1 : 0; } }
+        else T(O, 'words', 0, 160, inQuad);
+    }
     if (prev === 'followup' && st !== 'followup') T(O, 'wash', 0, 200, outQuad);
     if (prev === 'error' && st !== 'error') { ov('error'); GC.to(C.live, 0.2); }
     if (prev === 'mismatch' && st !== 'mismatch') { ov('mm'); ov('wake'); }
@@ -442,7 +455,7 @@ var ENTER = {
         LB.set(null); SUF.set(null); RIMC.to(C.live, 0.1); RIMA.to(0.22, 0.1); GC.to(C.live, 0.1); AMPK.to(1);
         TAPER.to(0.8, 0.07);
         if (MOTION !== 'full') {
-            ov('wake', C.hot, 0.03, 4); W.to(S.notMe ? 300 + NOTME_W : 300); H.to(40 + S.extraH); HEAD.to(40); EX.to(20, 'soft'); ER.to(5);
+            ov('wake', C.hot, 0.03, 4); W.to(S.turn ? turnW() : S.notMe ? 300 + NOTME_W : 300); H.to(40 + S.extraH); HEAD.to(40); EX.to(20, 'soft'); ER.to(5);
             TX0.set(40); TX1.set(208); setGen('wave'); TC.to(C.user, 0.05); TA.to(1, 0.05); TW.to(1.75);
             LB.set({ text: 'listening', x: 216, color: C.dim });
             at(160, function () { ov('wake'); });
@@ -453,7 +466,7 @@ var ENTER = {
         ER.to(3.2, 'snap'); S.wokeGlow = true; GA.to(0.22, 0.05); GR.to(30, 0.06);
         if (!fl && HEAD.x <= 30) { HEAD.to(26, 'snap'); H.to(26 + S.extraH, 'snap'); }
         at(80, function () {
-            ER.to(6.5, 'snap'); W.to(S.notMe ? 300 + NOTME_W : 300, 'snap'); HEAD.to(40, 'snap'); H.to(40 + S.extraH, 'snap'); EX.to(20, 'soft');
+            ER.to(6.5, 'snap'); W.to(S.turn ? turnW() : S.notMe ? 300 + NOTME_W : 300, S.turn ? 'glide' : 'snap'); HEAD.to(40, 'snap'); H.to(40 + S.extraH, 'snap'); EX.to(20, 'soft');
             GA.to(0.42, 0.06); GR.to(90, 0.06);
         });
         if (!fl) at(120, function () { S.rings.push({ kind: 'ring', x: 20, y: 20, t0: NOW, d: 320, r0: 6, r1: 40, w0: 2, w1: 0.5, a0: 0.5, c: C.live }); });
@@ -510,10 +523,14 @@ var ENTER = {
         thinkLabel();
     },
     speaking: function (prev, o) {
-        S.speakText = ''; S.wordIdx = -1; S.revealAcc = 0; S.speakTop = 0; S.plans = []; S.sentEnd = 0;
+        // In a turn, speaking again with the same answer (it paused for a slow sentence) carries on
+        // where it was: the words already shown are never revealed a second time.
+        var same = S.turn && S.words.length && S.speakText && String(o.text || '').indexOf(S.speakText.slice(0, 24)) === 0;
+        var keep = same ? S.wordIdx : -1;
+        S.speakText = ''; S.wordIdx = keep; S.revealAcc = 0; S.speakTop = 0; S.plans = []; S.sentEnd = keep + 1;
         layoutWords(o.text || '');
         S.speakT0 = NOW; O.words = 1; LB.set(null);
-        TX0.to(34); TX1.to(74); setGen('speak'); TC.to(C.live, 0.07); TA.to(1, 0.06); TW.to(2.0);
+        TX0.to(34); TX1.to(S.turn ? 208 : 74); setGen('speak'); TC.to(C.live, 0.07); TA.to(1, 0.06); TW.to(2.0);
         RIMC.to(C.live, 0.1); RIMA.to(0.18, 0.12); GC.to(C.live, 0.2); CORE.to(1); T(O, 'satVis', 0, 150, outQuad);
     },
     error: function (prev, o) {
@@ -550,8 +567,9 @@ function listenLabel() {
     else LB.set({ text: 'listening', x: 216, color: C.dim });
 }
 function thinkLabel() {
-    if (S.toolLabel) LB.set({ text: elide(S.toolLabel, true, MAXT - 26), x: 106, color: C.dim, big: true });
-    else LB.set({ text: S.thinkText, x: 80, color: C.dim, big: true });
+    var max = S.turn ? turnW() - 80 - CTRL - 14 : MAXT;
+    if (S.toolLabel) LB.set({ text: elide(S.toolLabel, true, max - 26), x: 106, color: C.dim, big: true });
+    else LB.set({ text: elide(S.thinkText, true, max), x: 80, color: C.dim, big: true });
 }
 function pausedSuffix() {
     var rem = Math.max(0, S.pauseEnd - NOW);
@@ -571,6 +589,7 @@ function layoutWords(sentence) {
     var total = tw(sentence, true);
     var limit = total > MAXT ? Math.min(MAXT, Math.max(total / 2 + 20, 0)) : 1e9;
     if (total > 2 * MAXT) limit = MAXT;
+    if (S.turn) limit = rowW();               // in a turn the words go to the answer row
     S.words = [];
     for (var i = 0; i < ws.length; i++) {
         var w = ws[i], ww = tw(w, true);
@@ -579,6 +598,7 @@ function layoutWords(sentence) {
         x += ww + sp; maxW = Math.max(maxW, x - sp);
     }
     S.lines = line >= 1 ? 2 : 1;
+    S.rowLines = line + 1;
     S.wordIdx = Math.min(keep, S.words.length - 1);
     S.speakW = Math.min(560, Math.max(300, Math.min(maxW, MAXT) + 90) + CTRL);
 }
@@ -810,7 +830,10 @@ function offsetOf(sh) { if (!sh) return 0; var tt = (NOW - sh.t0) / 1000; if (tt
 var out = {};
 var RINGS_OUT = [], SPARKS_OUT = [], SATS_OUT = [], DOTS_OUT = [0.7, 0.7, 0.7], NO_ROWS = [];
 function render() {
-    var w = W.x, h = Math.max(8, H.x), head = Math.min(HEAD.x, h), cy = head / 2;
+    // the drawn size snaps onto its target in the last half pixel: no 1 px flip-flop of the centred pill
+    var w = Math.abs(W.x - W.t) < 0.5 ? W.t : W.x, h = Math.abs(H.x - H.t) < 0.5 ? H.t : Math.max(8, H.x);
+    var head = Math.min(HEAD.x, h), cy = head / 2;
+    out.wt = W.t; out.turn = S.turn;
     out.w = w; out.h = h; out.head = head; out.cy = cy;
     out.rad = Math.min(h / 2, S.listGeom ? 18 : S.extraH ? 22 : 20);   // a card grows the pill into a panel
     out.hide = HIDE.x;
@@ -891,7 +914,8 @@ function render() {
     for (var dk = 0; dk < 3; dk++) DOTS_OUT[dk] = out.dotsA > 0 && MOTION === 'full' ? 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(2 * Math.PI * (NOW / 1200 - dk * 0.2 / 1.2))) : 0.7;
     // speaking words: the newest two lines; only the newest word is warm
     out.words = []; out.wordsA = 0;
-    if (S.words.length && O.words > 0.01 && (S.state === 'speaking' || S.prev === 'speaking')) {
+    renderRow();
+    if (!S.turn && S.words.length && O.words > 0.01 && (S.state === 'speaking' || S.prev === 'speaking')) {
         out.wordsA = O.words;
         var lastLine = 0;
         for (var n = 0; n <= S.wordIdx && n < S.words.length; n++) lastLine = S.words[n].line;
@@ -912,7 +936,7 @@ function render() {
     out.ghost = O.ghost; out.ghostX = O.ghostX; out.ghostText = S.ghost;
     // mic + stop buttons, not-me chip
     // the head as drawn: 40, or 60 while a two-line answer is up; cards sit below it
-    out.headFull = Math.min(h, HEAD.x + (S.state === 'speaking' && S.lines > 1 ? 20 : 0));
+    out.headFull = Math.min(h, HEAD.x + (S.state === 'speaking' && S.lines > 1 && !S.turn ? 20 : 0));
     S.ctlCy = Math.min(out.headFull, 60) / 2;
     out.ctl = O.ctl; out.ctlCy = S.ctlCy; out.ctlScale = MOTION === 'full' ? 0.85 + 0.15 * O.ctl : 1;
     out.hm = HM.x; out.hs = HS.x; out.pressM = O.pressM; out.pressS = O.pressS;
@@ -1104,6 +1128,52 @@ function setSpeakText(text) {
     layoutWords(text);
     if (S.speakW !== oldW || S.lines !== oldLines) resize('soft');
     wake();
+}
+// The turn's panel (Island.qml): a question row went up / the panel collapsed.
+function newTurn() {
+    NOW = env.now();
+    S.turn = true; S.words = []; S.wordIdx = -1; S.rowTop = 0; S.rowLines = 0; S.speakText = ''; S.plans = []; S.sentEnd = 0;
+    if (S.state === 'thinking') thinkLabel();
+    resize('soft'); wake();
+}
+function setTurn(on) {
+    NOW = env.now(); on = !!on;
+    if (on === S.turn) return;
+    S.turn = on;
+    if (!on) { S.words = []; S.wordIdx = -1; S.rowTop = 0; S.rowLines = 0; }
+    resize(); wake();
+}
+// The answer row under the question: words revealed in step with the voice (the ones not said
+// yet are laid out but clear, so the row's height only changes when more text arrives), the
+// newest word warm, ROW_LINES lines at most; it scrolls by a line, never per word.
+var ROW_OUT = { lines: ['', '', ''], n: 0 };
+function renderRow() {
+    var R0 = ROW_OUT;
+    if (!S.turn || !S.words.length) { R0.n = 0; R0.lines[0] = R0.lines[1] = R0.lines[2] = ''; out.row = R0; return; }
+    var last = 0;
+    for (var i = 0; i <= S.wordIdx && i < S.words.length; i++) last = S.words[i].line;
+    S.rowTop = Math.max(S.rowTop, last - (ROW_LINES - 1));
+    var top = S.rowTop, total = S.words[S.words.length - 1].line + 1;
+    R0.n = Math.max(0, Math.min(ROW_LINES, total - top));
+    var L = ['', '', ''], cal = MOTION !== 'full';
+    for (var z = 0; z < S.words.length; z++) {
+        var wd = S.words[z], k = wd.line - top;
+        if (k < 0 || k >= ROW_LINES) continue;
+        var a = 0, col = C.fg;
+        if (wd.t !== null && z <= S.wordIdx) {
+            var age = NOW - wd.t;
+            a = cal ? 1 : clamp(age / 160);
+            col = cal ? C.fg : mixc(C.hot, C.fg, outSine(clamp(age / 400)));
+        }
+        L[k] += (L[k] ? ' ' : '') + '<font color="' + hexa(col, a) + '">' + escHtml(wd.w) + '</font>';
+    }
+    R0.lines[0] = L[0]; R0.lines[1] = L[1]; R0.lines[2] = L[2];
+    out.row = R0;
+}
+function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function hexa(c, a) {
+    function h2(v) { var x = Math.round(Math.max(0, Math.min(255, v))).toString(16); return x.length < 2 ? '0' + x : x; }
+    return '#' + h2(a * 255) + h2(c[0]) + h2(c[1]) + h2(c[2]);
 }
 function setExtra(h, w, animating) {
     NOW = env.now();

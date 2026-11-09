@@ -13,13 +13,20 @@ Item {
     // collapses; the answer joins once it has been spoken (during speaking it is in
     // the head, in step with the voice). Card, question and answer go together.
     property string question: ""
-    property string answer: ""
-    readonly property bool showAnswer: answer !== "" && engineState !== "speaking" && engineState !== "thinking"
+    property string answer: ""                  // the answer so far, as text (info / tests)
+    // The answer row: revealed in step with the voice by the engine (engine.js renderRow:
+    // StyledText lines, words not said yet laid out but clear), the same row during and after
+    // speaking, so the answer is never shown twice and never moves.
+    property string row0: ""
+    property string row1: ""
+    property string row2: ""
+    property int rowN: 0
+    readonly property bool showAnswer: rowN > 0
+    signal turnCleared()
     readonly property real contentHeight: (effect.ev ? effect.height : 0) + approvals.height + (widget.spec ? widget.height : 0)
-        + qrow.height + (showAnswer ? arow.height : 0)
-    readonly property real minWidth: Math.max(effect.ev ? effect.minWidth : 0, approvals.count ? 440 : 0, widget.spec ? widget.minWidth : 0,
-                                              question !== "" ? 360 : 0)
-    function clearTurn() { linger.stop(); question = ""; answer = "" }
+        + qrow.height + arow.height
+    readonly property real minWidth: Math.max(effect.ev ? effect.minWidth : 0, approvals.count ? 440 : 0, widget.spec ? widget.minWidth : 0)
+    function clearTurn() { linger.stop(); question = ""; answer = ""; turnCleared() }
     // At rest: a card keeps the turn up until it goes (then all of it collapses at
     // once); without a card the turn lingers a few seconds.
     Timer { id: linger; interval: 4000; onTriggered: ex.clearTurn() }
@@ -33,7 +40,8 @@ Item {
     function info() {
         return { height: contentHeight, minWidth: minWidth, effect: effect.ev ? effect.ev.effect : "",
                  widget: widget.spec ? widget.spec.widget : "", widgetReady: widget.ready, widgetSource: widget.source,
-                 approvals: approvals.count, question: question, answer: showAnswer ? answer : "", pending: widget.pending }
+                 approvals: approvals.count, question: question, answer: showAnswer ? answer : "", pending: widget.pending,
+                 rowN: rowN }
     }
     height: contentHeight
 
@@ -68,7 +76,10 @@ Item {
             resting: ex.resting
             reduced: ex.reduced
             // arrived while it's still working on the answer: a skeleton until the answer starts
-            pending: ex.engineState === "thinking" && ex.question !== ""
+            // A skeleton only while the card is still being built; once its data is in it shows,
+            // even before the answer: the card is the first real answer (a weather card can be
+            // up seconds before the agent has written its sentence).
+            pending: ex.engineState === "thinking" && ex.question !== "" && !widget.ready
             onAction: function (wid, name, payload) {
                 if (!model) return
                 if (name === "open") model.openUrl(String(payload))
@@ -78,7 +89,24 @@ Item {
             }
             onExpired: { clear(); if (ex.resting) ex.clearTurn() }
         }
-        TurnRow { id: arow; width: ex.width; text: ex.showAnswer ? ex.answer : ""; answer: true; lines: 3 }
+        Item {
+            id: arow
+            width: ex.width
+            readonly property real lineH: 18
+            height: ex.rowN > 0 ? ex.rowN * lineH + 12 : 0
+            visible: ex.rowN > 0
+            Rectangle { x: 16; y: 10; width: 2; height: Math.max(0, ex.rowN * arow.lineH - 4); radius: 1; color: "#D97757" }
+            Repeater {
+                model: 3
+                Text {
+                    x: 26; y: 6 + index * arow.lineH; width: ex.width - 26 - 16; height: arow.lineH
+                    visible: index < ex.rowN
+                    text: index === 0 ? ex.row0 : index === 1 ? ex.row1 : ex.row2
+                    textFormat: Text.StyledText; wrapMode: Text.NoWrap
+                    color: "#F2F2F2"; font.family: "Segoe UI Variable Text"; font.pointSize: 10
+                }
+            }
+        }
     }
 
     function removeApproval(id) {

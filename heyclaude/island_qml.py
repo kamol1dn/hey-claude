@@ -895,8 +895,10 @@ class QmlIsland(QObject):
             n = len(self.tools)
             label = d["label"] + (f"  +{n - 1}" if n > 1 else "")
             self._send("setTool", [label, ""])
-        else:
+        elif self.mode != "thinking":
             self._send("setTool", ["", ""])
+        # else: the last tool's label stays until the answer starts (going back to
+        # "Let me check." / "checking with your tools…" would look like it started over)
 
     # -- plan usage ----------------------------------------------------------------------
     def set_usage(self, info: dict):

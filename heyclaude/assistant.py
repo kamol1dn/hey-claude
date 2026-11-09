@@ -388,6 +388,11 @@ class Assistant:
     def _tts_idle(self):
         self.wake_gate.set_speaking(False)
         if self.mode in ("speaking",):
+            if self.conv_lock.locked() and not self._converse_done:
+                # The voice caught up with the answer while more of it is still coming
+                # (a slow model, a long tool call): stay on the answer, don't drop to idle
+                # and start it over (converse() settles it when the answer is complete).
+                return
             if self.followup.state == "armed":
                 # The follow-up window opens in a moment (after the speaking tail):
                 # the island goes straight from the answer to "go on", not via idle.
@@ -806,9 +811,18 @@ class Assistant:
         th.start()
         return th
 
+    _converse_done = False
+
     def converse(self, text: str, gen: int, timing: dict):
         with self.conv_lock:
-            self._converse(text, gen, timing)
+            self._converse_done = False
+            try:
+                self._converse(text, gen, timing)
+            finally:
+                self._converse_done = True
+        sp = getattr(self, "speaker", None)
+        if self.mode == "speaking" and sp is not None and not sp.busy and sp.q.empty() and gen == self.gen:
+            self._tts_idle()                    # the voice finished before the answer did
         self._maybe_exit()
 
     def _converse(self, text, gen, timing):

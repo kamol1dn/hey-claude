@@ -582,7 +582,9 @@ def test_tools_in_use_show_their_service():
     b.tool.emit({"id": "t2", "phase": "end"})
     _spin(400)
     snap = _v(isl.call("snapshot"))
-    assert any(l["text"] == "what's on tomorrow?" and not l["out"] for l in snap["labels"])
+    # the last tool's label stays until the answer starts (no flip back to the first status line)
+    assert any(l["text"].startswith("Telegram · list dialogs") and not l["out"] for l in snap["labels"]), snap["labels"]
+    assert not any(l["text"] == "what's on tomorrow?" and not l["out"] for l in snap["labels"])
     b.session_event.emit({"session": "m5", "kind": "tool", "tool": "Bash"})
     assert "session:m5" in isl.tools
     b.session_event.emit({"session": "m5", "kind": "done"})

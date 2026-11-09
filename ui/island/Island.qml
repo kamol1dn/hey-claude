@@ -170,6 +170,14 @@ Item {
         }
         if (words0.text !== lines[0]) words0.text = lines[0]
         if (words1.text !== lines[1]) words1.text = lines[1]
+        // in a turn the answer is revealed in the row under the question instead
+        var R = o.row
+        if (R) {
+            if (extras.row0 !== R.lines[0]) extras.row0 = R.lines[0]
+            if (extras.row1 !== R.lines[1]) extras.row1 = R.lines[1]
+            if (extras.row2 !== R.lines[2]) extras.row2 = R.lines[2]
+            if (extras.rowN !== R.n) extras.rowN = R.n
+        }
     }
     function escapeHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
     function setLabel(item, l, xo) {
@@ -434,18 +442,30 @@ Item {
         }
 
         // ---- under the head: effects, approvals, response widgets ----------------
-        Extras {
-            id: extras
+        Item {
+            id: extrasClip
             x: 0; y: o.headFull || o.head
-            width: o.w
-            visible: !o.listGeom && contentHeight > 0
-            resting: o.state === "ready" || o.state === "off" || o.state === "paused"
-            reduced: o.motion !== "full"
-            engineState: o.state || ""
+            width: o.w; height: Math.max(0, o.h - y)
             clip: true
-            onContentHeightChanged: root.extraChanged()
-            onMinWidthChanged: root.extraChanged()
+            visible: !o.listGeom && extras.contentHeight > 0
+            Extras {
+                id: extras
+                // Laid out on the pill's target width and held still on screen while the pill
+                // morphs around it: the card and the answer never re-flow or slide per frame.
+                readonly property real contentW: Math.round(o.wt || o.w)
+                x: Math.round((root.stageW - contentW) / 2) - root.pillX
+                y: 0
+                width: contentW
+                resting: o.state === "ready" || o.state === "off" || o.state === "paused"
+                reduced: o.motion !== "full"
+                engineState: o.state || ""
+                clip: true
+                onContentHeightChanged: root.extraChanged()
+                onMinWidthChanged: root.extraChanged()
+                onTurnCleared: { E.setTurn(false); root.kick() }
+            }
         }
+        Connections { target: model; function onQuestionShown(q) { if (q) { E.newTurn(); root.kick() } } }
         // screenshot effect: a shutter flash over the whole pill
         Rectangle {
             anchors.fill: parent; radius: o.rad

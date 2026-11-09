@@ -884,7 +884,26 @@ allow-list), `ui/effects.json` (with M5), README.
   wallpaper" work end to end in ≤ 2.5 s with their effect and an undo;
 - Windows-MCP's acting tools are confirmed on the island before they run.
 
-## M10: Instant commands without Claude (local intent engine)
+## M10: Instant commands without Claude (local intent engine) ⏳ built, live timing pending (2026-11-10)
+
+**Status:** built; see README "Instant commands, no model". `heyclaude/intents/`
+(grammar + slots + Whisper-slip fixes, a numpy TF-IDF nearest-neighbour
+classifier, executors over M9's tool registry, local timers, "teach it")
+runs between the exact local routes and the weather/quick/agent tiers in
+`Brain.handle` (`("instant", match)`, tier `instant`). Corpus: 369 phrasings,
+99.2% routed right; 156 near-misses, 0 false triggers (tests/test_intents.py,
+CI). In-process text → match → executor (Windows mocked): median 0.11 ms,
+p95 0.22 ms. Live, read-only, through the executor (`tools/bench_instant.py`):
+`get_volume` ~40 ms (pycaw finds the device each call; the first ~0.2 s is paid
+at start-up), `now_playing` ~9 ms, the clock 0.1 ms; "next song" also waits
+for the player to report the new track (M9's media_control, up to 1.5 s).
+Offline UX harness (scenarios 19-25, CI; ~0.32 s of it is the simulated VAD
+tail): end of speech → effect median 0.32 s (0.26-0.40 s, 11 turns), all
+instant expectations met, near-misses reach the brain and change nothing.
+Not measured yet: the live speech end → effect median with
+the real VAD tail and Whisper (the harness's `instant_*` scenarios do it).
+Not built: acting on a confident *partial* transcript, Russian/Uzbek
+phrasings, the weather intent (that is weather-mcp's local route).
 
 **Goal:** simple commands never wait for a model. "Volume 30", "turn it up a
 bit", "mute", "dark mode", "brightness down", "next song", "pause", "what

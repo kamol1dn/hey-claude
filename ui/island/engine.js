@@ -142,7 +142,7 @@ function clampW(w) { return Math.min(560, Math.max(300, Math.round(w))); }
 var CTRL = 66, MAXT = 560 - 90 - CTRL;
 // While a turn's panel is open (question, card, answer under the head) the pill keeps one
 // width from the question to the collapse: nothing moves sideways during a turn.
-var TURN_W = 440, ROW_X = 26, ROW_PAD = 16, ROW_LINES = 3;
+var TURN_W = 440, ROW_X = 26, ROW_PAD = 16;
 function turnW() { return Math.max(TURN_W, S.extraW || 0); }
 function rowW() { return turnW() - ROW_X - ROW_PAD; }
 var NOTME_W = 70;
@@ -162,7 +162,7 @@ function makeModel() {
     HOV = new F(0, 0.06); HM = new F(0, 0.05); HS = new F(0, 0.05); HN = new F(0, 0.05);
     HIDE = new F(1, 0.12);              // 1 = shown; hide-when-idle fades the pill to 0
     O = { slash: 0, pilotOn: 0, arcA: 0, field: 0, fieldX: 6, trim: 0, bracket: 0, bracketA: 0, bracketOff: 0,
-        check: 0, checkW: 1.5, wash: 0, washReveal: 0, ghost: 0, ghostX: 0, words: 1, ul: 0, ulStart: 0, satVis: 1, progress: 0,
+        check: 0, checkW: 1.5, wash: 0, washReveal: 0, drain: 0, ghost: 0, ghostX: 0, words: 1, ul: 0, ulStart: 0, satVis: 1, progress: 0,
         ctl: 0, pressM: 0, pressS: 0, notme: 0, drop: 0, muted: 0 };
     K = { r: 0, rt: 0, g: 0, gt: 0 };
     OV = {};
@@ -176,7 +176,7 @@ function makeModel() {
         flash: '', flashUntil: 0, extraH: 0, extraW: 0, hideIdle: false, peek: false, lastU: 0, pend: null,
         inputLines: 1, ctlCy: 20, enteredRestAt: 0, slowSince: 0, readyFastSince: 0, toolLabel: '', drop: false,
         lastFrameAt: 0, emaFt: 0, slowFrames: 0, calmByGpu: false, sync: false, plans: [], sentEnd: 0,
-        turn: false, rowTop: 0, rowLines: 0 };
+        turn: false, rowTop: 0, rowLines: 0, rowMax: 3 };
     AU = { L: 0, A: 0, micRaw: 0, ttsRaw: 0, hist: [], aHist: [], micOpen: false, ttsT: -1e9, micT: -1e9 };
     TASKS = [];
 }
@@ -395,7 +395,7 @@ function enter(st, o) {
         if (S.turn) { if (S.wordIdx < S.words.length - 1) { S.words = S.words.slice(0, S.wordIdx + 1); S.rowLines = S.words.length ? S.words[S.words.length - 1].line + 1 : 0; } }
         else T(O, 'words', 0, 160, inQuad);
     }
-    if (prev === 'followup' && st !== 'followup') T(O, 'wash', 0, 200, outQuad);
+    if (prev === 'followup' && st !== 'followup') { T(O, 'wash', 0, 200, outQuad); T(O, 'drain', 0, 200, outQuad); }
     if (prev === 'error' && st !== 'error') { ov('error'); GC.to(C.live, 0.2); }
     if (prev === 'mismatch' && st !== 'mismatch') { ov('mm'); ov('wake'); }
     if (st !== 'woke') { ov('wake'); S.wokeGlow = false; }
@@ -508,7 +508,16 @@ var ENTER = {
         RIMC.to(C.live, 0.1); RIMA.to(0.40, 0.1); GC.to(C.live, 0.2); T(O, 'satVis', 0, 150, outQuad);
     },
     followup: function (prev, o) {
-        S.fuT0 = NOW; S.fuEnded = false; S.fuDur = Math.max(1000, (o.seconds || 5) * 1000);
+        S.fuT0 = NOW; S.fuEnded = false; S.fuDur = Math.max(1000, (o.seconds || 5) * 1000); S.fuHeard = false;
+        // A card or the turn's panel is open under the head: a quiet cue. No thread
+        // over the card, no wash, no "go on": only a hairline along the panel's bottom
+        // edge that drains as the followup window runs out ("listening" when it hears you).
+        S.fuQuiet = S.extraH > 0;
+        if (S.fuQuiet) {
+            setGen('rest'); TA.to(0, 0.1); LB.set(null); O.wash = 0; T(O, 'drain', 1, 220, outCubic);
+            RIMC.to(C.live, 0.1); RIMA.to(0.12, 0.1); T(O, 'satVis', 0, 150, outQuad);
+            return;
+        }
         TX0.to(40); TX1.to(208); setGen('wave'); TC.to(C.user, 0.07); TA.to(1, 0.06); TW.to(1.75); TAPER.to(0.8); AMPK.to(0.7, 0.15);
         if (O.wash < 0.01) { O.washReveal = 0; O.wash = 1; } else T(O, 'wash', 1, 120, outCubic);
         T(O, 'washReveal', 1, 260, outCubic);
@@ -764,6 +773,7 @@ function logic(dt) {
             base = uF < 0.4 ? mixc(C.banked, C.live, uF / 0.4) : C.live;
             rAdd = calm ? 0.6 * L : 0.7 * 2.5 * L; ga = 0.06 + 0.14 * uF + (calm ? 0 : 0.1 * L); gr = 10 + 40 * uF; gtau = 0.1; core = 0.4;
             if (remF <= 0 && !S.fuEnded) { S.fuEnded = true; if (MOTION === 'full') kickR(0.6); }
+            if (S.fuQuiet && !S.fuHeard && L > 0.15) { S.fuHeard = true; LB.set({ text: 'listening', x: 216, color: C.dim }); }
             break;
         }
         case 'thinking': {
@@ -857,6 +867,13 @@ function render() {
         } else u = S.lastU || 0;
         var full = 20 + (w - 26) * u;
         out.washX = ex + (full - ex) * O.washReveal; out.washA = (0.10 + 0.08 * u) * O.wash;
+    }
+    // quiet followup (a panel is open): the hairline along its bottom edge, draining
+    out.drainA = 0; out.drainU = 0;
+    if (O.drain > 0.01) {
+        var uD = S.state === 'followup' ? clamp((S.fuDur - (NOW - S.fuT0)) / S.fuDur) : (S.lastU || 0);
+        if (S.state === 'followup') S.lastU = uD;
+        out.drainA = O.drain; out.drainU = uD;
     }
     out.progress = S.state === 'loading' ? O.progress : 0;
     // rings (heat ring on woke, ripples on speech onsets), at most 3
@@ -1145,20 +1162,23 @@ function setTurn(on) {
 }
 // The answer row under the question: words revealed in step with the voice (the ones not said
 // yet are laid out but clear, so the row's height only changes when more text arrives), the
-// newest word warm, ROW_LINES lines at most; it scrolls by a line, never per word.
-var ROW_OUT = { lines: ['', '', ''], n: 0 };
+// newest word warm, as many lines as the window has room for (setRowMax); past that it
+// scrolls by a line, never per word.
+var ROW_OUT = { lines: [], n: 0, key: '' };
+function setRowMax(n) { n = Math.max(2, Math.round(n || 3)); if (n !== S.rowMax) { S.rowMax = n; wake(); } }
 function renderRow() {
-    var R0 = ROW_OUT;
-    if (!S.turn || !S.words.length) { R0.n = 0; R0.lines[0] = R0.lines[1] = R0.lines[2] = ''; out.row = R0; return; }
+    var R0 = ROW_OUT, M = S.rowMax;
+    if (!S.turn || !S.words.length) { if (R0.n) { R0.n = 0; R0.lines = []; R0.key = ''; } out.row = R0; return; }
     var last = 0;
     for (var i = 0; i <= S.wordIdx && i < S.words.length; i++) last = S.words[i].line;
-    S.rowTop = Math.max(S.rowTop, last - (ROW_LINES - 1));
+    S.rowTop = Math.max(S.rowTop, last - (M - 1));
     var top = S.rowTop, total = S.words[S.words.length - 1].line + 1;
-    R0.n = Math.max(0, Math.min(ROW_LINES, total - top));
-    var L = ['', '', ''], cal = MOTION !== 'full';
+    R0.n = Math.max(0, Math.min(M, total - top));
+    var L = [], cal = MOTION !== 'full';
+    for (var q = 0; q < R0.n; q++) L.push('');
     for (var z = 0; z < S.words.length; z++) {
         var wd = S.words[z], k = wd.line - top;
-        if (k < 0 || k >= ROW_LINES) continue;
+        if (k < 0 || k >= R0.n) continue;
         var a = 0, col = C.fg;
         if (wd.t !== null && z <= S.wordIdx) {
             var age = NOW - wd.t;
@@ -1167,7 +1187,7 @@ function renderRow() {
         }
         L[k] += (L[k] ? ' ' : '') + '<font color="' + hexa(col, a) + '">' + escHtml(wd.w) + '</font>';
     }
-    R0.lines[0] = L[0]; R0.lines[1] = L[1]; R0.lines[2] = L[2];
+    R0.lines = L; R0.key = R0.n + '|' + L.join('\n');
     out.row = R0;
 }
 function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }

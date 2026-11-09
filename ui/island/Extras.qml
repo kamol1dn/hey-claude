@@ -10,17 +10,19 @@ Item {
     property bool reduced: false
     property string engineState: ""
     // The open turn (one request): its question stays from "heard" until the panel
-    // collapses; the answer joins once it has been spoken (during speaking it is in
-    // the head, in step with the voice). Card, question and answer go together.
+    // collapses; the answer is revealed under it in step with the voice and stays in
+    // that same row. Card, question and answer go together.
     property string question: ""
     property string answer: ""                  // the answer so far, as text (info / tests)
+    property real maxHeight: 100000          // what the window has under the head (Island.qml)
     // The answer row: revealed in step with the voice by the engine (engine.js renderRow:
     // StyledText lines, words not said yet laid out but clear), the same row during and after
-    // speaking, so the answer is never shown twice and never moves.
-    property string row0: ""
-    property string row1: ""
-    property string row2: ""
+    // speaking, so the answer is never shown twice and never moves. It may use whatever the
+    // window has left under the head (rowMax lines), then it scrolls by a line.
+    property var rowLines: []
     property int rowN: 0
+    readonly property int rowMax: Math.max(2, Math.min(14, Math.floor((maxHeight - ((effect.ev ? effect.height : 0)
+        + approvals.height + (widget.spec ? widget.height : 0) + qrow.height) - 12) / arow.lineH)))
     readonly property bool showAnswer: rowN > 0
     signal turnCleared()
     readonly property real contentHeight: (effect.ev ? effect.height : 0) + approvals.height + (widget.spec ? widget.height : 0)
@@ -29,7 +31,7 @@ Item {
     function clearTurn() { linger.stop(); question = ""; answer = ""; turnCleared() }
     // At rest: a card keeps the turn up until it goes (then all of it collapses at
     // once); without a card the turn lingers a few seconds.
-    Timer { id: linger; interval: 4000; onTriggered: ex.clearTurn() }
+    Timer { id: linger; interval: Math.max(4000, arow.readMs); onTriggered: ex.clearTurn() }
     onRestingChanged: {
         if (!resting) { linger.stop(); return }
         if (question === "" && answer === "") return
@@ -87,21 +89,24 @@ Item {
                 model.widgetAction(wid, name, payload === undefined ? null : payload)
                 if (name === "dismiss" || name === "cancel") clear()
             }
-            onExpired: { clear(); if (ex.resting) ex.clearTurn() }
+            // a long answer still being read stays a little longer than its (private) card
+            onExpired: { clear(); if (ex.resting) { if (arow.readMs > 0) linger.restart(); else ex.clearTurn() } }
         }
         Item {
             id: arow
+            objectName: "answerRow"
             width: ex.width
             readonly property real lineH: 18
             height: ex.rowN > 0 ? ex.rowN * lineH + 12 : 0
             visible: ex.rowN > 0
+            // a long answer stays up long enough to read the lines it ended on
+            readonly property real readMs: ex.rowN > 3 ? 2500 + ex.rowN * 900 : 0
             Rectangle { x: 16; y: 10; width: 2; height: Math.max(0, ex.rowN * arow.lineH - 4); radius: 1; color: "#D97757" }
             Repeater {
-                model: 3
+                model: ex.rowN
                 Text {
                     x: 26; y: 6 + index * arow.lineH; width: ex.width - 26 - 16; height: arow.lineH
-                    visible: index < ex.rowN
-                    text: index === 0 ? ex.row0 : index === 1 ? ex.row1 : ex.row2
+                    text: ex.rowLines[index] || ""
                     textFormat: Text.StyledText; wrapMode: Text.NoWrap
                     color: "#F2F2F2"; font.family: "Segoe UI Variable Text"; font.pointSize: 10
                 }

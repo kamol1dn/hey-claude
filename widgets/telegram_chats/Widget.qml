@@ -40,6 +40,7 @@ Item {
         model: w.chats
         Item {
             id: row
+            objectName: "chatRow"
             y: index * w.rowH; width: w.width; height: w.rowH
             readonly property int unread: modelData.unread || 0
             readonly property bool hasAv: !!modelData.avatar_src
@@ -75,6 +76,7 @@ Item {
             // avatar
             Item {
                 id: avI
+                objectName: "chatAvatar"
                 x: 0; y: (w.rowH - w.av) / 2; width: w.av; height: w.av
                 Rectangle {
                     visible: !row.hasAv || avImg.status !== Image.Ready
@@ -133,6 +135,7 @@ Item {
             // time + unread badge
             Text {
                 id: timeT
+                objectName: "chatTime"
                 anchors.right: parent.right
                 y: row.unread > 0 ? (w.rowH - w.bh - 16) / 2 : (w.rowH - implicitHeight) / 2
                 text: modelData.time || ""; textFormat: Text.PlainText
@@ -141,6 +144,7 @@ Item {
             }
             Rectangle {
                 id: badge
+                objectName: "unreadBadge"
                 visible: row.unread > 0
                 anchors.right: parent.right
                 y: timeT.y + 16; height: w.bh; radius: w.bh / 2

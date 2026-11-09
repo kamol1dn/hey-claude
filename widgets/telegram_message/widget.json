@@ -11,6 +11,13 @@
  "private": true,
  "ttl_s": 12,
  "icon": "telegram",
+ "triggers": {
+  "tools": [
+   "telegram_get_messages",
+   "telegram_search_messages"
+  ],
+  "data": "telegram_messages"
+ },
  "example": {
   "chat": "Aziz",
   "link": "tg://resolve?domain=aziz",

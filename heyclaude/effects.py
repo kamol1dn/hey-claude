@@ -54,6 +54,14 @@ def parse_result(content) -> object:
     return v
 
 
+def result_text(content) -> str:
+    """A tool_result's text (the first text block), for tools that answer in markdown."""
+    if isinstance(content, list):
+        texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        content = texts[0] if texts else ""
+    return content if isinstance(content, str) else ""
+
+
 def _get(scope: dict, path: str):
     cur = scope
     for part in path.split("."):

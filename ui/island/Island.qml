@@ -73,6 +73,8 @@ Item {
     }
     // Frame pacing for the UX recorder: while the engine wants every frame (live tier),
     // ticks further apart than ~2 frames are hitches. Bounded; drained by takeHitches().
+    property string rowKey: ""
+    property int sentRowMax: -1
     property real lastTickMs: 0
     property var hitches: []
     property int liveTicks: 0
@@ -171,11 +173,11 @@ Item {
         if (words0.text !== lines[0]) words0.text = lines[0]
         if (words1.text !== lines[1]) words1.text = lines[1]
         // in a turn the answer is revealed in the row under the question instead
+        if (extras.rowMax !== root.sentRowMax) { root.sentRowMax = extras.rowMax; E.setRowMax(extras.rowMax) }
         var R = o.row
-        if (R) {
-            if (extras.row0 !== R.lines[0]) extras.row0 = R.lines[0]
-            if (extras.row1 !== R.lines[1]) extras.row1 = R.lines[1]
-            if (extras.row2 !== R.lines[2]) extras.row2 = R.lines[2]
+        if (R && R.key !== root.rowKey) {
+            root.rowKey = R.key
+            extras.rowLines = R.lines.slice(0, R.n)
             if (extras.rowN !== R.n) extras.rowN = R.n
         }
     }
@@ -459,6 +461,8 @@ Item {
                 resting: o.state === "ready" || o.state === "off" || o.state === "paused"
                 reduced: o.motion !== "full"
                 engineState: o.state || ""
+                // the panel never grows past the window (the stage's bottom, less room for the glow)
+                maxHeight: root.stageH - root.pillY - (o.headFull || o.head) - 18
                 clip: true
                 onContentHeightChanged: root.extraChanged()
                 onMinWidthChanged: root.extraChanged()
@@ -471,6 +475,16 @@ Item {
             anchors.fill: parent; radius: o.rad
             visible: extras.flash > 0.005
             color: "white"; opacity: extras.flash
+        }
+        // quiet followup (a card or the turn is open): a hairline along the panel's
+        // bottom edge, centred, shrinking as the followup window runs out
+        Rectangle {
+            objectName: "followupDrain"
+            readonly property real span: Math.max(0, o.w - 2 * Math.max(o.rad, 14))
+            visible: (o.drainA || 0) > 0.01
+            x: (o.w - width) / 2; y: o.h - 3
+            width: span * (o.drainU || 0); height: 1.5; radius: 0.75
+            color: root.cLive; opacity: 0.85 * (o.drainA || 0)
         }
 
         // ---- tools in use (thinking): service icons, stacked for parallel calls --------
@@ -602,6 +616,8 @@ Item {
         p.ctl = o.ctl || 0; p.notme = o.notme || 0; p.ctlCy = o.ctlCy; p.pillX = root.pillX; p.pillY = root.pillY; p.ow = o.w; p.oh = o.h
         return p }
     function takeHitches() { var h = root.hitches; root.hitches = []; var n = root.liveTicks; root.liveTicks = 0; return { hitches: h, live: n } }
-    function probe() { return { er: o.er, w: o.w, h: o.h, state: o.state, glowA: o.glowA, hide: o.hide } }
+    function probe() { return { er: o.er, w: o.w, h: o.h, state: o.state, glowA: o.glowA, hide: o.hide,
+                                thrA: o.thrA || 0, washA: o.washA || 0, dotsA: o.dotsA || 0, drainA: o.drainA || 0, drainU: o.drainU || 0,
+                                labels: (o.lb || []).filter(function (l) { return !l.out && (l.a || 0) > 0.05 }).map(function (l) { return l.text }) } }
     function measure(s, big) { return (big ? fm10 : fm9).advanceWidth(s) }
 }

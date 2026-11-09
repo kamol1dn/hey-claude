@@ -627,7 +627,7 @@ class Agent:
                              timeout=float(a.get("timeout", 180)))
         self.reported = False
         # M9: tool calls are watched so changes get an island effect and an undo.
-        self.on_tool_result = None          # callback(name, input, result, is_error)
+        self.on_tool_result = None          # callback(name, input, result, is_error, raw=text)
         self.on_tool_use = None             # M5: callback({"id", "name", "phase": "start"|"end", "input"}) for the icons
         self._pending_tools: dict[str, tuple[str, dict]] = {}
         self.chat.on_tool = self._tool_event
@@ -644,8 +644,10 @@ class Agent:
         name, args = self._pending_tools.pop(block.get("tool_use_id", ""), ("", {}))
         if not name or self.on_tool_result is None:
             return
-        from .effects import parse_result
-        self.on_tool_result(name, args, parse_result(block.get("content")), bool(block.get("is_error")))
+        from .effects import parse_result, result_text
+        content = block.get("content")
+        self.on_tool_result(name, args, parse_result(content), bool(block.get("is_error")),
+                            raw=result_text(content))
 
     def _args(self) -> list[str]:
         """With conversation.save on, the session is saved and named per day

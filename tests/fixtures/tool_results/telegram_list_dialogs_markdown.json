@@ -1,0 +1,20 @@
+{
+ "note": "the server's default markdown (what the bug report's turn got)",
+ "tool": "mcp__telegram__telegram_list_dialogs",
+ "args": {
+  "limit": 7
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# Conversations (7)\n\n- **Nova Test** @nova_test [user, id: 1001] (2 unread) — \"are we still on for seven?\"\n- **Island crew** [group, id: -1002003] (14 unread) — \"new mocks are up see the doc\"\n- **Sample Parent** [user, id: 1003] (1 unread) — \"call me when you can\"\n- **Sam Example** @sam_example [user, id: 1004] — \"sounds good\"\n- **Release notes (demo)** [channel, id: -1005] (3 unread) — \"v0.5 is out\"\n- **Quiet Contact** [user, id: 1006]\n- **Seventh Chat** [user, id: 1007] (5 unread) — \"beyond the six the card shows\""
+  }
+ ],
+ "expect": {
+  "widget": "telegram_chats",
+  "title": "Telegram · chats",
+  "rows": 6,
+  "badges": 4,
+  "icon": true
+ }
+}

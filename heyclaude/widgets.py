@@ -165,26 +165,174 @@ def normalise(spec) -> dict | None:
     return out
 
 
-def from_tool(tool: str, args: dict | None, result) -> dict | None:
-    """A widget straight from a tool result (a manifest's triggers), or None."""
-    if not isinstance(result, dict):
-        return None
+def _tool_matches(tool: str, names) -> bool:
+    """A trigger names a tool in full (mcp__weather__get_weather) or by its own
+    name (telegram_list_dialogs), whatever the MCP server is called locally."""
+    return any(tool == n or tool.endswith("__" + n) for n in names or [])
+
+
+def from_tool(tool: str, args: dict | None, result, raw: str | None = None) -> dict | None:
+    """A widget straight from a tool result (a manifest's triggers), or None.
+
+    `result` is the tool's JSON (or None); `raw` its text, for tools that answer
+    in markdown (the Telegram server does unless asked for JSON). A manifest's
+    `triggers.data` is "result" (the JSON is the card's data) or the name of an
+    adapter in ADAPTERS that turns the result into the card's data."""
     for wid, man in registry().items():
         trig = man.get("triggers") or {}
-        if tool in (trig.get("tools") or []):
-            data = result if trig.get("data", "result") == "result" else None
-            return normalise({"widget": wid, "data": data, "text": ""})
+        if not _tool_matches(tool, trig.get("tools")):
+            continue
+        how = trig.get("data", "result")
+        if how == "result":
+            data = result if isinstance(result, dict) else None
+        elif how in ADAPTERS:
+            try:
+                data = ADAPTERS[how](args or {}, result, raw or "")
+            except Exception as e:                     # a tool's odd output never breaks the turn
+                print(f"[widget] {how}: {e}")
+                data = None
+        else:
+            print(f"[widget] {wid}: no adapter {how!r}")
+            data = None
+        if not data:
+            return None
+        return normalise({"widget": wid, "data": data, "text": ""})
     return None
 
 
+# ------------------------------------------------------- tool-result adapters
+def _clip(s, n: int) -> str:
+    s = re.sub(r"\s+", " ", str(s or "")).strip()
+    return s if len(s) <= n else s[: n - 1].rstrip() + "…"
+
+
+def _local_hhmm(iso: str) -> str:
+    """"2026-11-09T14:02:11.000Z" (UTC) -> "19:02" in local time; "" when unreadable."""
+    from datetime import datetime
+    s = str(iso or "").strip()
+    if not s:
+        return ""
+    try:
+        if re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d", s):      # the markdown form, UTC
+            s += "Z"
+        d = datetime.fromisoformat(s.replace("Z", "+00:00").replace(" ", "T"))
+        if d.tzinfo is None:
+            return d.strftime("%H:%M")
+        return d.astimezone().strftime("%H:%M")
+    except ValueError:
+        return ""
+
+
+def _tg_link(username: str) -> str:
+    u = str(username or "").lstrip("@")
+    return f"tg://resolve?domain={u}" if re.fullmatch(r"[A-Za-z0-9_]{3,64}", u) else ""
+
+
+def _json_of(result, raw: str):
+    if isinstance(result, dict):
+        return result
+    try:
+        v = json.loads(raw) if raw.lstrip().startswith("{") else None
+    except ValueError:
+        v = None
+    return v if isinstance(v, dict) else None
+
+
+_DIALOG_LINE = re.compile(r'^- \*\*(?P<name>.+?)\*\*(?: @(?P<user>\w+))? \[[^\]]*\]'
+                          r'(?: \((?P<unread>\d+) unread\))?(?: — "(?P<last>.*)")?\s*$')
+
+
+def _telegram_dialogs(args: dict, result, raw: str) -> dict | None:
+    """telegram_list_dialogs -> telegram_chats (at most 6, as listed: pinned and newest first)."""
+    v = _json_of(result, raw)
+    chats = []
+    if v is not None and isinstance(v.get("dialogs"), list):
+        for d in v["dialogs"]:
+            if not isinstance(d, dict) or not d.get("name"):
+                continue
+            last = d.get("lastMessage") if isinstance(d.get("lastMessage"), dict) else {}
+            text = last.get("text") or ""
+            if last.get("outgoing") and text:
+                text = "You: " + text
+            c = {"name": _clip(d["name"], 50), "unread": max(0, int(d.get("unreadCount") or 0)),
+                 "last": _clip(text, 120), "time": _local_hhmm(last.get("date", ""))}
+            link = _tg_link(d.get("username", ""))
+            if link:
+                c["link"] = link
+            chats.append(c)
+    else:
+        for line in raw.splitlines():
+            m = _DIALOG_LINE.match(line.strip())
+            if not m:
+                continue
+            c = {"name": _clip(m["name"], 50), "unread": int(m["unread"] or 0), "last": _clip(m["last"] or "", 120)}
+            link = _tg_link(m["user"] or "")
+            if link:
+                c["link"] = link
+            chats.append(c)
+    chats = [{k: v for k, v in c.items() if v != ""} for c in chats[:6]]
+    return {"chats": chats} if chats else None
+
+
+_MESSAGE_LINE = re.compile(r"^- \[(?P<id>\d+)\] (?P<when>\d{4}-\d\d-\d\d \d\d:\d\d) \*\*(?P<who>.+?)\*\*"
+                           r"(?: \(reply to \d+\))?: (?P<text>.*)$")
+
+
+def _telegram_messages(args: dict, result, raw: str) -> dict | None:
+    """telegram_get_messages / _search_messages -> telegram_message: the newest
+    five, oldest first, so it reads like the chat; yours are indented."""
+    v = _json_of(result, raw)
+    msgs = []
+    if v is not None and isinstance(v.get("messages"), list):
+        for m in v["messages"]:
+            if not isinstance(m, dict):
+                continue
+            text = m.get("text") or (f"[{m['media'].get('type', 'media')}]" if isinstance(m.get("media"), dict) else "")
+            if not text:
+                continue
+            mine = bool(m.get("outgoing"))
+            msgs.append({"sender": "You" if mine else _clip(m.get("senderName") or "", 50),
+                         "text": _clip(text, 600), "time": _local_hhmm(m.get("date", "")), "reply": mine})
+    else:
+        for line in raw.splitlines():
+            m = _MESSAGE_LINE.match(line.strip())
+            if not m or m["text"] == "[no text]":
+                continue
+            mine = m["who"] == "me"
+            msgs.append({"sender": "You" if mine else _clip(m["who"], 50), "text": _clip(m["text"], 600),
+                         "time": _local_hhmm(m["when"]), "reply": mine})
+    if not msgs:
+        return None
+    msgs = list(reversed(msgs[:5]))                    # the tool lists newest first
+    msgs = [{k: v for k, v in m.items() if v not in ("", None)} for m in msgs]
+    data = {"messages": msgs}
+    chat = str(args.get("chat") or "").strip()
+    if chat and not re.fullmatch(r"-?\d+", chat):      # a name or @handle, not a bare id
+        data["chat"] = _clip(chat.lstrip("@"), 50)
+        link = _tg_link(chat) if chat.startswith("@") else ""
+        if link:
+            data["link"] = link
+    elif args.get("query"):
+        data["chat"] = _clip(f"“{args['query']}”", 50)
+    else:
+        senders = {m.get("sender") for m in msgs if not m.get("reply") and m.get("sender")}
+        if len(senders) == 1:
+            data["chat"] = senders.pop()
+    return data
+
+
+ADAPTERS = {"telegram_dialogs": _telegram_dialogs, "telegram_messages": _telegram_messages}
+
+
 def title_for(man: dict, data: dict) -> str:
-    """The card header from the manifest's template ("Weather · {location}")."""
+    """The card header from the manifest's template ("Weather · {location}").
+    Empty when the template has nothing to show (a text card without a title):
+    the card then has no header, never the widget's type name."""
     def sub(m):
         v = data.get(m.group(1))
         return "" if v is None else str(v)
-    t = re.sub(r"\{(\w+)\}", sub, man.get("title") or man.get("name") or "")
-    t = re.sub(r"\s*·\s*$", "", t).strip(" ·")
-    return t or man.get("name", "")
+    t = re.sub(r"\{(\w+)\}", sub, man.get("title") or "")
+    return re.sub(r"\s*·\s*$", "", t).strip(" ·")
 
 
 def _fallback(out: dict, why: str) -> dict | None:

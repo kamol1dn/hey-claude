@@ -1,0 +1,20 @@
+{
+ "note": "global search, json",
+ "tool": "mcp__telegram__telegram_search_messages",
+ "args": {
+  "query": "projector",
+  "response_format": "json"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"query\": \"projector\",\n  \"scope\": \"global\",\n  \"count\": 2,\n  \"messages\": [\n    {\n      \"id\": 54,\n      \"chatId\": \"1001\",\n      \"date\": \"2026-11-09T13:42:10.000Z\",\n      \"text\": \"I can bring the projector\",\n      \"outgoing\": false,\n      \"senderId\": \"2002\",\n      \"senderName\": \"Nova Test\"\n    },\n    {\n      \"id\": 901,\n      \"chatId\": \"-1002003\",\n      \"date\": \"2026-11-08T12:00:00.000Z\",\n      \"text\": \"the projector is in room 2\",\n      \"outgoing\": false,\n      \"senderId\": \"2002\",\n      \"senderName\": \"Lin Sample\"\n    }\n  ]\n}"
+  }
+ ],
+ "expect": {
+  "widget": "telegram_message",
+  "title": "Telegram · “projector”",
+  "rows": 2,
+  "icon": true
+ }
+}

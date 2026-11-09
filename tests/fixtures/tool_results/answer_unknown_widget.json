@@ -1,0 +1,9 @@
+{
+ "note": "an unknown widget falls back to a text card: still no type name",
+ "answer": "Done.\nWIDGET {\"widget\": \"chat_list\", \"data\": {}, \"text\": \"Two chats need you.\"}",
+ "expect": {
+  "widget": "text",
+  "title": "",
+  "icon": false
+ }
+}

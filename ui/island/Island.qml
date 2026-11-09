@@ -430,6 +430,8 @@ Item {
             resting: o.state === "ready" || o.state === "off" || o.state === "paused"
             reduced: o.motion !== "full"
             engineState: o.state || ""
+            // the panel never grows past the window (the stage's bottom, less room for the glow)
+            maxHeight: root.stageH - root.pillY - (o.headFull || o.head) - 18
             clip: true
             onContentHeightChanged: root.extraChanged()
             onMinWidthChanged: root.extraChanged()
@@ -439,6 +441,16 @@ Item {
             anchors.fill: parent; radius: o.rad
             visible: extras.flash > 0.005
             color: "white"; opacity: extras.flash
+        }
+        // quiet followup (a card or the turn is open): a hairline along the panel's
+        // bottom edge, centred, shrinking as the followup window runs out
+        Rectangle {
+            objectName: "followupDrain"
+            readonly property real span: Math.max(0, o.w - 2 * Math.max(o.rad, 14))
+            visible: (o.drainA || 0) > 0.01
+            x: (o.w - width) / 2; y: o.h - 3
+            width: span * (o.drainU || 0); height: 1.5; radius: 0.75
+            color: root.cLive; opacity: 0.85 * (o.drainA || 0)
         }
 
         // ---- tools in use (thinking): service icons, stacked for parallel calls --------
@@ -565,6 +577,8 @@ Item {
     function busyWhy() { return E.busyWhy() + " | frames.running " + frames.running + " rest " + rest.running + "/" + rest.interval }
     function extrasInfo() { var i = extras.info(); i.pillW = o.w; i.pillH = o.h; i.head = o.head; return i }
     function hit(x, y) { return hitCtl(x, y) }
-    function probe() { return { er: o.er, w: o.w, h: o.h, state: o.state, glowA: o.glowA, hide: o.hide } }
+    function probe() { return { er: o.er, w: o.w, h: o.h, state: o.state, glowA: o.glowA, hide: o.hide,
+                                thrA: o.thrA || 0, washA: o.washA || 0, dotsA: o.dotsA || 0, drainA: o.drainA || 0, drainU: o.drainU || 0,
+                                labels: (o.lb || []).filter(function (l) { return !l.out && (l.a || 0) > 0.05 }).map(function (l) { return l.text }) } }
     function measure(s, big) { return (big ? fm10 : fm9).advanceWidth(s) }
 }

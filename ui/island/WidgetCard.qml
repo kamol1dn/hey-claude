@@ -8,6 +8,7 @@ import QtQuick
 // after the island rests (personal ones, like Telegram, fade after 4 s).
 Item {
     id: card
+    objectName: "widgetCard"
     property var spec: null                 // {id, widget, data, title, glyph, icon_url, qml, width, max_height, ttl_s, private}
     property bool resting: false
     property bool reduced: false
@@ -15,7 +16,10 @@ Item {
     readonly property bool holds: loader.item !== null && loader.item.holds === true
     signal action(string wid, string name, var payload)
     signal expired()
-    readonly property real headH: 30
+    // A card with nothing to say in its header (a text card without a title) has
+    // none: never a type name like "Text". The body then starts near the top.
+    readonly property bool hasHead: spec !== null && ((spec.title || "") !== "" || (spec.icon_url || "") !== "" || (spec.glyph || "") !== "")
+    readonly property real headH: hasHead ? 30 : 12
     readonly property real minWidth: spec ? Math.max(spec.width || 400, loader.item && loader.item.minWidth ? loader.item.minWidth : 0) : 0
     readonly property bool ready: loader.status === Loader.Ready && loader.item !== null && loader.item.implicitHeight > 0
     readonly property string source: String(loader.source)
@@ -75,10 +79,13 @@ Item {
     // ---- header: glyph or service icon, title ------------------------------------------
     Item {
         id: head
+        objectName: "cardHeader"
         x: 16; y: 0; width: card.width - 32; height: card.headH
+        visible: card.hasHead
         opacity: 0
         ServiceIcon {
             id: hicon
+            objectName: "cardIcon"
             y: (parent.height - 14) / 2; size: 14
             url: card.spec ? card.spec.icon_url || "" : ""
             glyph: card.spec ? card.spec.glyph || "" : ""
@@ -86,6 +93,7 @@ Item {
             visible: url !== "" || glyph !== ""
         }
         Text {
+            objectName: "cardTitle"
             x: hicon.visible ? 22 : 0; width: parent.width - x - 24; height: parent.height; verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
             text: card.spec ? card.spec.title || "" : ""
@@ -109,7 +117,7 @@ Item {
     }
     Rectangle {
         visible: hov.containsMouse || closeMa.containsMouse
-        x: card.width - 34; y: (card.headH - 18) / 2; width: 18; height: 18; radius: 9
+        x: card.width - 34; y: card.hasHead ? (card.headH - 18) / 2 : 2; width: 18; height: 18; radius: 9
         color: Qt.rgba(1, 1, 1, closeMa.containsMouse ? 0.2 : 0.08)
         Text { anchors.centerIn: parent; text: "×"; color: "#F2F2F2"; font.pointSize: 9 }
         MouseArea { id: closeMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor

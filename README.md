@@ -622,7 +622,15 @@ line: white is you, terracotta is Claude).
   Telegram chats / message / draft. The draft has Send, Edit and Cancel; Send
   stays disabled until M7's approvals exist. An answer may end with
   `WIDGET {...}` (never read aloud), or a tool's result becomes the card by
-  itself. The design is [docs/widgets-preview.html](docs/widgets-preview.html).
+  itself: Telegram's chat list, message history and search (JSON or the
+  server's markdown) become the chats and message cards. A card without a
+  title has no header. The answer stays on the panel in full: it grows to
+  the window, then scrolls at a reading pace (never an ellipsis). While a
+  card is open, the followup cue is a hairline draining along the panel's
+  bottom edge instead of the thread and "go on". The design is
+  [docs/widgets-preview.html](docs/widgets-preview.html); CI renders every
+  recorded tool result in `tests/fixtures/tool_results/` on the live island
+  and checks it against the preview's structure.
 - **Widgets are plug-ins:** each is a folder `widgets/<id>/` with
   `widget.json` (its data schema, an example, size, title, which tools
   trigger it) and `Widget.qml`. Add one by PR without touching the island.

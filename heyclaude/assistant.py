@@ -422,15 +422,26 @@ class Assistant:
         if sig is not None:
             sig.emit(ev)
 
-    def _on_tool_result(self, name: str, args: dict, result, is_error: bool):
+    def _covered_by_tool_widget(self, spec: dict, gen: int) -> bool:
+        """This turn's tool already made a card (Telegram chats, weather): a text
+        card or a hand-written copy of a tool card from the model doesn't replace it."""
+        shown = getattr(self, "_tool_widget", None)
+        if not shown or shown[0] != gen:
+            return False
+        from .widgets import registry
+        name = spec.get("widget")
+        return name == "text" or name == shown[1] or bool((registry().get(name) or {}).get("triggers"))
+
+    def _on_tool_result(self, name: str, args: dict, result, is_error: bool, raw: str = ""):
         """The agent ran a tool (its process's thread): show the effect, remember the undo."""
         if is_error:
             return
         try:                                    # M5: a widget straight from the tool result (weather)
             from .widgets import from_tool
-            spec = from_tool(name, args, result)
+            spec = from_tool(name, args, result, raw)
             if spec is not None:
                 print(f"[widget] {spec['widget']} from {name}")
+                self._tool_widget = (self.gen, spec["widget"])
                 self._ui_emit("widget", spec)
         except Exception as e:
             print(f"[widget] {name}: {e}")
@@ -888,8 +899,11 @@ class Assistant:
             said.append(rest)
             self.speaker.feed(rest)
         if wf.spec is not None and gen == self.gen:
-            print(f"[widget] {wf.spec.get('widget')}")
-            self._ui_emit("widget", wf.spec)
+            if self._covered_by_tool_widget(wf.spec, gen):
+                print(f"[widget] {wf.spec.get('widget')} skipped: the tool's own card is showing")
+            else:
+                print(f"[widget] {wf.spec.get('widget')}")
+                self._ui_emit("widget", wf.spec)
         self._wf = None
         self.speaker.flush()
         if answered and gen == self.gen:

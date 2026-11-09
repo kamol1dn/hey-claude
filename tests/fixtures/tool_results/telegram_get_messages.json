@@ -1,0 +1,21 @@
+{
+ "note": "response_format json",
+ "tool": "mcp__telegram__telegram_get_messages",
+ "args": {
+  "chat": "@nova_test",
+  "limit": 6,
+  "response_format": "json"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"chatId\": \"1001\",\n  \"count\": 6,\n  \"messages\": [\n    {\n      \"id\": 55,\n      \"chatId\": \"1001\",\n      \"date\": \"2026-11-09T13:44:00.000Z\",\n      \"text\": \"yes! bring it\",\n      \"outgoing\": true\n    },\n    {\n      \"id\": 54,\n      \"chatId\": \"1001\",\n      \"date\": \"2026-11-09T13:42:10.000Z\",\n      \"text\": \"are we still on for seven? I can bring the projector\",\n      \"outgoing\": false,\n      \"senderId\": \"2002\",\n      \"senderName\": \"Nova Test\"\n    },\n    {\n      \"id\": 53,\n      \"chatId\": \"1001\",\n      \"date\": \"2026-11-09T13:40:00.000Z\",\n      \"text\": \"did you see the new island build?\",\n      \"outgoing\": false,\n      \"senderId\": \"2002\",\n      \"senderName\": \"Nova Test\"\n    },\n    {\n      \"id\": 52,\n      \"chatId\": \"1001\",\n      \"date\": \"2026-11-09T09:00:00.000Z\",\n      \"text\": \"\",\n      \"outgoing\": false,\n      \"senderId\": \"2002\",\n      \"senderName\": \"Nova Test\",\n      \"media\": {\n        \"type\": \"photo\"\n      }\n    },\n    {\n      \"id\": 51,\n      \"chatId\": \"1001\",\n      \"date\": \"2026-11-08T20:00:00.000Z\",\n      \"text\": \"morning!\",\n      \"outgoing\": false,\n      \"senderId\": \"2002\",\n      \"senderName\": \"Nova Test\"\n    },\n    {\n      \"id\": 50,\n      \"chatId\": \"1001\",\n      \"date\": \"2026-11-08T19:00:00.000Z\",\n      \"text\": \"older than the five the card shows\",\n      \"outgoing\": false,\n      \"senderId\": \"2002\",\n      \"senderName\": \"Nova Test\"\n    }\n  ],\n  \"next_offset_id\": 50\n}"
+  }
+ ],
+ "expect": {
+  "widget": "telegram_message",
+  "title": "Telegram · nova_test",
+  "rows": 5,
+  "icon": true
+ }
+}

@@ -1,0 +1,9 @@
+name: instant_near_miss
+desc: "M10: things that sound like commands but are not: they must reach Claude and change nothing"
+steps:
+  - ask: "What is the volume of a sphere?"
+  - until: {what: answer, timeout: 40}
+  - until: {what: done, timeout: 40}
+  - ask: "How bright is the sun?"
+  - until: {what: answer, timeout: 40}
+expect: {route: "!instant", no_effect: true, answer: true}

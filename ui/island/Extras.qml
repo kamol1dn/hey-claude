@@ -30,7 +30,7 @@ Item {
         + qrow.height + arow.height
     readonly property real minWidth: Math.max(effect.ev ? effect.minWidth : 0, approvals.count ? 440 : 0, widget.spec ? widget.minWidth : 0)
     // the whole panel goes at once: card, question and answer together
-    function clearTurn() { linger.stop(); if (widget.spec) widget.clear(); question = ""; answer = ""; turnCleared() }
+    function clearTurn() { linger.stop(); if (widget.spec) widget.clear(); if (effect.ev && !effect.isConfirm) effect.clear(); question = ""; answer = ""; turnCleared() }
     // At rest: a card keeps the turn up until it goes (then all of it collapses at
     // once); without a card the turn lingers a few seconds.
     Timer { id: linger; interval: Math.max(4000, arow.readMs); onTriggered: ex.clearTurn() }
@@ -57,7 +57,9 @@ Item {
             width: ex.width
             visible: ev !== null
             onClicked: function (what) { if (model && ev) model.effectClicked(what, ev.id); clear() }
-            onDone: clear()
+            // at rest with the turn still lingering, the row goes with it (one collapse, not two:
+            // an instant command's turn is short, so its effect outlives the answer)
+            onDone: { if (ex.resting && linger.running && (ex.question !== "" || ex.showAnswer)) return; clear() }
         }
         Column {
             id: approvals

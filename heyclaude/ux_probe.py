@@ -94,7 +94,8 @@ class Recorder:
             if sig is not None:
                 sig.connect(fn)
         on("state", lambda m, t: self.add("state", mode=m, text=str(t)[:300]))
-        on("turn", lambda d: self.add("turn", question=str((d or {}).get("question", ""))[:300]))
+        on("turn", lambda d: self.add("turn", question=str((d or {}).get("question", ""))[:300],
+                                      **({"announcement": True} if (d or {}).get("announcement") else {})))
         on("spoken", lambda t, s: self.add("spoken", text=str(t)[:300], secs=float(s)))
         on("widget", lambda d: self.add("widget", widget=str((d or {}).get("widget", ""))))
         on("tool", lambda d: self.add("tool", name=str((d or {}).get("name", "")), phase=str((d or {}).get("phase", ""))))
@@ -315,8 +316,8 @@ def turns(events: list[dict]) -> list[dict]:
         users = [e for e in ev if e["k"] == "user" and e.get("t1", e["t"]) <= t0 + 0.05]
         acts = [e for e in ev if e["k"] == "action" and e["t"] <= t0 and e.get("what") in ("type_submit", "click_submit")]
         speech_end = max([u.get("t1", u["t"]) for u in users] + [a["t"] for a in acts] + [t0 - 30])
-        if speech_end < t0 - 20:
-            speech_end = t0
+        if speech_end < t0 - 20 or s.get("announcement"):
+            speech_end = t0                     # an announcement (a timer ended) answers no one's speech
         stopped = [e["t"] for e in ev if e["k"] == "action" and t0 <= e["t"] < t1
                    and e.get("what") in ("click_stop", "esc", "hotkey", "barge_in", "click_mic", "not_me", "wake")]
         answer_end = max([a["t1"] for a in audio] + [t0])
@@ -615,9 +616,10 @@ def _latency(ev, tr, ss):
     aud = next((a["t0"] - se for a in tr["audio"]), None)
     ans = next((a["t0"] - se for a in tr["audio"] if not a["filler"]), None)
     wid = first(lambda e: e["k"] == "w_shown" and e["t"] < tr["t1"])
+    eff = first(lambda e: e["k"] == "effect" and e["t"] < tr["t1"])         # M10: the change landed
     r = lambda v: round(v, 3) if v is not None else None   # noqa: E731
-    return {"question": tr["question"][:80], "first_visual": r(vis), "first_audio": r(aud), "widget": r(wid),
-            "answer": r(ans), "answer_end": r(tr["answer_end"] - se)}
+    return {"question": tr["question"][:80], "first_visual": r(vis), "effect": r(eff), "first_audio": r(aud),
+            "widget": r(wid), "answer": r(ans), "answer_end": r(tr["answer_end"] - se)}
 
 
 def _overlaps(ev):

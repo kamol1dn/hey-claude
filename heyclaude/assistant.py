@@ -19,7 +19,7 @@ from .vad import TurnListener, make_vad
 
 # Short acks for instant commands, synthesised ahead (tts.Speaker.prewarm) so they play at once.
 INSTANT_ACKS = ("Muted.", "Sound on.", "Dark mode.", "Light mode.", "Skipped.", "Paused.", "Playing.", "Going back.",
-                "Timer cancelled.", "Locked.", "Volume 30.", "Volume 50.")
+                "Timer cancelled.", "Locked.", "Volume 30.", "Volume 50.", "Your timer is done.")
 
 
 class _Either:
@@ -127,6 +127,13 @@ class Assistant:
             self._speaking_text = text
             self._ui_emit("turn", {"question": about or "announcement", "announcement": True})
             self.speaker.announce(text)
+            if self.mode in ("idle", "off"):
+                # its own turn: not "at rest" while the voice gets ready (speaking follows at the first
+                # sound; the synthesis takes far longer than this check)
+                self.set_mode("thinking", about or "announcement")
+                t = threading.Timer(15.0, lambda: self.rest() if self.mode == "thinking" and not self._busy() else None)
+                t.daemon = True
+                t.start()                       # the voice never started (no audio device): don't stay "thinking"
         threading.Thread(target=go, daemon=True, name="announce").start()
 
     def _ui_emit(self, name: str, *args):
@@ -578,6 +585,11 @@ class Assistant:
                     print(f"[instant] {len(names)} apps can be opened by name")
                 except Exception as e:
                     print(f"[instant] no app list ({e}); common app names only")
+                try:                            # pay pycaw's first-call cost (~0.2 s) now, with a read
+                    from .mcp_windows import registry
+                    registry.call("get_volume", {})
+                except Exception:
+                    pass
             threading.Thread(target=apps, daemon=True, name="instant-apps").start()
         sp = getattr(self, "speaker", None)
         if sp is not None and hasattr(sp, "prewarm") and self._instant_ack() == "speak":

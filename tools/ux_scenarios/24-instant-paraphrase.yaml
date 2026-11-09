@@ -1,0 +1,10 @@
+name: instant_paraphrase
+desc: "M10: paraphrases the grammar does not spell out (the classifier), still instant; the volume is put back"
+steps:
+  - check_volume: {}
+  - ask: "My ears hurt, it is too loud."
+  - until: {what: done, timeout: 20}
+  - ask: "Could you make the music a little quieter for me?"
+  - until: {what: done, timeout: 20}
+  - check_volume: {}
+expect: {route: instant, effect: volume, effect_within: 1.5}

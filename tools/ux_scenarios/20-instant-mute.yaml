@@ -1,0 +1,10 @@
+name: instant_mute
+desc: "M10: mute, then unmute, both instant; the volume and mute are put back"
+steps:
+  - check_volume: {}
+  - ask: "Mute."
+  - until: {what: done, timeout: 20}
+  - ask: "Unmute."
+  - until: {what: done, timeout: 20}
+  - check_volume: {}
+expect: {route: instant, effect: mute, effect_within: 1.5}

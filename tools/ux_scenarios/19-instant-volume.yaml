@@ -1,0 +1,11 @@
+name: instant_volume
+desc: "M10: an instant volume step, then a follow-up on it in the follow-up window (no model); the volume is put back"
+steps:
+  - check_volume: {}
+  - ask: "Turn the volume down a bit."
+  - until: {what: followup, timeout: 20}
+  - wait: 0.6
+  - say: {text: "A bit more.", voice: am_michael}
+  - until: {what: done, timeout: 20}
+  - check_volume: {}
+expect: {route: instant, effect: volume, effect_within: 1.5, turns: 2}

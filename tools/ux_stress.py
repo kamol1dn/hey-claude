@@ -25,6 +25,15 @@ plus the volume (state/ux/config.harness.yaml), every tool call is audited (the
 run stops on anything else), the volume is put back after each scenario, tasks
 only run in state/ux/scratch, and no message, mail or event is ever sent or
 changed. The user's own hey-claude must not be running (one GPU).
+
+Instant commands (M10) run their settings tool in-process, not through the
+agent: in a live run they may only use INSTANT_SAFE (volume, mute, theme,
+brightness, media, reads); anything else is refused before it runs (and
+listed as a refused attempt). The volume, mute, colour mode and brightness
+are snapshotted before each scenario and put back if a scenario changed
+them; a timer a scenario set is cancelled at its end. "next song" (scenario
+22) skips your real track if something is playing, then "undo that" goes
+back to it; with nothing playing it just says so.
 """
 from __future__ import annotations
 
@@ -278,6 +287,59 @@ class Audit:
         self.on_violation(name)
 
 
+# M10: the settings instant commands may change in a live run (all put back by settings_restore).
+INSTANT_SAFE = re.compile(r"^(?:mcp__windows__)?(set_volume|set_mute|set_theme|set_brightness|media_control|now_playing|"
+                          r"get_volume|get_theme|get_brightness)$")
+
+
+def settings_now() -> dict:
+    """Volume + mute, colour mode and brightness, to put back after a scenario."""
+    out = {"volume": volume_now()}
+    try:
+        from heyclaude.mcp_windows import display
+        out["theme"] = display.get_theme()
+    except Exception as e:
+        print(f"[ux] can't read the colour mode: {e}")
+    try:
+        from heyclaude.mcp_windows import display
+        out["brightness"] = display.get_brightness()
+    except Exception:
+        out["brightness"] = None                    # no panel / DDC: nothing to restore
+    return out
+
+
+def settings_restore(snap: dict, touched: set) -> dict:
+    """Put back what a scenario changed (only the kinds it touched). Returns what was restored."""
+    done = {}
+    if "volume" in touched or "mute" in touched:
+        r = volume_restore(snap.get("volume"))
+        if r:
+            done["volume"] = r
+    th = snap.get("theme")
+    if "theme" in touched and th:
+        try:
+            from heyclaude.mcp_windows import display
+            now = display.get_theme()
+            if (now.get("apps"), now.get("system")) != (th.get("apps"), th.get("system")):
+                display.restore_theme(1 if th["apps"] == "light" else 0 if th["apps"] == "dark" else None,
+                                      1 if th["system"] == "light" else 0 if th["system"] == "dark" else None)
+                done["theme"] = f"{now.get('mode')} -> {display.get_theme().get('mode')}"
+                print(f"[ux] colour mode restored: {done['theme']}")
+        except Exception as e:
+            print(f"[ux] couldn't restore the colour mode: {e}")
+    br = snap.get("brightness")
+    if "brightness" in touched and br and br.get("monitors"):
+        try:
+            from heyclaude.mcp_windows import display
+            mons = [{"id": m["id"], "old": m["level"]} for m in br["monitors"] if m.get("level") is not None]
+            display.restore_brightness(mons)
+            done["brightness"] = True
+            print("[ux] brightness restored")
+        except Exception as e:
+            print(f"[ux] couldn't restore the brightness: {e}")
+    return done
+
+
 def volume_now():
     try:
         from heyclaude.mcp_windows import audio
@@ -432,6 +494,7 @@ class Harness:
         self.audit = Audit(self._violation)
         self.volume0 = None if self.offline else volume_now()
         self.ctx = None
+        self.instant_refused: list[str] = []
 
     # -- main() hooks ------------------------------------------------------------------
     def configure(self, cfg):
@@ -486,6 +549,7 @@ class Harness:
                         orig(s)
                     asst.far.push = push
             self.rec.hook_assistant(asst)
+            self._guard_instant(asst)
             ag = getattr(getattr(asst, "brain", None), "agent", None)
             if ag is not None and ag.on_tool_result is not None:
                 orig_res = ag.on_tool_result
@@ -509,6 +573,23 @@ class Harness:
         finally:
             self.finish()
 
+    def _guard_instant(self, asst):
+        """Live runs: an instant command may only touch INSTANT_SAFE settings (all restored)."""
+        ex = getattr(asst, "instant_exec", None)
+        if ex is None or self.offline:
+            return
+        orig = ex.runner
+
+        def runner(name, args, orig=orig):
+            if not INSTANT_SAFE.match(name):
+                self.instant_refused.append(name)
+                self.audit.attempts.append(f"instant:{name}")
+                print(f"[ux] SAFETY: an instant command wanted {name}; refused")
+                raise PermissionError(f"{name} is not allowed in a UX run")
+            self.audit.calls.append("instant:" + name)
+            return orig(name, args)
+        ex.runner = runner
+
     def run_one(self, sc: dict, n: int):
         asst = self.ctx["asst"]
         name = f"{sc['name']}-{n + 1}"
@@ -518,7 +599,8 @@ class Harness:
             g = wait_gpu()
             print(f"[ux] GPU {g}%")
         self._settle(25)
-        vol0 = None if self.offline else volume_now()
+        snap = None if self.offline else settings_now()
+        n_tim = len(asst.timings)
         self.rec.grab_dir = d / "frames"
         self.rec.grabbing = True
         t0 = time.perf_counter()
@@ -544,17 +626,24 @@ class Harness:
         self.rec.grabbing = False
         self.rec.flush_grabs()
         ev = self.rec.since(t0, t1)
-        # put the volume back only if the agent changed it in this scenario (a volume effect):
+        # put a setting back only if the app changed it in this scenario (its effect, or a tool call):
         # a change by hand (you turning it down while it talks) is yours and stays
-        touched = any(e["k"] == "effect" and e.get("effect") == "volume" for e in ev) or             any(t.endswith(("set_volume", "set_mute")) for t in self.audit.calls)
-        restored = volume_restore(vol0) if (touched and not self.offline) else None
+        kinds = {e.get("effect") for e in ev if e["k"] == "effect"}
+        if any(t.endswith(("set_volume", "set_mute")) for t in self.audit.calls):
+            kinds.add("volume")
+        restored = settings_restore(snap, kinds) if (kinds and snap) else None
+        if getattr(asst, "timers", None) is not None and asst.timers.running():
+            asst.timers.cancel()                         # a scenario's timer never rings in the next one
+        rows = asst.timings[n_tim:]
         ev += [{"t": c["t0"], "k": "user", "label": c["label"], "t0": c["t0"], "t1": c["t1"]}
                for c in self.room.log if t0 <= c["t0"] <= t1]
         ev.sort(key=lambda e: e["t"])
         UX.save_timeline(ev, d / "timeline.jsonl")
         res = UX.detect(ev, scenario=sc["name"])
         res.update(name=name, scenario=sc["name"], t0=t0, error=err, volume_restored=restored,
-                   tools=sorted(set(self.audit.calls)), expect=self._expect(sc, ev))
+                   tools=sorted(set(self.audit.calls)), expect=self._expect(sc, ev, rows),
+                   routes=[r.get("route") for r in rows], intents=[r.get("intent") for r in rows],
+                   effect_s=[r.get("speech_end_to_effect") for r in rows])
         grabs = [e for e in ev if e["k"] == "grab"]
         try:
             res["contact"] = self.gui(lambda: UX.contact_sheet(d / "frames", grabs, d / "contact.png", t0), timeout=60)
@@ -568,9 +657,24 @@ class Harness:
         print(f"[ux] {name}: {len(res['findings'])} finding(s) {kinds}  latency {res['latency']}")
         self.audit.calls.clear()
 
-    def _expect(self, sc, ev) -> dict:
+    def _expect(self, sc, ev, rows=()) -> dict:
+        """Each expectation -> True/False. M10 adds: route (every turn's route contains it, e.g.
+        "instant"; "!instant" = none of them), no_effect (nothing changed on the island),
+        effect_within (seconds from the end of speech to the change, every instant turn)."""
         exp = sc.get("expect") or {}
         got = {}
+        routes = [str(r.get("route") or "") for r in rows]
+        if "route" in exp:
+            want = str(exp["route"])
+            if want.startswith("!"):
+                got["route"] = bool(routes) and all(want[1:] not in r for r in routes)
+            else:
+                got["route"] = bool(routes) and all(want in r for r in routes)
+        if "no_effect" in exp:
+            got["no_effect"] = not any(e["k"] == "effect" for e in ev)
+        if "effect_within" in exp:
+            lat = [r.get("speech_end_to_effect") for r in rows if "instant" in str(r.get("route") or "")]
+            got["effect_within"] = bool(lat) and all(x is not None and x <= float(exp["effect_within"]) for x in lat)
         if "widget" in exp:
             got["widget"] = any(e["k"] == "w_shown" and e.get("widget") == exp["widget"] for e in ev)
         if "effect" in exp:
@@ -804,10 +908,21 @@ def write_summary(out: Path, results: list[dict], audit: Audit, args):
             lines.append(f"- `{n}` @{f['t'] - next(r['t0'] for r in results if r['name'] == n):.2f}s: {f['msg']}")
         lines.append("")
     lines += ["## Stage latency (seconds after the end of speech)", "",
-              "| run | first visual | first audio | widget | answer | answer end |", "|---|---|---|---|---|---|"]
+              "| run | first visual | effect | first audio | widget | answer | answer end |",
+              "|---|---|---|---|---|---|---|"]
     for r in results:
         for L in r["latency"]:
-            lines.append(f"| {r['name']} | {L['first_visual']} | {L['first_audio']} | {L['widget']} | {L['answer']} | {L['answer_end']} |")
+            lines.append(f"| {r['name']} | {L['first_visual']} | {L.get('effect')} | {L['first_audio']} | {L['widget']} | "
+                         f"{L['answer']} | {L['answer_end']} |")
+    inst = [(r["name"], i, e) for r in results for i, e, rt in zip(r.get("intents") or [], r.get("effect_s") or [],
+                                                                     r.get("routes") or []) if "instant" in str(rt)]
+    if inst:
+        xs = sorted(e for _, _, e in inst if e is not None)
+        med = xs[len(xs) // 2] if xs else None
+        lines += ["", "## Instant commands (M10): end of speech -> the change (app's own clock)", "",
+                  f"{len(inst)} instant turn(s); median {med}s, worst {xs[-1] if xs else None}s", "",
+                  "| run | intent | speech end -> effect (s) |", "|---|---|---|"]
+        lines += [f"| {n} | {i} | {e} |" for n, i, e in inst]
     lines += ["", "## Frames", "", "| run | live ticks | late ticks | in transitions | worst ms | swap p50/p95/p99 ms |",
               "|---|---|---|---|---|---|"]
     for r in results:

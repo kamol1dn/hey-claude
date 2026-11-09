@@ -185,6 +185,30 @@ def test_offline_run_is_quiet():
         assert all(not r.get("error") for r in res), [r.get("error") for r in res]
 
 
+def test_offline_instant_commands():
+    """M10 through the whole app, offline: instant commands act through the real intent engine
+    and executor (over in-memory settings), with the effect in well under a second from the end
+    of speech and no jank; near-misses reach the brain and change nothing; a timer is said
+    aloud when it ends."""
+    with tempfile.TemporaryDirectory() as d:
+        cmd = [sys.executable, str(ROOT / "tools" / "ux_stress.py"), "run", "--offline", "--grab-fps", "4", "--no-gif",
+               "--out", d, "instant_volume", "instant_mute", "instant_dark_mode", "instant_next_song", "instant_timer",
+               "instant_paraphrase", "instant_near_miss"]
+        env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PYTHONIOENCODING="utf-8")
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env, cwd=str(ROOT))
+        res = json.loads((Path(d) / "summary.json").read_text(encoding="utf-8")) if (Path(d) / "summary.json").exists() else None
+        assert res is not None, p.stdout[-3000:] + p.stderr[-3000:]
+        assert len(res) == 7, [r["name"] for r in res]
+        bad = [(r["name"], f["kind"], f["msg"]) for r in res for f in r["findings"]]
+        assert not bad, json.dumps(bad, indent=1)
+        failed = {r["name"]: r["expect"] for r in res if not all(r["expect"].values())}
+        assert not failed, failed
+        assert all(not r.get("error") for r in res), [r.get("error") for r in res]
+        lat = [e for r in res for e, rt in zip(r["effect_s"], r["routes"]) if "instant" in str(rt)]
+        assert len(lat) >= 9 and all(e is not None and e < 1.0 for e in lat), lat
+        print(f"[ux] offline instant turns: {len(lat)}, speech end -> effect median {sorted(lat)[len(lat) // 2]}s")
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):

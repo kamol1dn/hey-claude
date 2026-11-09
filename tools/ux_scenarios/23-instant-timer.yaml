@@ -1,0 +1,10 @@
+name: instant_timer
+desc: "M10: a ten second timer: its card at once, then it says so when it ends"
+steps:
+  - ask: "Set a timer for ten seconds."
+  - until: {what: widget, timeout: 10}
+  - until: {what: idle, timeout: 20}
+  - wait: 11
+  - until: {what: done, timeout: 25}
+expect: {route: instant, widget: timer, answer: true}
+settle_s: 30

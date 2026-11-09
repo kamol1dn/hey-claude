@@ -1,0 +1,8 @@
+name: instant_next_song
+desc: "M10: next song and undo (live: skips your track if something plays, else it says nothing is playing)"
+steps:
+  - ask: "Next song."
+  - until: {what: done, timeout: 20}
+  - ask: "Undo that."
+  - until: {what: done, timeout: 20}
+expect: {effect: media, answer: true}

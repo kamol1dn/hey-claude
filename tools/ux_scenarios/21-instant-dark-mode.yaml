@@ -1,0 +1,9 @@
+name: instant_dark_mode
+desc: "M10: light mode, then \"the other way\" (a follow-up); the colour mode is put back afterwards"
+steps:
+  - ask: "Switch to light mode."
+  - until: {what: followup, timeout: 20}
+  - wait: 0.6
+  - say: {text: "No, the other way.", voice: am_michael}
+  - until: {what: done, timeout: 20}
+expect: {route: instant, effect: theme, effect_within: 1.5, turns: 2}

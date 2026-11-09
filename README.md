@@ -7,8 +7,9 @@ and a small model answers out loud in a second or two. Say *"start a task in
 The island tracks the run, and when it finishes a one-sentence summary is read
 out.
 
-Everything runs in one Python process, on the CPU, so the GPU stays free for
-Premiere. Claude is driven through the `claude` CLI you're already signed in
+Everything runs in one Python process. Speech-to-text runs on the GPU unless
+the GPU is busy (a render, say), in which case that request goes to the CPU;
+everything else runs on the CPU. Claude is driven through the `claude` CLI you're already signed in
 to. No API key is needed.
 
 There are three tiers:
@@ -20,7 +21,7 @@ There are three tiers:
 | **(c) real work** | "start a task in inha app: fix the login screen" | a **new** headless Claude Code session in that folder, per task |
 
 ```
-mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ faster-whisper (CPU)
+mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ faster-whisper (GPU, CPU fallback)
                                                                     │
                                      ┌──────────────────────────────┘
                                      ▼
@@ -86,18 +87,140 @@ mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ fas
    run.cmd
    ```
 
-   First start downloads the wake-word models (~6 MB) and whisper `base.en`
-   (~140 MB). After that, startup takes about 5 s.
+   First start downloads the wake-word models (~6 MB) and whisper
+   `large-v3` for the GPU (~3 GB, already there if another app on this PC
+   uses faster-whisper) and `base.en` for the CPU (~140 MB).
+   After that, startup takes about 5 s.
+
+   To run it all day without a terminal, tick **Start with Windows** in the
+   tray's Settings… (see below), or start it silently once with
+   `.venv\Scripts\pythonw.exe -m heyclaude`.
 
 ### Flags
 
 | flag | what it does |
 |---|---|
-| `--gpu` | whisper on CUDA (float16). Off by default; don't use it while Premiere is open. |
+| `--gpu` / `--cpu` | whisper on the GPU / the CPU, overriding `stt.device`. |
 | `--text` | type requests instead of speaking (no mic, no whisper). |
 | `--simulate x.wav` | use a 16 kHz mono wav as the microphone. Good for testing and timing. |
 | `--exit` | with `--simulate`: quit after the request (and any task it started) is done. |
-| `--no-ui` | no island. |
+| `--muted` | start with listening off (mic closed); the hotkey and "Talk now" still work. |
+| `--quit` | ask the running hey-claude to quit, then exit. |
+| `--config f.yaml` | use another config file instead of `config.yaml`. |
+| `--no-ui` / `--no-tray` | no island / no tray icon. |
+
+`--simulate` and `--text` runs are treated as tests: they skip the
+single-instance check, the global hotkey and the Startup-shortcut sync, so
+they can run next to a normal copy.
+
+## Tray, hotkey and settings
+
+hey-claude lives in the **tray** (the orange dot; grey with a slash while
+listening is off). Left-click it to talk. Right-click for:
+
+| menu item | what it does |
+|---|---|
+| **Talk now** | listen for one request without the wake word (same as clicking the island or the hotkey) |
+| **Listening** | wake word on/off. Off **closes the microphone stream**, so Windows' mic-in-use indicator goes away; the island turns into a muted grey pill |
+| **Pause for 1 hour** | listening off, back on by itself after an hour ("Resume listening" ends it early) |
+| **Settings…** | the settings window, below |
+| **Open logs** | `state\logs\` (the app log and every task's log) |
+| **Quit** | |
+
+While listening is off, **Talk now**, the hotkey and clicking the pill still
+work: the mic opens for that one request and closes again.
+
+**Push-to-talk hotkey:** `Ctrl+Alt+Space` by default (`app.hotkey`), a
+system-wide hotkey through `RegisterHotKey`, no admin rights needed. If
+another app already owns the combination, hey-claude shows a tray balloon
+and runs without one. On this machine PowerToys holds `Ctrl+Alt+Space`;
+`Ctrl+Shift+Space`, `Win+Alt+Space`, `Ctrl+Alt+H` and `F9` were free.
+
+**Hold to keep listening** (`listen.hold_key`, default `ctrl`): if you
+pause to think mid-sentence, hold Ctrl while you talk. While it's down the
+island shows **holding** and silence never ends the request, however long the
+pause. Let go and it goes back to normal: it stops about 0.7 s after you
+stop talking (counted from the later of the release and your last word).
+You can press it before you start talking too. Pressing another key during
+the hold (Ctrl+C, Ctrl+V...) makes it a shortcut, not a hold. The key is
+watched only while the island is listening, by a low-level keyboard hook
+that passes every key through untouched. Once a hold is used, the length
+cap is `listen.max_utterance_s` (180 s) instead of `max_seconds`, and
+pauses longer than half a second are cut out before whisper, so a 30 s
+think-pause costs nothing. Other choices: `right ctrl`, `caps lock`, `f13`,
+or `""` to turn it off.
+
+**Settings window** (tray → Settings…) edits `config.yaml`, creating it from
+`config.example.yaml` the first time. Tabs: General (listening at start,
+hotkey with a Record… button, hold key, start with Windows), Voice & wake (wake model
+and threshold; whisper device, GPU and CPU models, GPU precision, busy
+thresholds, the Premiere opt-out; voice, rate, a test button), Models (quick-answer backend and models, the tool agent on/off,
+model and filler line, task model, permission mode and parallel limit),
+Projects (spoken name → folder, with a folder picker) and Permissions (the
+agent's and the tasks' `allowed_tools`, one per line). Fields tagged
+**restart** take effect after a restart, and the window offers a **Restart
+now** button after saving them. Everything else applies on save:
+
+| applies on save | needs a restart |
+|---|---|
+| wake threshold and cooldown, `listen.*`, `tasks.*` (permission mode, allowed tools, model, parallel limit), projects for "start a task in …", the agent's filler line, `island.*`, hotkey, start with Windows, `stt.*_busy_pct`, `stt.yield_to_premiere` | wake model, the rest of `stt.*` (device, models), `tts.*` (voice, rate, backend), `fast.*`, the agent's on/off, model and allowed tools, `claude.exe` |
+
+New project names are routed right away; whisper's spelling hints and the
+quick model's project list pick them up after a restart.
+
+**Start with Windows** puts `hey-claude.lnk` in your Startup folder
+(`shell:startup`). It runs `.venv\Scripts\pythonw.exe -m heyclaude` in the
+repo folder, so there's no console window. Turning it off deletes the
+shortcut. The setting follows the shortcut: if you delete it by hand, the
+checkbox reads off next time. Turn it on from the checkout you actually run
+(the shortcut points at whichever folder saved it).
+
+**One copy at a time:** a second launch (say, clicking the shortcut again)
+tells the running copy to show itself and exits.
+
+**Speech-to-text device** (`stt.device`, default `gpu`): the device is
+picked for each request from the actual load, read from NVML (GPU
+utilisation averaged over about 0.5 s, free VRAM) and psutil (CPU):
+
+| situation | whisper runs on | island / log says |
+|---|---|---|
+| GPU under `stt.gpu_busy_pct` (70%) | GPU (`stt.gpu_model`, `large-v3` int8_float16, ~0.5 s per request on an RTX 4060) | `gpu (large-v3)` |
+| GPU at 70% or more, or too little free VRAM to load the model | CPU (`stt.cpu_model`, `base.en`) | `cpu (gpu busy 83%)` / `cpu (low vram 0.9 GB)` |
+| GPU busy **and** CPU at `stt.cpu_busy_pct` (85%) or more | GPU anyway | `gpu (cpu busy)` |
+| back on the GPU | once it's under `stt.gpu_resume_pct` (60%), so it doesn't flip back and forth | |
+
+An idle Premiere is fine; only real load counts (e.g. a Remotion render
+while Premiere sits open). Both models stay loaded once used, so switching
+is instant. The GPU model loads at start-up. If it isn't downloaded yet
+(1.6–3 GB the first time), start-up doesn't wait: the CPU model answers
+(`cpu (downloading large-v3)`) while it downloads and loads in the
+background. `large-v3-turbo` is faster on the GPU; set `stt.gpu_model` to it
+once it's downloaded (a stalled Hugging Face download leaves it on the CPU
+model meanwhile, it doesn't block anything). Hard fallbacks to the CPU: CUDA missing or the GPU
+load failing (`cpu (fallback: no cuda)` / `gpu load failed`, for the
+session), out of memory while loading (retried a minute later), and a CUDA
+error mid-transcription (`cpu (fallback: cuda error)`; that request is
+retried on the CPU). `stt.yield_to_premiere: true` is an opt-in that keeps
+whisper off the GPU whenever Premiere Pro is running, idle or not.
+`--cpu` or `stt.device: cpu` keeps the GPU out of it entirely. The
+`[ready]` line shows the choice and the readings, e.g.
+`stt: cpu (downloading turbo) [gpu 7%, vram free 6.8 GB, cpu 62%]`, and
+every switch is logged as `[stt] now …`.
+
+GPU needs an NVIDIA driver plus CUDA 12 cuBLAS (`cublas64_12.dll` and
+`cublasLt64_12.dll`); the ctranslate2 wheel already ships cuDNN 9. A CUDA 13
+toolkit alone isn't enough. Any of these works: `pip install
+nvidia-cublas-cu12` into the venv (found automatically), a torch install in
+the venv, or copying the two DLLs from another venv's `torch\lib` next to
+`.venv\Lib\site-packages\ctranslate2\ctranslate2.dll` (what this machine
+uses; a reinstall of ctranslate2 removes them). Without cuBLAS 12 the load
+fails and it uses the CPU (`cpu (fallback: gpu load failed)`).
+
+**Logs:** everything the app prints also goes to `state\logs\app.log`
+(timestamped, rotated at 1 MB, 3 old files kept), including uncaught
+exceptions. That's where to look when it runs under `pythonw` with no
+console. If the assistant thread crashes, it restarts once by itself; a
+second crash shows the error on the island.
 
 Make a test clip with a Windows voice:
 
@@ -119,9 +242,9 @@ Make a test clip with a Windows voice:
 | *hey jarvis … who messaged me on Telegram today?* | "Let me check." → the warm tool agent answers (needs the MCP set up, see below) |
 | *hey jarvis … how are my tasks going?* | spoken status of running tasks |
 | *hey jarvis* while it's talking | cuts it off and listens again |
-| click the idle pill | talk without the wake word |
+| click the idle pill, or press the hotkey (`Ctrl+Alt+Space`) | talk without the wake word |
 | click while speaking | stop speaking |
-| right-click | menu: talk now / stop / open logs / quit |
+| right-click the island | menu: talk now / stop / open logs / quit (the tray menu has the rest) |
 
 The wake word is the stock **"hey jarvis"** model until a "hey claude" model
 is trained. See [docs/train-hey-claude.md](docs/train-hey-claude.md). Project
@@ -130,9 +253,10 @@ and the names are given to whisper as a spelling hint.
 
 ## Config
 
-See [config.example.yaml](config.example.yaml); every key is commented. The
-ones you'll touch:
+See [config.example.yaml](config.example.yaml); every key is commented. Most
+of it is also in the Settings window. The ones you'll touch:
 
+- `app.*`: listening at start, the hotkey, start with Windows.
 - `projects`: spoken name → folder. Several names can point at one folder.
 - `tasks.permission_mode`, `tasks.allowed_tools`: what a voice-started run
   may do without asking. Runs are started with `--permission-prompts none`,
@@ -145,7 +269,8 @@ ones you'll touch:
 - `fast.backend`: `auto` uses the Anthropic SDK (`claude-haiku-5-5`) when
   `ANTHROPIC_API_KEY` is set, and the CLI otherwise. Set `sdk_model:
   claude-sonnet-5-5` for smarter, slower answers.
-- `stt.model`: `base.en` is the default (≈0.6 s per request on CPU).
+- `stt.device`, `stt.gpu_model`, `stt.cpu_model`: see "Speech-to-text
+  device" above. On the CPU, `base.en` is the default (≈0.6 s per request).
   `small.en` is more accurate and slower; `tiny.en` is faster and sloppier.
 - `tts.backend`: `sapi` (default), `piper` or `kokoro`. Piper and Kokoro
   are wired in but untested. If one fails to load, it falls back to SAPI.
@@ -302,10 +427,19 @@ Where the rest of the time goes, and the knobs:
 
 ```
 heyclaude/
-  __main__.py     CLI flags, Qt app
-  assistant.py    the loop: wake → record → STT → brain → speak / spawn; latency log
+  __main__.py     CLI flags, Qt app, wiring (tray, hotkey, settings, single instance, restart)
+  assistant.py    the loop: wake → record → STT → brain → speak / spawn; listening on/off,
+                  crash restart, latency log
+  tray.py         tray icon and menu
+  hotkey.py       global push-to-talk hotkey (RegisterHotKey) and hotkey parsing
+  holdkey.py      hold-to-keep-listening key (low-level hook, armed only while listening)
+  settings_ui.py  the settings window
+  winsys.py       Startup shortcut, single-instance lock, "is a process running"
+  sysload.py      GPU (NVML) and CPU (psutil) load, sampled in the background
+  applog.py       state/logs/app.log (rotating)
+  config.py       config.yaml load/save, what applies live vs after a restart
   listen.py       mic (sounddevice), openWakeWord, webrtcvad recorder, wav simulator
-  stt.py          faster-whisper (CPU default, --gpu opt-in)
+  stt.py          faster-whisper: GPU by default, CPU when the GPU is busy or fails
   brain.py        router, tier (a) chat (CLI or SDK), tier (b) warm tool agent, TASK/LOOKUP detection
   tasks.py        headless claude runs, stream-json parsing, logs, session ids
   tts.py          SAPI (direct COM), Piper, Kokoro; sentence streaming
@@ -330,6 +464,9 @@ docs/             training a "hey claude" wake word
 - Started from inside a Claude Code session, hey-claude strips the
   parent-session variables (`CLAUDE_CODE_SESSION_ID` etc.) so each task is
   its own top-level session.
-- Not built yet: a global push-to-talk hotkey, a tray icon, autostart, and
-  answering follow-up questions *about* a finished task (resume it in a
-  terminal for now).
+- Not built yet: answering follow-up questions *about* a finished task
+  (resume it in a terminal for now). See [ROADMAP.md](ROADMAP.md).
+- With the default VAD, steady background sound (music, a video playing) can
+  count as speech, so a "Talk now" with nobody talking may record until
+  `listen.max_seconds` and whisper may invent a phrase. Silero VAD is planned
+  in M4.

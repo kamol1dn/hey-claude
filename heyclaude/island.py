@@ -1,10 +1,11 @@
 """The "island": a black pill at the top-centre of the screen.
 
-States: loading, idle (tiny), listening (level meter), thinking (dots +
-what you said), speaking (the reply), and a task list that drops down under
+States: loading, idle (tiny), off (muted: listening switched off, mic
+closed), listening (level meter), thinking (dots + what you said), speaking
+(the reply), and a task list that drops down under
 the pill while tasks exist. Clicking a task opens its live log.
 
-Left-click the idle pill = talk without the wake word. Right-click = menu.
+Left-click the idle or muted pill = talk without the wake word. Right-click = menu.
 """
 from __future__ import annotations
 
@@ -31,6 +32,9 @@ class Bridge(QObject):
     state = Signal(str, str)        # state, text
     level = Signal(float)
     tasks = Signal(list)            # list[dict]
+    listening = Signal(bool, float)  # wake word on/off, paused-until epoch (0 = not paused)
+    talk = Signal()                 # global hotkey pressed (from the hotkey thread)
+    stt = Signal(str)               # active speech-to-text device, e.g. "gpu (turbo)"
     quit = Signal()
 
 
@@ -65,6 +69,8 @@ class Island(QWidget):
         bridge.state.connect(self.set_state)
         bridge.level.connect(self.push_level)
         bridge.tasks.connect(self.set_tasks)
+        bridge.stt.connect(self.set_stt)
+        self.stt_label = ""
 
         self.anim = QVariantAnimation(self, duration=260, easingCurve=QEasingCurve.OutCubic)
         self.anim.valueChanged.connect(self._apply_geom)
@@ -85,8 +91,11 @@ class Island(QWidget):
         fm = QFontMetrics(self.font_main)
         n_running = sum(1 for t in self.task_rows if t["status"] in ("starting", "running"))
         if self.mode == "idle":
-            w, h = (170 if n_running else 120), 28
-        elif self.mode == "listening":
+            label = self._idle_label()
+            w, h = max(120, QFontMetrics(self.font_small).horizontalAdvance(label) + 46), 28
+        elif self.mode == "off":
+            w, h = (170 if n_running or "until" in self.text else 130), 28
+        elif self.mode in ("listening", "holding"):
             w, h = 300, PILL_H
         elif self.mode in ("thinking", "speaking", "loading", "error"):
             w = min(560, max(300, fm.horizontalAdvance(self.text) + 80))
@@ -134,6 +143,18 @@ class Island(QWidget):
             QTimer.singleShot(450, lambda m=mode: self.grab().save(
                 os.path.join(snap, f"{time.strftime('%H%M%S')}-{m}.png")))
 
+    def set_stt(self, label: str):
+        self.stt_label = label
+        self.setToolTip(f"speech-to-text: {label}")
+        self._place()
+        self.update()
+
+    def _stt_short(self) -> str:
+        # "gpu (turbo)" -> "gpu"; "cpu (gpu busy 83%)" -> "cpu · gpu busy 83%"
+        dev, _, inside = self.stt_label.partition(" (")
+        inside = inside.rstrip(")").replace("fallback: ", "")
+        return f"{dev} · {inside}" if " " in inside or inside == "premiere" else dev
+
     def push_level(self, v: float):
         self.levels = self.levels[1:] + [v]
 
@@ -151,7 +172,7 @@ class Island(QWidget):
         self.update()
 
     def _tick(self):
-        busy = self.mode not in ("idle",) or any(t["status"] in ("starting", "running") for t in self.task_rows)
+        busy = self.mode not in ("idle", "off") or any(t["status"] in ("starting", "running") for t in self.task_rows)
         was = getattr(self, "_was_visible", False)
         vis = self._tasks_visible()
         if vis != was:
@@ -172,7 +193,7 @@ class Island(QWidget):
         p.setPen(QPen(QColor(255, 255, 255, 22), 1))
         p.drawPath(path)
 
-        top_h = 28 if self.mode == "idle" else (PILL_H if self.height() < PILL_H + 30 or self._tasks_visible() is False else PILL_H)
+        top_h = 28 if self.mode in ("idle", "off") else (PILL_H if self.height() < PILL_H + 30 or self._tasks_visible() is False else PILL_H)
         head = QRectF(0, 0, self.width(), min(self.height(), top_h if not self._tasks_visible() else self._head_h()))
         t = time.perf_counter() - self.t0
         getattr(self, "_paint_" + self.mode, self._paint_text)(p, head, t)
@@ -181,7 +202,7 @@ class Island(QWidget):
 
     def _head_h(self):
         fm = QFontMetrics(self.font_main)
-        if self.mode == "idle":
+        if self.mode in ("idle", "off"):
             return 28
         if self.mode in ("thinking", "speaking", "loading", "error") and fm.horizontalAdvance(self.text) >= 480:
             return PILL_H + 20
@@ -192,13 +213,32 @@ class Island(QWidget):
         p.setBrush(c)
         p.drawEllipse(QRectF(x - r, y - r, 2 * r, 2 * r))
 
+    def _idle_label(self) -> str:
+        running = [x for x in self.task_rows if x["status"] in ("starting", "running")]
+        if running:
+            return f"{len(running)} task{'s' if len(running) != 1 else ''} running"
+        return self.wake_label + (f" · {self._stt_short()}" if self.stt_label else "")
+
     def _paint_idle(self, p, head, t):
         cy = head.center().y()
         self._dot(p, 18, cy, 4, ACCENT)
         running = [x for x in self.task_rows if x["status"] in ("starting", "running")]
         p.setFont(self.font_small)
         p.setPen(DIM if not running else FG)
-        label = f"{len(running)} task{'s' if len(running) != 1 else ''} running" if running else self.wake_label
+        label = self._idle_label()
+        p.drawText(QRectF(30, 0, head.width() - 38, head.height()), Qt.AlignVCenter | Qt.AlignLeft, label)
+
+    def _paint_off(self, p, head, t):
+        cy = head.center().y()
+        self._dot(p, 18, cy, 4, QColor(110, 110, 110))
+        p.setPen(QPen(QColor(8, 8, 8), 2.2))           # the "muted" slash
+        p.drawLine(13, int(cy + 5), 23, int(cy - 5))
+        p.setPen(QPen(DIM, 1.3))
+        p.drawLine(13, int(cy + 5), 23, int(cy - 5))
+        running = [x for x in self.task_rows if x["status"] in ("starting", "running")]
+        p.setFont(self.font_small)
+        p.setPen(DIM)
+        label = f"off · {len(running)} running" if running else (self.text or "listening off")
         p.drawText(QRectF(30, 0, head.width() - 38, head.height()), Qt.AlignVCenter | Qt.AlignLeft, label)
 
     def _paint_listening(self, p, head, t):
@@ -215,6 +255,23 @@ class Island(QWidget):
         p.setFont(self.font_small)
         p.setPen(DIM)
         p.drawText(QRectF(x0 + n * (bw + 3) + 4, 0, 60, head.height()), Qt.AlignVCenter, "listening")
+
+    def _paint_holding(self, p, head, t):
+        """Hold key down: still listening, pauses don't end it."""
+        cy = head.center().y()
+        self._dot(p, 20, cy, 5, ACCENT)
+        p.setPen(QPen(ACCENT, 1.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(20 - 9, cy - 9, 18, 18))
+        bw, x0 = 5, 40
+        p.setPen(Qt.NoPen)
+        p.setBrush(FG)
+        for i, v in enumerate(self.levels):
+            hh = 3 + v * (head.height() - 16)
+            p.drawRoundedRect(QRectF(x0 + i * (bw + 3), cy - hh / 2, bw, hh), 2, 2)
+        p.setFont(self.font_small)
+        p.setPen(ACCENT)
+        p.drawText(QRectF(x0 + len(self.levels) * (bw + 3) + 4, 0, 60, head.height()), Qt.AlignVCenter, "holding")
 
     def _paint_thinking(self, p, head, t):
         cy = head.center().y()
@@ -303,13 +360,15 @@ class Island(QWidget):
             return
         if self.mode == "speaking":
             self.stop_speaking.emit()
-        elif self.mode == "idle":
+        elif self.mode in ("idle", "off"):
             self.activate.emit()
 
     def _menu(self, at):
         m = QMenu(self)
         m.addAction("Talk now", self.activate.emit)
         m.addAction("Stop speaking", self.stop_speaking.emit)
+        if self.stt_label:
+            m.addAction(f"Speech-to-text: {self.stt_label}").setEnabled(False)
         m.addSeparator()
         m.addAction("Open logs folder", lambda: os.startfile(str(Path(__file__).resolve().parent.parent / "state" / "logs")))
         m.addSeparator()

@@ -20,7 +20,11 @@ VAD_FRAME = 320       # 20 ms
 
 
 class MicSource:
-    """Live microphone via sounddevice. Iterating yields int16 blocks."""
+    """Live microphone via sounddevice. Iterating yields int16 blocks.
+
+    close() releases the device (Windows' mic-in-use indicator goes off) and
+    ends any iteration in progress; make a new MicSource to listen again.
+    """
 
     def __init__(self, device=None):
         import sounddevice as sd
@@ -43,13 +47,28 @@ class MicSource:
     def stop(self):
         self._stream.stop()
 
+    def close(self):
+        try:
+            self._stream.stop()
+            self._stream.close()
+        except Exception:
+            pass
+        self.drain()
+        self._q.put(None)          # wake and end a blocked iterator
+
     def drain(self):
         while not self._q.empty():
-            self._q.get_nowait()
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                break
 
     def __iter__(self):
         while True:
-            yield self._q.get()
+            b = self._q.get()
+            if b is None:
+                return
+            yield b
 
 
 class WavSource:
@@ -74,6 +93,9 @@ class WavSource:
         pass
 
     def stop(self):
+        pass
+
+    def close(self):
         pass
 
     def drain(self):
@@ -125,49 +147,89 @@ def level(block: np.ndarray) -> float:
     return min(1.0, rms / 6000.0)
 
 
-def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Event | None = None):
+def trim_silences(blocks: list, voiced: list[bool], keep: int = 6) -> list:
+    """Collapse every run of unvoiced blocks longer than `keep` (~0.5 s) to
+    `keep` blocks, so a long think-pause doesn't cost whisper time."""
+    out, run = [], []
+    for b, v in zip(blocks, voiced):
+        if v:
+            out.extend(run[:keep] if len(run) > keep else run)
+            run = []
+            out.append(b)
+        else:
+            run.append(b)
+    out.extend(run[:keep])
+    return out
+
+
+def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Event | None = None,
+                     hold=None, is_speech=None, clock=time.perf_counter):
     """Pull blocks until speech has started and then `end_silence_ms` of silence.
+
+    `hold` (a holdkey.HoldState, optional): while `hold.held`, silence never
+    ends the utterance and the start timeout waits; after release the silence
+    window counts from the later of release and the last speech. Once a hold
+    was used the length cap is `max_utterance_s` instead of `max_seconds`,
+    and long silences are trimmed out before returning.
 
     Returns (int16 audio, speech_end_wall_time) or (None, None) on timeout.
     """
-    import webrtcvad
-
-    vad = webrtcvad.Vad(int(cfg["vad_aggressiveness"]))
+    if is_speech is None:
+        import webrtcvad
+        vad = webrtcvad.Vad(int(cfg["vad_aggressiveness"]))
+        is_speech = lambda frame: vad.is_speech(frame, RATE)  # noqa: E731
     end_frames = max(1, int(cfg["end_silence_ms"] / 20))
-    start_deadline = time.perf_counter() + float(cfg["start_timeout"])
+    start_timeout = float(cfg["start_timeout"])
+    start_deadline = clock() + start_timeout
     max_blocks = int(cfg["max_seconds"] * RATE / BLOCK)
+    cap_blocks = int(float(cfg.get("max_utterance_s", 180)) * RATE / BLOCK)
 
     pre_roll: list[np.ndarray] = []   # keep ~0.3 s before speech so the first word isn't clipped
     out: list[np.ndarray] = []
+    flags: list[bool] = []            # per block in `out`: any speech in it?
     started = False
     silent = 0
     voiced_run = 0
     last_voice_t = None
-    for n, block in enumerate(blocks):
+    for block in blocks:
         if stop_event is not None and stop_event.is_set():
             return None, None
         if on_level:
             on_level(level(block))
-        voiced = [vad.is_speech(block[i:i + VAD_FRAME].tobytes(), RATE)
-                  for i in range(0, BLOCK, VAD_FRAME)]
+        voiced = [is_speech(block[i:i + VAD_FRAME].tobytes()) for i in range(0, BLOCK, VAD_FRAME)]
+        held = bool(hold is not None and hold.held)
         if not started:
             pre_roll.append(block)
             pre_roll = pre_roll[-4:]
+            if held:                       # thinking first, then talking: keep waiting
+                start_deadline = clock() + start_timeout
             voiced_run = voiced_run + sum(voiced) if any(voiced) else 0
             if voiced_run >= 6:            # ~120 ms of speech: it's real
                 started = True
                 out.extend(pre_roll)
-                last_voice_t = time.perf_counter()
-            elif time.perf_counter() > start_deadline:
+                flags.extend([True] * len(pre_roll))
+                last_voice_t = clock()
+            elif clock() > start_deadline:
                 return None, None
             continue
         out.append(block)
+        flags.append(any(voiced))
         for v in voiced:
             if v:
                 silent = 0
-                last_voice_t = time.perf_counter()
+                last_voice_t = clock()
             else:
                 silent += 1
-        if silent >= end_frames or len(out) >= max_blocks:
+        if held:
+            silent = 0                     # the silence window restarts at release
+        limit = cap_blocks if (hold is not None and hold.used) else max_blocks
+        if (silent >= end_frames and not held) or len(out) >= limit:
             break
+    if not started or not out:      # source closed before speech
+        return None, None
+    if hold is not None and hold.used:
+        n = len(out)
+        out = trim_silences(out, flags)
+        if len(out) < n:
+            print(f"[listen] hold: trimmed {(n - len(out)) * BLOCK / RATE:.1f}s of silence")
     return np.concatenate(out), last_voice_t

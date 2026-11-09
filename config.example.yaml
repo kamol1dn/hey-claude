@@ -1,4 +1,10 @@
-# Copy to config.yaml and edit. config.yaml is git-ignored.
+# Copy to config.yaml and edit (or use Settings… in the tray menu, which
+# creates it). config.yaml is git-ignored.
+
+app:
+  listening: true            # wake word on at start; off = mic closed until you turn it on
+  hotkey: ctrl+alt+space     # global push-to-talk, e.g. ctrl+shift+h, win+alt+j, f9; "" = none
+  start_with_windows: false  # Startup-folder shortcut (pythonw -m heyclaude, no console)
 
 wake:
   # Stock openWakeWord model until a custom "hey claude" one is trained
@@ -15,13 +21,35 @@ listen:
   start_timeout: 5.0      # give up if no speech starts within this many seconds
   end_silence_ms: 700     # this much silence after speech ends the utterance
   max_seconds: 20
+  # Hold this key while talking to keep listening through pauses (silence won't
+  # end the utterance until you let go). ctrl = either Ctrl; also right ctrl,
+  # caps lock, f13... "" = off. Ctrl+C etc. during a hold count as shortcuts.
+  hold_key: ctrl
+  max_utterance_s: 180    # safety cap once a hold was used
 
 stt:
-  model: base.en          # tiny.en / base.en / small.en / small / medium ...
-  device: cpu             # cpu by default so Premiere keeps the GPU; --gpu flips to cuda
-  compute_type: int8      # int8 on cpu, float16 on cuda
+  # gpu: the GPU by default, picked per request from actual load (see the
+  # *_pct keys below); falls back to the CPU when CUDA/cuDNN is missing, the
+  # load fails, or a transcription hits a CUDA error (that request is retried
+  # on the CPU). cpu: always cpu_model. --gpu / --cpu override this.
+  device: gpu
+  # large-v3: ~0.5 s per request on an RTX 4060, ~2 GB VRAM in int8_float16.
+  # large-v3-turbo is faster still (~1.6 GB download); set it here once you have it.
+  gpu_model: large-v3
+  gpu_compute_type: int8_float16   # or float16 (more VRAM)
+  cpu_model: base.en          # tiny.en / base.en / small.en / small: loaded only when needed
+  cpu_compute_type: int8
   cpu_threads: 4
   language: en
+  # Per request: use the CPU when the GPU is at least gpu_busy_pct busy (averaged
+  # over ~0.5 s) or short of VRAM, unless the CPU is at least cpu_busy_pct busy
+  # (then stay on the GPU). Back to the GPU once it's below gpu_resume_pct.
+  gpu_busy_pct: 70
+  gpu_resume_pct: 60
+  cpu_busy_pct: 85
+  # Opt-in: never use the GPU while Adobe Premiere Pro is running (an idle
+  # Premiere is fine otherwise; the load check above handles a busy one).
+  yield_to_premiere: false
 
 fast:
   # auto  = Anthropic SDK if ANTHROPIC_API_KEY is set, otherwise the claude CLI

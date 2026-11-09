@@ -14,7 +14,7 @@ from .conversation import FollowUp, is_end_phrase, strip_wake
 from .listen import MicSource, SpeakingGate, WakeWord, WavSource, record_utterance
 from .stt import SpeechToText, normalize_device
 from .tasks import TaskManager
-from .tts import Speaker
+from .tts import Speaker, clean_for_speech
 from .vad import TurnListener, make_vad
 
 
@@ -327,6 +327,8 @@ class Assistant:
         player = getattr(self.speaker, "player", None)
         if player is not None and hasattr(player, "on_level"):
             player.on_level = lambda v: self._ui_emit("tts_level", v)     # M5: the island's outward wave
+        if hasattr(self.speaker, "on_sentence"):
+            self.speaker.on_sentence = self._sentence_started              # M5: text follows the voice
         self.tasks = TaskManager(c, on_change=self.push_tasks, on_finish=self._task_finished)
         self.push_tasks()
         self.set_mode("loading", "loading brain…")
@@ -371,16 +373,40 @@ class Assistant:
     # -- TTS callbacks --------------------------------------------------------
     def _tts_started(self):
         self.wake_gate.set_speaking(True)
-        if self.mode not in ("listening",):
-            self.set_mode("speaking", self._speaking_text)
+        if self.mode in ("listening",):
+            return
+        if self._filler and not self._speaking_text.strip():
+            # The filler ("Let me check.") is a status line of the turn: shown once,
+            # never as the answer, and the answer's text never includes it.
+            self.set_mode("thinking", self._filler)
+            return
+        self.set_mode("speaking", self._speaking_text)
 
     def _tts_idle(self):
         self.wake_gate.set_speaking(False)
         if self.mode in ("speaking",):
-            self.rest()
+            if self.followup.state == "armed":
+                # The follow-up window opens in a moment (after the speaking tail):
+                # the island goes straight from the answer to "go on", not via idle.
+                threading.Timer(2.5, self._rest_if_still_speaking).start()
+            else:
+                self.rest()
         self._maybe_exit()
 
+    def _rest_if_still_speaking(self):
+        """Safety net for a follow-up window that never opened (listening switched off...)."""
+        sp = getattr(self, "speaker", None)
+        if self.mode == "speaking" and not (sp and sp.busy) and self.followup.state != "open":
+            self.rest()
+
+    def _sentence_started(self, text: str, secs: float):
+        """A sentence starts playing: the island reveals its words in step with the voice."""
+        if self._filler and text.strip() == clean_for_speech(self._filler).strip():
+            return                                  # the filler: a status line, not answer text
+        self._ui_emit("spoken", text, float(secs))
+
     _speaking_text = ""
+    _filler = ""
 
     def _maybe_exit(self):
         if (self.exit_when_done and self._sim_done and self.pending_tasks == 0
@@ -783,6 +809,9 @@ class Assistant:
         self._maybe_exit()
 
     def _converse(self, text, gen, timing):
+        self._filler = ""
+        self._speaking_text = ""
+        self._ui_emit("turn", {"question": text})          # M5: the island keeps the question up all turn
         self.set_mode("thinking", text)
         self.speaker.begin()
         self.brain.timing = {}
@@ -810,9 +839,13 @@ class Assistant:
                     self.speaker.feed(ev[1])
                 elif kind == "lookup":
                     filler = self.cfg["agent"].get("filler")
-                    if filler:
-                        self._say(filler)
+                    # Only longer requests get the filler: a short one is answered quickly anyway.
+                    if len(text.split()) < int(self.cfg["agent"].get("filler_min_words", 8) or 0):
+                        filler = ""
                     self.set_mode("thinking", "checking with your tools… " + text)
+                    if filler:
+                        self._filler = filler           # spoken, shown as the status line; not the answer
+                        self.speaker.feed(filler + " ")
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
                 elif kind == "control":

@@ -603,6 +603,13 @@ line: white is you, terracotta is Claude).
   bracketed (Ctrl+Shift mutes it), followup drains a warm wash, thinking
   writes loops, speaking's wave flows out, an error underlines, and a finished
   task leaves a check.
+- **One request, one panel:** from the moment it hears you until it's done,
+  the island stays open and keeps your question on a small row. The filler
+  ("Let me check.", only for requests of `agent.filler_min_words` or more,
+  default 8) is a status line, shown once. A card that arrives first waits as a
+  skeleton, then card and answer show together; the answer appears in step
+  with the voice, sentence by sentence, and stays (under the card) through "go
+  on" and a short linger. Then everything collapses once.
 - **Mic and stop buttons** while it thinks or talks; **not me** after a wake.
 - **Tools in use** show their service and icon ("Google Calendar · list
   events"). Parallel calls stack, and Telegram shuffles chat bubbles while it

@@ -11,6 +11,8 @@ Item {
     property var spec: null                 // {id, widget, data, title, glyph, icon_url, qml, width, max_height, ttl_s, private}
     property bool resting: false
     property bool reduced: false
+    property bool pending: false            // the answer isn't out yet: show a skeleton, reveal with the answer
+    readonly property bool holds: loader.item !== null && loader.item.holds === true
     signal action(string wid, string name, var payload)
     signal expired()
     readonly property real headH: 30
@@ -34,9 +36,25 @@ Item {
         card.spec = s
         loader.setSource(s.qml, { data_: s.data, wid: s.id, reduced: card.reduced })
         head.opacity = 0; enter.restart()
-        if (resting) ttl.restart()
+        loader.opacity = pending ? 0 : 1
+        if (resting) {
+            ttl.interval = (s.private ? 4 : (s.ttl_s || 12)) * 1000    // (it ran at Qt's 1 s default here)
+            ttl.restart()
+        }
     }
     function clear() { ttl.stop(); card.spec = null; loader.source = "" }
+    onPendingChanged: if (!pending && spec) reveal.restart()
+    NumberAnimation { id: reveal; target: loader; property: "opacity"; to: 1; duration: card.reduced ? 160 : 260; easing.type: Easing.OutCubic }
+    // the skeleton: three quiet bars where the card's content will be (no animation)
+    Column {
+        visible: card.spec !== null && loader.opacity < 0.99
+        opacity: 1 - loader.opacity
+        x: 16; y: card.headH + 6; spacing: 10
+        Repeater {
+            model: 3
+            Rectangle { width: [0.62, 0.86, 0.48][index] * (card.width - 32); height: 8; radius: 4; color: Qt.rgba(1, 1, 1, 0.06) }
+        }
+    }
     onRestingChanged: {
         if (!spec) return
         if (loader.item && loader.item.active !== undefined) loader.item.active = !resting

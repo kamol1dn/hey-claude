@@ -1,0 +1,22 @@
+{
+ "note": "a real answer, recorded once from the pinned server (public places only)",
+ "server": "@dangahagan/weather-mcp@1.35.8",
+ "recorded": "2026-11-09 (London/Berlin/Almaty evening)",
+ "tool": "get_forecast",
+ "args": {
+  "latitude": 51.5074,
+  "longitude": -0.1278,
+  "days": 3,
+  "include_astronomy": true
+ },
+ "env": {
+  "WEATHER_UNITS": "metric",
+  "WEATHER_TIME_FORMAT": "24h"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# Weather Forecast (Daily)\n\n**Location:** 51.5074, -0.1278\n**Elevation:** 16m\n**Timezone:** Europe/London\n**Forecast Days:** 3\n\n## Monday, November 9\n**Temperature:** High 10°C / Low 6°C\n**Feels Like:** High 8°C / Low 3°C\n**Sunrise:** 07:08\n**Sunset:** 16:20\n**Moon:** New Moon (0% illuminated) · Rise 07:40 · Set 15:46\n**Twilight:** Civil 06:31 / 16:56 · Nautical 05:51 / 17:36 · Astronomical 05:12 / 18:15\n**Daylight Duration:** 9h 11m\n**Precipitation Chance:** 0%\n**Wind:** 13 km/h ENE\n**Wind Gusts:** 30 km/h\n**Conditions:** Foggy\n**UV Index:** 0.6\n\n## Tuesday, November 10\n**Temperature:** High 10°C / Low 6°C\n**Feels Like:** High 7°C / Low 3°C\n**Sunrise:** 07:09\n**Sunset:** 16:18\n**Moon:** New Moon (2% illuminated) · Rise 08:54 · Set 16:14\n**Twilight:** Civil 06:33 / 16:54 · Nautical 05:53 / 17:34 · Astronomical 05:14 / 18:13\n**Daylight Duration:** 9h 8m\n**Precipitation Chance:** 93%\n**Precipitation:** 6.40 mm\n**Wind:** 17 km/h ENE\n**Wind Gusts:** 37 km/h\n**Conditions:** Slight rain\n**UV Index:** 0.6\n\n## Wednesday, November 11\n**Temperature:** High 11°C / Low 8°C\n**Feels Like:** High 8°C / Low 6°C\n**Sunrise:** 07:11\n**Sunset:** 16:16\n**Moon:** Waxing Crescent (5% illuminated) · Rise 10:02 · Set 16:51\n**Twilight:** Civil 06:35 / 16:53 · Nautical 05:54 / 17:33 · Astronomical 05:15 / 18:12\n**Daylight Duration:** 9h 5m\n**Precipitation Chance:** 92%\n**Precipitation:** 10.70 mm\n**Wind:** 16 km/h NE\n**Wind Gusts:** 36 km/h\n**Conditions:** Slight rain\n**UV Index:** 0.3\n\n**Next full moon:** Nov 24 · **Next new moon:** Nov 9\n\n---\n*Data source: Open-Meteo (Global)*\n"
+  }
+ ]
+}

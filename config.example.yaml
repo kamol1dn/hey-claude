@@ -306,6 +306,32 @@ weather:
   enabled: true
   location: ""
   unit: C                 # C or F
+  # M5b: plain weather questions ("will it rain tomorrow?", "weather in Paris",
+  # "when's sunset", "what's the air quality") skip the model: the card shows
+  # at once and a short summary is spoken from the same data. false = they go
+  # to the tool agent as before.
+  local_route: true
+  # weather-mcp (github.com/weather-mcp/weather-mcp, MIT, keyless: Open-Meteo,
+  # NOAA, MeteoAlarm, MET Norway) adds official alerts, air quality/UV/pollen, a
+  # 15-minute rain nowcast and the moon. It needs Node.js 18+ (npx); without it
+  # the built-in Open-Meteo tool answers (logged once). It runs warm from start-up
+  # (~10-40 s to start; until then the built-in tool answers).
+  mcp:
+    enabled: true
+    # Exact version, official @dangahagan scope only (never @latest; the README
+    # warns about stale forks under other scopes). npm provenance checked for
+    # 1.35.8 on 2026-11-10: built by GitHub Actions from weather-mcp/weather-mcp
+    # tag v1.35.8, .github/workflows/publish.yml (heyclaude/weather_mcp/__init__.py).
+    package: "@dangahagan/weather-mcp@1.35.8"
+    tools: [get_weather_summary, get_forecast, get_current_conditions, get_alerts, get_air_quality, search_location]
+    timeout_s: 2.0        # wait this long for its first data, then the built-in tool answers
+    fallback: true        # false = no built-in fallback once weather-mcp runs (it says it couldn't get it)
+    cache_s: 300          # a place's answers are reused this long (weather-mcp caches upstream data too)
+    prefetch: true        # fetch your home place once it's up, so the first question is instant
+    refresh_min: 0        # refresh home in the background every N min (0 = never; at least 30: fair use)
+    agent: false          # also give the tool agent weather-mcp (mcp__weather-mcp__*, the tools above).
+                          # Costs ~4k tokens of tool descriptions per agent turn and a second node process.
+    env: {}               # extra environment for weather-mcp, e.g. {GOOGLE_POLLEN_API_KEY: ...} (its README)
 
 island:
   screen: primary        # primary, or a screen index

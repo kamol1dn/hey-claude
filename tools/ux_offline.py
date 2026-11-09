@@ -12,8 +12,8 @@ island.
 - `ToneVoice`: a "voice" whose sentences last as long as Kokoro's would
   (~0.33 s a word) and have a level (so the island's wave moves).
 - `ScriptedBrain`: brain.Brain's surface with canned, timed answers: a fast
-  answer, a tool lookup with a weather card, a Windows volume change, a long
-  answer.
+  answer, a weather question on the local weather route (M5b: the card, then
+  the summary, no agent), a tool lookup, a Windows volume change, a long answer.
 - `RoomWake` / `RoomSTT` / `energy_vad`: the wake word fires when a "wake"
   clip ends in the SimRoom; the transcript is the text of the last clip said.
 """
@@ -189,6 +189,26 @@ def _weather():
     return dict(d, location="Springfield")
 
 
+class _Weather:
+    """weather_mcp.WeatherService's surface: the card from the widget's example data
+    after a warm weather-mcp's ~0.2 s, and the summary built from the same data."""
+
+    def __init__(self, delay_s: float = 0.2):
+        self.delay_s, self.last = delay_s, None
+
+    def query(self, text, prev_turn_was_weather=False):
+        from heyclaude.weather_mcp.query import WeatherQuery, parse
+        return parse(text, prev=self.last if prev_turn_was_weather else None) or WeatherQuery(text=text)
+
+    def answer(self, q):
+        from heyclaude.widgets import normalise
+        time.sleep(self.delay_s)
+        self.last = q
+        d = _weather()
+        say = "It's mainly clear and twenty one degrees in Springfield, with a small chance of rain later."
+        return normalise({"widget": "weather", "data": d, "text": say}), say
+
+
 class _Agent:
     on_tool_result = None
     on_tool_use = None
@@ -217,6 +237,7 @@ class ScriptedBrain:
         self.cfg = cfg
         self.convo = _Convo()
         self.agent = _Agent()
+        self.wx = _Weather()
         self.chat = None
         self.timing = {}
         self.warm = threading.Event()
@@ -235,7 +256,8 @@ class ScriptedBrain:
         t = text.lower()
         self.timing = {"route": 0.01}
         if "weather" in t or "umbrella" in t:
-            yield ("lookup", text)
+            self.timing["route"] = "local-weather"
+            yield ("weather", self.wx.query(text))
         elif "volume" in t:
             yield ("control", text)
         elif "undo" in t:

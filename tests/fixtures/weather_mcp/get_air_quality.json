@@ -1,0 +1,20 @@
+{
+ "note": "a real answer, recorded once from the pinned server (public places only)",
+ "server": "@dangahagan/weather-mcp@1.35.8",
+ "recorded": "2026-11-09 (London/Berlin/Almaty evening)",
+ "tool": "get_air_quality",
+ "args": {
+  "latitude": 51.5074,
+  "longitude": -0.1278
+ },
+ "env": {
+  "WEATHER_UNITS": "metric",
+  "WEATHER_TIME_FORMAT": "24h"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# Air Quality Report\n\n**Location:** 51.5074, -0.1278\n**Timezone:** Europe/London\n**Elevation:** 16m\n\n**Observation Time:** 11/9/2026, 7:00:00 PM\n\n## 🟡 European Air Quality Index: 57\n\n**Category:** Moderate (Yellow)\n**Description:** Air quality is moderate\n\n**Health Implications:**\nConsider reducing intense outdoor activities if you experience symptoms.\n\n⚠️ **Caution:** Sensitive individuals should consider reducing intense activities.\n\n## 🟢 UV Index: 0.0\n\n**Level:** Low\n**Description:** Minimal protection required\n**Recommendation:** No protection required. You can safely stay outside.\n\n## Pollutant Concentrations\n\n**PM2.5 (Fine Particulate Matter):** 20 μg/m³\n**PM10 (Coarse Particulate Matter):** 26 μg/m³\n**Ozone (O₃):** 4.0 μg/m³\n**Nitrogen Dioxide (NO₂):** 55 μg/m³\n**Sulfur Dioxide (SO₂):** 4.3 μg/m³\n**Carbon Monoxide (CO):** 286 μg/m³\n**Ammonia (NH₃):** 4.0 μg/m³\n**Aerosol Optical Depth:** 0.120 (atmospheric haze indicator)\n\n## 🌾 Pollen\n\n**Alder:** 0 grains/m³\n**Birch:** 0 grains/m³\n**Grass:** 0 grains/m³\n**Mugwort:** 0 grains/m³\n**Olive:** 0 grains/m³\n**Ragweed:** 0 grains/m³\n\n*Pollen from the CAMS European forecast — available for European locations only.*\n\n*US AQI: 83 (Moderate)*\n\n"
+  }
+ ]
+}

@@ -48,7 +48,7 @@ class Turn:
     id: int
     user: str
     reply: str = ""
-    tier: str = ""                   # fast | agent | task | task-ask | local
+    tier: str = ""                   # fast | agent | task | task-ask | local | weather
     t: float = field(default_factory=time.time)
     task_id: str | None = None       # a task this turn started or talked about
 

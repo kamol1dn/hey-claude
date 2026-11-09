@@ -1,0 +1,20 @@
+{
+ "note": "a real answer, recorded once from the pinned server (public places only)",
+ "server": "@dangahagan/weather-mcp@1.35.8",
+ "recorded": "2026-11-09 (London/Berlin/Almaty evening)",
+ "tool": "search_location",
+ "args": {
+  "query": "London",
+  "limit": 1
+ },
+ "env": {
+  "WEATHER_UNITS": "metric",
+  "WEATHER_TIME_FORMAT": "24h"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# Location Search Results\n\n**Query:** \"London\"\n**Found:** 1 location\n\n---\n\n## 1. Greater London\n\n**Full Name:** Greater London, England, United Kingdom\n**Coordinates:** 51.5074°, -0.1278°\n**Country Code:** GB\n**Type:** First-order administrative division\n**Confidence:** ✅ High\n**Data Source:** OpenStreetMap Nominatim\n\n*To get weather for this location, use these coordinates:*\n*Latitude: 51.5074456, Longitude: -0.1277653*\n\n---\n*Multi-service geocoding with automatic fallback (Census.gov, Nominatim, Open-Meteo)*\n"
+  }
+ ]
+}

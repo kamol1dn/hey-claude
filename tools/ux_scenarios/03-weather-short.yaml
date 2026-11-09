@@ -1,5 +1,5 @@
 name: weather_short
-desc: weather, short question (no filler), a bit of background noise while asking
+desc: weather, short question (the local weather route), a bit of background noise while asking
 steps:
   - noise: {dbfs: -44, secs: 4}
   - ask: "What's the weather today?"

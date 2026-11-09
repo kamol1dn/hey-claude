@@ -1,0 +1,20 @@
+{
+ "note": "a real answer, recorded once from the pinned server (public places only)",
+ "server": "@dangahagan/weather-mcp@1.35.8",
+ "recorded": "2026-11-09 (London/Berlin/Almaty evening)",
+ "tool": "get_alerts",
+ "args": {
+  "latitude": 51.5074,
+  "longitude": -0.1278
+ },
+ "env": {
+  "WEATHER_UNITS": "metric",
+  "WEATHER_TIME_FORMAT": "24h"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# Weather Alerts — United Kingdom\n\n**Location:** 51.5074, -0.1278\n**Coverage note:** European alerts are matched at country level — regional filtering is not yet available. Warnings below may not affect your exact location.\n\n⚠️ **1 active warning for United Kingdom**\n\n🟡 **Yellow fog warning** — Yellow (Moderate)\n---\n**Headline:** Fog leading to some delays to transport and difficult travel conditions\n**Severity:** Moderate | **Urgency:** Future | **Certainty:** Likely\n**Area:** East Midlands | East of England | London & South East England | North West England | South West England | Wales | West Midlands | Yorkshire & Humber\n**Issued:** 2026-11-09 08:45 (+00:00)\n**Onset:** 2026-11-09 18:00 (+00:00)\n**Expires:** 2026-11-10 10:00 (+00:00)\n\n**Instructions:**\nGive yourself the best chance of avoiding delays by checking road conditions if driving, leaving extra journey time, or amending plans if necessary. Make sure you know how to switch on your fog lights, and check they are working before setting off on your journey. Bus and train services, as well as flights and ferry travel may also be affected; check for updates from your travel company and follow their advice.\n\nBe prepared for weather warnings to change: when a weather warning is issued, the Met Office recommends staying up to date with the weather forecast in your area.\n\n**Sender:** UK Met Office\n\n*Showing standard detail. Use detail=\"full\" for complete warning descriptions.*\n\n---\n*Data source: EUMETNET – MeteoAlarm (national warnings: UK Met Office). Alerts shown unmodified as issued; times as published.*\n"
+  }
+ ]
+}

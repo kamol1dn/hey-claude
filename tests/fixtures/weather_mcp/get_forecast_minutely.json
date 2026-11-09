@@ -1,0 +1,21 @@
+{
+ "note": "a real answer, recorded once from the pinned server (public places only)",
+ "server": "@dangahagan/weather-mcp@1.35.8",
+ "recorded": "2026-11-09 (London/Berlin/Almaty evening)",
+ "tool": "get_forecast",
+ "args": {
+  "latitude": 52.52,
+  "longitude": 13.405,
+  "granularity": "minutely"
+ },
+ "env": {
+  "WEATHER_UNITS": "metric",
+  "WEATHER_TIME_FORMAT": "24h"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# 15-Minute Precipitation Nowcast\n\n**Model:** ICON-D2 (DWD) via Open-Meteo — updates every 3 hours\n*Next 2 hours in 15-minute steps, local time (GMT+1). Amounts are shown as bands, not figures: consecutive model runs can disagree about individual showers, so read a single quarter as indicative.*\n\n| Time | Precipitation |\n|------|---------------|\n| 20:30 | none |\n| 20:45 | none |\n| 21:00 | none |\n| 21:15 | none |\n| 21:30 | none |\n| 21:45 | none |\n| 22:00 | none |\n| 22:15 | none |\n\n**Chance of precipitation (hourly figure, not per quarter):** 21:00: 0% · 22:00: 0%\n\n*Bands are this server's heuristic for the 15-minute amount: none · trace · light · moderate · heavy (thresholds in docs/TOOLS.md).*\n\n---\n*Data source: Open-Meteo (ICON-D2 model)*\n"
+  }
+ ]
+}

@@ -5,6 +5,7 @@
     python -m heyclaude --cpu           # whisper on the CPU (stt.device in config.yaml is gpu by default)
     python -m heyclaude --text          # type instead of talk (no mic, no whisper)
     python -m heyclaude --simulate samples\\question.wav --exit   # feed a wav as the mic
+    python -m heyclaude --simulate a.wav b.wav c.wav --exit      # a simulated conversation (follow-ups)
     python -m heyclaude --record-wake-samples [N] [--auto]       # record your own "hey claude" clips
 """
 from __future__ import annotations
@@ -23,7 +24,9 @@ def main():
     dev.add_argument("--gpu", action="store_true", help="whisper on the GPU (overrides stt.device)")
     dev.add_argument("--cpu", action="store_true", help="whisper on the CPU (overrides stt.device)")
     ap.add_argument("--text", action="store_true", help="type requests instead of speaking")
-    ap.add_argument("--simulate", metavar="WAV", help="use a 16 kHz mono wav as the microphone")
+    ap.add_argument("--simulate", metavar="WAV", nargs="+",
+                    help="use 16 kHz mono wavs as the microphone; with several, each one after the first "
+                         "is played into the follow-up window (or once idle and tasks are done)")
     ap.add_argument("--exit", action="store_true", help="quit after the simulated request and its tasks finish")
     ap.add_argument("--no-ui", action="store_true", help="no island window")
     ap.add_argument("--no-tray", action="store_true", help="no tray icon")

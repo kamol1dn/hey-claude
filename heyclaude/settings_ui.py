@@ -107,6 +107,12 @@ TIPS = {
                      "go to ONE warm Claude Code process, started at launch and reused.",
     "agent.model": "Model for the tool agent; sonnet for harder lookups, at some latency cost.",
     "agent.filler": "Spoken right away while the agent looks things up.",
+    "conversation.followup_s": "After an answer, keep listening this long without the wake word, once its own "
+                               "voice has finished. \"Thanks\" or silence ends it. 0 = off.",
+    "conversation.save": "Save the conversation: turns go to state/conversations/<date>.jsonl and come back "
+                         "after a restart, and the tool agent's session is saved as \"hey-claude <date>\". "
+                         "Off: nothing is written. Saying \"start fresh\" forgets it either way.",
+    "conversation.idle_reset_s": "Start a new conversation after this long without a request.",
     "tasks.model": "Model for headless tasks. Empty = your Claude Code default model.",
     "tasks.permission_mode": "Permission mode for headless tasks (claude -p).",
     "tasks.max_parallel": "How many background tasks may run at once.",
@@ -487,6 +493,16 @@ class SettingsWindow(QWidget):
         self._row(f, "agent.filler", "Filler phrase", self.ed_filler)
         v.addWidget(g)
 
+        g = QGroupBox("Conversation")
+        f = self._form(g)
+        self.sp_followup = QDoubleSpinBox(minimum=0.0, maximum=30.0, singleStep=1.0, decimals=1, suffix=" s")
+        self._row(f, "conversation.followup_s", "Follow-up window", self.sp_followup)
+        self.sp_idle_reset = QSpinBox(minimum=30, maximum=86400, singleStep=60, suffix=" s")
+        self._row(f, "conversation.idle_reset_s", "New conversation after", self.sp_idle_reset)
+        self.cb_save_conv = QCheckBox("Save this conversation (per day)")
+        self._row(f, "conversation.save", "Save", self.cb_save_conv)
+        v.addWidget(g)
+
         g = QGroupBox("Background tasks (claude -p)")
         f = self._form(g)
         self.cmb_tasks_model = self._combo([("(Claude Code default)", "")] + CLI_MODELS, editable=True)
@@ -587,6 +603,9 @@ class SettingsWindow(QWidget):
         self.cb_agent.setChecked(bool(_get(cfg, "agent.enabled", True)))
         self._set_combo(self.cmb_agent_model, _get(cfg, "agent.model", "haiku"))
         self.ed_filler.setText(str(_get(cfg, "agent.filler") or ""))
+        self.sp_followup.setValue(float(_get(cfg, "conversation.followup_s", 5) or 0))
+        self.sp_idle_reset.setValue(int(_get(cfg, "conversation.idle_reset_s", 600) or 600))
+        self.cb_save_conv.setChecked(bool(_get(cfg, "conversation.save", False)))
         self._set_combo(self.cmb_tasks_model, _get(cfg, "tasks.model"))
         self._set_combo(self.cmb_perm, _get(cfg, "tasks.permission_mode", "acceptEdits"))
         self.sp_parallel.setValue(int(_get(cfg, "tasks.max_parallel", 3)))
@@ -667,6 +686,9 @@ class SettingsWindow(QWidget):
         _set(new, "agent.enabled", self.cb_agent.isChecked())
         _set(new, "agent.model", self._combo_value(self.cmb_agent_model))
         _set(new, "agent.filler", self._text(self.ed_filler, "agent.filler"))
+        _set(new, "conversation.followup_s", self.sp_followup.value())
+        _set(new, "conversation.idle_reset_s", self.sp_idle_reset.value())
+        _set(new, "conversation.save", self.cb_save_conv.isChecked())
         _set(new, "tasks.model", self._combo_value(self.cmb_tasks_model) or None)
         _set(new, "tasks.permission_mode", self._combo_value(self.cmb_perm))
         _set(new, "tasks.max_parallel", self.sp_parallel.value())

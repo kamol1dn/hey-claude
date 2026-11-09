@@ -73,23 +73,35 @@ class MicSource:
             yield b
 
 
+def _read_wav(path) -> np.ndarray:
+    with wave.open(str(path), "rb") as w:
+        assert w.getframerate() == RATE and w.getnchannels() == 1 and w.getsampwidth() == 2,             "simulate wav must be 16 kHz mono 16-bit"
+        return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+
+
 class WavSource:
-    """Plays a 16 kHz mono wav into the pipeline in real time, then silence.
+    """Plays 16 kHz mono wavs into the pipeline in real time, then silence.
 
     Used by --simulate to test wake -> answer without speaking into the mic.
+    With several files (a simulated conversation), each one after the first
+    waits until `ready()` says the assistant can take it (for example its
+    follow-up window is open); silence is fed meanwhile, like a quiet room.
     """
 
-    def __init__(self, path: str | Path, lead_silence: float = 1.0, tail_silence: float = 30.0):
-        with wave.open(str(path), "rb") as w:
-            assert w.getframerate() == RATE and w.getnchannels() == 1 and w.getsampwidth() == 2, \
-                "simulate wav must be 16 kHz mono 16-bit"
-            pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
-        lead = np.zeros(int(RATE * lead_silence), np.int16)
-        tail = np.zeros(int(RATE * tail_silence), np.int16)
-        self.audio = np.concatenate([lead, pcm, tail])
+    def __init__(self, path, lead_silence: float = 1.0, tail_silence: float = 30.0, ready=None,
+                 gap: float = 0.4):
+        paths = [path] if isinstance(path, (str, Path)) else list(path)
+        self.clips = [_read_wav(p) for p in paths]
+        self.names = [Path(p).name for p in paths]
+        self.ready = ready or (lambda: True)
+        self.lead, self.tail, self.gap = lead_silence, tail_silence, gap
         self.audio_end_t: float | None = None   # wall time the last real sample was "heard"
-        self._lead = len(lead)
-        self._speech_len = len(pcm)
+        self.played = 0                          # clips fully played so far
+        self.audio = self.clips[0]               # (kept for callers that read it)
+
+    @property
+    def finished(self) -> bool:
+        return self.played >= len(self.clips)
 
     def start(self):
         pass
@@ -105,17 +117,35 @@ class WavSource:
 
     def __iter__(self):
         t0 = time.perf_counter()
-        i = 0
+        n = 0                                    # blocks yielded, for real-time pacing
         silence = np.zeros(BLOCK, np.int16)
-        while True:   # after the file: endless silence, so tasks can finish
-            target = t0 + (i + BLOCK) / RATE
-            delay = target - time.perf_counter()
+
+        def tick(block):
+            nonlocal n
+            delay = t0 + (n + 1) * BLOCK / RATE - time.perf_counter()
             if delay > 0:
                 time.sleep(delay)
-            if self.audio_end_t is None and i + BLOCK >= self._lead + self._speech_len:
-                self.audio_end_t = time.perf_counter()
-            yield self.audio[i:i + BLOCK] if i + BLOCK <= len(self.audio) else silence
-            i += BLOCK
+            n += 1
+            return block
+
+        for k, pcm in enumerate(self.clips):
+            if k == 0:
+                for _ in range(int(self.lead * RATE / BLOCK)):
+                    yield tick(silence)
+            else:
+                while not self.ready():          # wait for the assistant, feeding silence
+                    yield tick(silence)
+                for _ in range(int(self.gap * RATE / BLOCK)):
+                    yield tick(silence)
+            if len(self.clips) > 1:
+                print(f"[simulate] playing {self.names[k]} ({k + 1}/{len(self.clips)})")
+            pad = np.concatenate([pcm, np.zeros((-len(pcm)) % BLOCK, np.int16)])
+            for i in range(0, len(pad), BLOCK):
+                yield tick(pad[i:i + BLOCK])
+            self.audio_end_t = time.perf_counter()
+            self.played = k + 1
+        while True:   # after the files: endless silence, so tasks can finish
+            yield tick(silence)
 
 
 STOCK_FALLBACK = "hey_jarvis"     # used when the configured model is missing or broken
@@ -191,8 +221,13 @@ class SpeakingGate:
             self._speaking = False
             self._until = self.clock() + float(self.cfg.get("speaking_tail_s", 0.7))
 
+    def busy(self) -> bool:
+        """Talking, or within the tail after it, whatever suppress_while_speaking
+        says. The follow-up window waits for this to clear."""
+        return self._speaking or self.clock() < self._until
+
     def suppressed(self) -> bool:
-        return self.enabled and (self._speaking or self.clock() < self._until)
+        return self.enabled and self.busy()
 
 
 class WakeWord:

@@ -9,10 +9,22 @@ import traceback
 from . import config as config_mod
 from .brain import Brain, Projects
 from .config import STATE_DIR
+from .conversation import FollowUp, is_end_phrase, strip_wake
 from .listen import MicSource, SpeakingGate, WakeWord, WavSource, record_utterance
 from .stt import SpeechToText, normalize_device
 from .tasks import TaskManager
 from .tts import Speaker
+
+
+class _Either:
+    """Duck-typed threading.Event for record_utterance's stop_event: set when
+    any of the given checks is true."""
+
+    def __init__(self, *checks):
+        self.checks = [c for c in checks if c is not None]
+
+    def is_set(self) -> bool:
+        return any(c() for c in self.checks)
 
 
 def _elapsed(t) -> str:
@@ -49,6 +61,10 @@ class Assistant:
         self.stt: SpeechToText | None = None
         self.hold = None                        # holdkey.HoldKey, set by __main__ (mic runs only)
         self.wake_gate = SpeakingGate(cfg["wake"])   # no wake triggers while it talks (+ a short tail)
+        # After an answer: listen again without the wake word, once its voice has finished.
+        self.followup = FollowUp(cfg.setdefault("conversation", {}), self.wake_gate, busy=self._busy)
+        self._user_stopped: set[str] = set()   # tasks stopped by voice: no "was stopped" announcement
+        self._reply: list[str] = []            # what the current request has said so far
 
     # -- UI helpers -----------------------------------------------------------
     def set_mode(self, mode, text=""):
@@ -77,6 +93,7 @@ class Assistant:
         else:
             self.listening.clear()
             self._abort_rec.set()
+            self.followup.cancel()
             if pause_seconds:
                 self.paused_until = time.time() + pause_seconds
                 self._pause_timer = threading.Timer(pause_seconds, self.set_listening, args=(True,))
@@ -92,7 +109,7 @@ class Assistant:
 
     def on_hold(self, held: bool):
         """Hold key went down/up (hook thread). Only shown while listening."""
-        if self.mode in ("listening", "holding"):
+        if self.mode in ("listening", "holding", "followup"):
             self.set_mode("holding" if held else "listening")
 
     def talk_now(self):
@@ -195,12 +212,38 @@ class Assistant:
     # -- task callbacks -------------------------------------------------------
     def _task_finished(self, t):
         self.pending_tasks = max(0, self.pending_tasks - 1)
+        print(f"[task {t.id}] {t.status}: {t.summary}  (resume: {t.resume_cmd})")
+        self.push_tasks()
+        if t.id in self._user_stopped:          # "stop the task": already answered
+            self._user_stopped.discard(t.id)
+            return
         verb = {"done": "is done", "failed": "failed", "stopped": "was stopped"}.get(t.status, "ended")
         msg = f"Your {t.project} task {verb}. {t.summary}"
-        print(f"[task {t.id}] {t.status}: {t.summary}  (resume: {t.resume_cmd})")
         self._speaking_text = msg
         self.speaker.announce(msg)
-        self.push_tasks()
+        self.brain.convo.add("", msg, "local", task_id=t.id)
+        self._arm_followup()     # "what did it change?" works without the wake word
+
+    def _busy(self) -> bool:
+        """Still answering: a request running, or speech queued or playing."""
+        sp = getattr(self, "speaker", None)
+        return self.conv_lock.locked() or bool(sp and (sp.busy or not sp.q.empty()))
+
+    def _arm_followup(self):
+        if (self.listening.is_set() or self.simulate) and not self.text_mode:
+            self.followup.arm()
+
+    def _sim_ready(self) -> bool:
+        """--simulate with several clips: play the next one into the follow-up
+        window, or once everything is idle (and tasks have finished)."""
+        if self.pending_tasks:
+            return False
+        if self.followup.is_open and self.followup.opens != self._sim_window:
+            self._sim_window = self.followup.opens        # one clip per window, not two into the same one
+            return True
+        return self.followup.state == "idle" and not self._busy() and self.mode == "idle"
+
+    _sim_window = 0
 
     # -- main loop ------------------------------------------------------------
     def run(self):
@@ -233,7 +276,7 @@ class Assistant:
             return self._text_loop()
         if self.simulate:
             self.brain.warm.wait(120)   # measure a warmed-up app, like real use after start-up
-            src = WavSource(self.simulate)
+            src = WavSource(self.simulate, ready=self._sim_ready)
             try:
                 self._pump(src, one_shot=False)
             finally:
@@ -274,45 +317,68 @@ class Assistant:
             if self.manual.is_set():
                 self.manual.clear()
                 hit = True
-            if not hit or time.perf_counter() < cooldown_until:
+            followup = False
+            if not hit and not one_shot and self.followup.poll():
+                hit = followup = True           # answered and done speaking: listen without the wake word
+            if not hit or (not followup and time.perf_counter() < cooldown_until):
                 continue
             t_wake = time.perf_counter()
-            self.speaker.stop()                 # barge-in: wake word cuts off speech
+            if not followup:
+                self.followup.cancel()
+                self.speaker.stop()             # barge-in: wake word cuts off speech
             self.gen += 1
-            self.set_mode("listening")
+            lcfg = self.cfg["listen"]
+            stop = None if (self.simulate or one_shot) else self._abort_rec
+            if followup:
+                print(f"[followup] listening {self.followup.remaining():.1f}s without the wake word")
+                self.set_mode("followup", f"{self.followup.length:.0f}")
+                lcfg = dict(lcfg, start_timeout=self.followup.remaining())
+                # An announcement starting meanwhile closes the window (it re-opens after).
+                stop = _Either(stop.is_set if stop else None, self.wake_gate.busy)
+            else:
+                self.set_mode("listening")
             hold = self.hold if (self.hold is not None and not self.simulate) else None
             if hold:
                 hold.arm()
             try:
-                audio, t_end = record_utterance(blocks, self.cfg["listen"], on_level=self.ui.level.emit,
-                                                stop_event=None if (self.simulate or one_shot) else self._abort_rec,
-                                                hold=hold.state if hold else None)
+                audio, t_end = record_utterance(blocks, lcfg, on_level=self.ui.level.emit,
+                                                stop_event=stop, hold=hold.state if hold else None)
             finally:
                 if hold:
                     hold.disarm()
+                self.followup.close()
             self.wake.reset()
             if audio is None:
+                if followup:
+                    print("[followup] closed: nothing said")
                 self.rest()
-                if self.simulate or one_shot:
+                if self.simulate:
+                    self._sim_done = getattr(src, "finished", True)
+                    self._maybe_exit()
+                if one_shot or (self.simulate and not followup and getattr(src, "finished", True)):
                     return
                 continue
             t_rec = time.perf_counter()
             self.set_mode("thinking", "…")
             text = self.stt.transcribe(audio)
             t_stt = time.perf_counter()
-            print(f"[heard] {text!r}")
+            print(f"[heard] {text!r}" + (" (follow-up)" if followup else ""))
             cooldown_until = time.perf_counter() + float(self.cfg["wake"]["cooldown"])
-            if not text.strip():
+            if followup:
+                text = strip_wake(text)
+            if self.simulate:
+                self._sim_done = getattr(src, "finished", True)
+            if not text.strip() or (followup and is_end_phrase(text)):
+                if text.strip():
+                    print(f"[followup] ended by {text!r}")
                 self.rest()
+                self._maybe_exit()
                 if one_shot:
                     return
                 continue
             timing = dict(wake=t_wake, speech_end=t_end or t_rec, vad_done=t_rec, stt_done=t_stt,
                           audio_s=len(audio) / 16000, text=text)
-            threading.Thread(target=self.converse, args=(text, self.gen, timing), daemon=True).start()
-            if self.simulate:
-                # one utterance per simulated file; keep pumping silence until done
-                self._sim_done = True
+            self.request(text, timing, source="followup" if followup else "voice")
             if one_shot:
                 return
 
@@ -325,15 +391,30 @@ class Assistant:
                 break
             if not line:
                 break
-            self.gen += 1
-            self.converse(line, self.gen, dict(wake=time.perf_counter(), speech_end=time.perf_counter(),
-                                               vad_done=time.perf_counter(), stt_done=time.perf_counter(),
-                                               audio_s=0, text=line))
+            self.request(line, source="text", wait=True)
             self.speaker.wait()
             while self.pending_tasks and self.exit_when_done:
                 time.sleep(0.5)
             self.speaker.wait()
         self.ui.quit.emit()
+
+    def request(self, text: str, timing: dict | None = None, source: str = "voice", wait: bool = False):
+        """The one entry point for a request, spoken or typed. It joins the
+        shared conversation and is answered by whichever tier fits. Runs on a
+        new thread (returned) unless `wait`. `source`: voice | followup | typed | text."""
+        text = text.strip()
+        if not text:
+            return None
+        self.gen += 1
+        now = time.perf_counter()
+        timing = timing or dict(wake=now, speech_end=now, vad_done=now, stt_done=now, audio_s=0, text=text)
+        timing["source"] = source
+        if wait:
+            self.converse(text, self.gen, timing)
+            return None
+        th = threading.Thread(target=self.converse, args=(text, self.gen, timing), daemon=True)
+        th.start()
+        return th
 
     def converse(self, text: str, gen: int, timing: dict):
         with self.conv_lock:
@@ -344,14 +425,18 @@ class Assistant:
         self.set_mode("thinking", text)
         self.speaker.begin()
         self.brain.timing = {}
-        said = []
+        said = self._reply = []
+        tier, task_id, answered = "", None, False
         t_llm0 = time.perf_counter()
         try:
             for ev in self.brain.handle(text):
                 if gen != self.gen:
                     break
                 kind = ev[0]
+                if kind != "noop":
+                    answered = True
                 if kind == "say":
+                    tier = tier or "fast"
                     said.append(ev[1])
                     self._speaking_text = "".join(said).strip()
                     if self.mode == "speaking":
@@ -362,17 +447,27 @@ class Assistant:
                     if filler:
                         self._say(filler)
                     self.set_mode("thinking", "checking with your tools… " + text)
-                    for chunk in self.brain.agent.ask(ev[1]):
-                        if gen != self.gen:
-                            break
-                        timing.setdefault("answer", time.perf_counter())
-                        said.append(chunk)
-                        self._speaking_text = "".join(said).strip()
-                        self.speaker.feed(chunk)
+                    tier = "agent"
+                    self._stream(self.brain.lookup(ev[1]), gen, timing)
                 elif kind == "task":
-                    self._start_task(ev[1], ev[2])
+                    tier = "task"
+                    task_id = self._start_task(ev[1], ev[2])
                 elif kind == "status":
+                    tier = "local"
                     self._say_status()
+                elif kind == "fresh":
+                    tier = "fresh"             # not recorded: the new conversation starts after it
+                    self.brain.forget()
+                    self._say("Okay, starting fresh.")
+                elif kind == "task_ask":
+                    tier = "task-ask"
+                    task_id = self._ask_task(ev[1], ev[2], gen, timing)
+                elif kind == "task_stop":
+                    tier = "local"
+                    task_id = self._stop_task(ev[1])
+                elif kind == "task_resume":
+                    tier = "local"
+                    task_id = self._resume_task(ev[1])
                 elif kind == "noop":
                     pass
         except Exception as e:
@@ -383,6 +478,11 @@ class Assistant:
             else:
                 self._say("Sorry, that didn't work. " + msg[:80])
         self.speaker.flush()
+        if answered and gen == self.gen:
+            if tier != "fresh":
+                self.brain.convo.add(text, "".join(said).strip(), tier or "fast", task_id=task_id)
+            if timing.get("source") != "typed":
+                self._arm_followup()
         # wait for first audio to record latency
         t_wait = time.perf_counter()
         while self.speaker.first_audio_t is None and time.perf_counter() - t_wait < 20 and gen == self.gen:
@@ -397,23 +497,104 @@ class Assistant:
 
     def _say(self, text):
         self._speaking_text = text
+        self._reply.append(text + " ")
         self.speaker.feed(text + " ")
+
+    def _stream(self, chunks, gen, timing):
+        """Speak a streamed answer (tool agent, task question)."""
+        for chunk in chunks:
+            if gen != self.gen:
+                break
+            timing.setdefault("answer", time.perf_counter())
+            self._reply.append(chunk)
+            self._speaking_text = "".join(self._reply).strip()
+            self.speaker.feed(chunk)
 
     def _start_task(self, project, task):
         if not project:
             names = ", ".join(self.cfg["projects"]) or "none yet"
             self._say(f"Which project should that run in? I know {names}.")
-            return
+            return None
         path = self.cfg["projects"][project]
         try:
-            t = self.tasks.spawn(project, path, task)
+            t = self.tasks.spawn(project, path, task, context=self.brain.convo.task_context())
         except Exception as e:
             self._say(f"I couldn't start it: {e}.")
-            return
+            return None
         self.pending_tasks += 1
         print(f"[task {t.id}] started in {path}: {task}")
         self._say(f"Okay, starting that in {project}. I'll tell you when it's done.")
         self.push_tasks()
+        return t.id
+
+    # -- talking about tasks ----------------------------------------------------
+    def _find_task(self, ref: str, running: bool | None = None):
+        if ref and ref.startswith("#"):
+            return self.tasks.tasks.get(ref[1:])
+        return self.tasks.find(ref, self.brain.projects, running)
+
+    def _ask_task(self, ref, question, gen, timing):
+        """'What did the inha app task change?' -> resume its session headlessly."""
+        t = (self._find_task(ref, running=False) or self._find_task(ref)) if self.tasks.tasks else None
+        if t is None:
+            self._say("I couldn't find that task." if self.tasks.tasks else "There are no tasks yet.")
+            return None
+        if t.status in ("starting", "running"):
+            on = f", on {t.activity}" if t.activity else ""
+            self._say(f"The {t.project} task is still running{on}. I'll tell you when it's done.")
+            return t.id
+        if not t.session_id:
+            self._say(f"The {t.project} task never got started, so there's nothing to ask it.")
+            return t.id
+        print(f"[task {t.id}] asking its session {t.session_id}: {question}")
+        self._say(self.cfg["agent"].get("filler") or "Let me check.")
+        self.set_mode("thinking", f"asking the {t.project} task… {question}")
+        self._stream(self.brain.ask_task(t, question), gen, timing)
+        return t.id
+
+    def _stop_task(self, ref):
+        run = self.tasks.running()
+        if not run:
+            self._say("Nothing is running.")
+            return None
+        if ref == "all":
+            for t in run:
+                self._user_stopped.add(t.id)
+                self.tasks.stop(t.id)
+            self._say(f"Stopped {len(run)} task{'s' if len(run) != 1 else ''}.")
+            return None
+        if not ref and len(run) > 1:
+            names = " or ".join(f"the {t.project} one" for t in run)
+            self._say(f"{len(run)} are running. Which one, {names}?")
+            return None
+        t = self._find_task(ref, running=True) if ref else run[0]
+        if t is None:
+            self._say("I couldn't find a running task like that.")
+            return None
+        self._user_stopped.add(t.id)
+        self.tasks.stop(t.id)
+        print(f"[task {t.id}] stopped by voice")
+        self._say(f"Stopped the {t.project} task.")
+        self.push_tasks()
+        return t.id
+
+    def _resume_task(self, ref):
+        """'Resume the last task in a terminal': a console running claude --resume in its folder."""
+        t = self._find_task(ref) if self.tasks.tasks else None
+        if t is None:
+            self._say("There's no task like that to resume." if self.tasks.tasks else "There are no tasks yet.")
+            return None
+        if t.status in ("starting", "running"):
+            self._say(f"The {t.project} task is still running. Stop it first, or wait until it's done.")
+            return t.id
+        try:
+            self.tasks.open_terminal(t)
+        except Exception as e:
+            self._say(f"I couldn't open it: {e}.")
+            return t.id
+        print(f"[task {t.id}] resumed in a terminal: {t.resume_cmd}")
+        self._say(f"Opening the {t.project} task in a terminal.")
+        return t.id
 
     def _say_status(self):
         run = self.tasks.running()

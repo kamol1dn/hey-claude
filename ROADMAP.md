@@ -98,7 +98,31 @@ training (the user runs Colab) and the ≥95% / <1 per 3 h measurement with
 **Done when:** ≥95% hit rate on the user's samples and fewer than 1 false
 wake per 3 hours of background audio.
 
-## M3: Conversation, follow-ups and memory
+## M3: Conversation, follow-ups and memory ✅ built (2026-11-09)
+
+**Status:** built and verified with simulated clips; see README
+"Conversations and sessions". `heyclaude/conversation.py` keeps one
+transcript for all tiers. Each warm process gets the turns the other tiers
+answered since it last spoke, and a task gets the whole recent conversation.
+It is capped by turns and tokens and resets after 10 min idle or on "start
+fresh". The follow-up window (5 s) opens once M2's speaking gate is clear,
+including the tail. "Thanks" or silence ends it, and the island shows a
+draining ring. "Save this conversation" (off by default) writes
+`state/conversations/<date>.jsonl` and names the agent session per day. Voice
+task control covers "what did the X task change?" (forked headless `--resume`,
+read-only tools), "stop the task" and "resume the last task in a terminal".
+`Assistant.request()` is the one entry point for spoken and typed requests.
+25 new offline tests (`tests/test_conversation.py`) pass, and so do the 64
+existing ones. Live check: `--simulate` with six clips. Turn 1 (quick)
+answered "Canberra". Turn 2 ("what's the weather there?", agent) searched for
+Canberra. Turn 3 ("what is that in Fahrenheit?", quick) answered from the
+agent's reply. Turn 4 ("start a task in sandbox: … for a day in that city")
+wrote a Canberra packing list. Turn 5 ("what did the sandbox task change?")
+was answered from the task's session. Then "thanks, that's all" closed the
+window. Found and fixed on the way: whisper large-v3 dropped "Start a task in
+X," because the hint prompt was phrased the same way. **Not done:** a check
+with a real mic and room echo. The agent's web weather lookup found no live
+reading (a WebSearch result issue, not context).
 
 **Goal:** talking back and forth feels like one conversation.
 

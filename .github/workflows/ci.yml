@@ -1,0 +1,61 @@
+name: CI
+
+# Offline tests on Windows (the only platform hey-claude runs on). No mic, GPU,
+# models or Claude login needed: the suites mock those. Also reused by
+# release.yml before anything is published.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Offline tests (Windows, Python 3.12)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen      # the island and settings render without a display
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+      HF_HUB_DISABLE_XET: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies (CPU only)
+        run: python -m pip install -r requirements.txt
+
+      - name: Byte-compile
+        run: python -m compileall -q heyclaude tools tests
+
+      - name: Run every test suite
+        shell: pwsh
+        run: |
+          $failed = @()
+          foreach ($t in Get-ChildItem tests\test_*.py | Sort-Object Name) {
+            Write-Host "::group::$($t.Name)"
+            python $t.FullName
+            $code = $LASTEXITCODE
+            Write-Host "::endgroup::"
+            if ($code -ne 0) { $failed += $t.Name; Write-Host "::error file=tests/$($t.Name)::$($t.Name) failed (exit $code)" }
+          }
+          if ($failed.Count) { Write-Error "Failed: $($failed -join ', ')"; exit 1 }
+          Write-Host "All test suites passed."
+
+      - name: Version matches the package
+        shell: pwsh
+        run: python -c "import heyclaude; print('hey-claude', heyclaude.__version__)"

@@ -1,5 +1,7 @@
 # hey-claude
 
+[![CI](https://github.com/kamol1dn/hey-claude/actions/workflows/ci.yml/badge.svg)](https://github.com/kamol1dn/hey-claude/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/kamol1dn/hey-claude?include_prereleases)](https://github.com/kamol1dn/hey-claude/releases)
+
 An always-listening voice assistant for Windows 11. Say the wake word and a
 small black "island" drops in at the top of the screen. Ask a quick question
 and a small model answers out loud in a second or two. Say *"start a task in
@@ -649,6 +651,34 @@ Where the rest of the time goes, and the knobs:
   lookups take about 10 s.
 - "start a task in …" is matched locally, without a model call. You hear
   "Okay, starting that…" as soon as whisper finishes.
+
+## CI and releases
+
+- **CI** (`.github/workflows/ci.yml`) runs every `tests/test_*.py` suite on
+  Windows with Python 3.12 for each push to `main` and each pull request. Only
+  CPU packages are installed: no mic, GPU, models or Claude login are needed,
+  because the suites mock them. Qt runs offscreen. Run the same thing locally
+  with `for %t in (tests\test_*.py) do .venv\Scripts\python %t`.
+- **Releases** (`.github/workflows/release.yml`):
+  1. Bump `__version__` in `heyclaude/__init__.py` and merge it.
+  2. Tag that commit and push the tag:
+
+     ```bash
+     git tag v0.4.0
+     ```
+
+     ```bash
+     git push origin v0.4.0
+     ```
+
+  The workflow re-runs the tests, checks that the tag matches `__version__`,
+  and publishes a GitHub release. It attaches a source zip and
+  `SHA256SUMS.txt`, with notes generated from the merged PRs. A tag with a
+  hyphen (`v0.5.0-rc1`) makes a pre-release.
+- **Later assets:** the default wake-word model (M2a) and the Windows
+  installer (M8) are attached to the same releases when those milestones land.
+- Dependabot keeps the workflow actions up to date. Python packages are
+  pinned by hand because of the GPU stack.
 
 ## Files
 

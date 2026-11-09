@@ -1,0 +1,8 @@
+# Keep the workflow actions current. Python packages are left alone on purpose:
+# the GPU stack (onnxruntime-gpu, CUDA/cuDNN wheels, ctranslate2) is pinned by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

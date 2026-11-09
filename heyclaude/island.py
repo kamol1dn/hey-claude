@@ -37,6 +37,8 @@ class Bridge(QObject):
     hush = Signal()                 # stop key pressed while it talks (from the hotkey thread)
     stt = Signal(str)               # active speech-to-text device, e.g. "gpu (turbo)"
     heard = Signal(str)             # the hotkey session's spoken request was transcribed ("" = nothing)
+    partial = Signal(str)           # live transcript while you talk ("" = none yet)
+    voice = Signal(str)             # active text-to-speech engine/device, e.g. "kokoro gpu"
     quit = Signal()
 
 
@@ -105,7 +107,11 @@ class Island(QWidget):
         bridge.tasks.connect(self.set_tasks)
         bridge.stt.connect(self.set_stt)
         bridge.heard.connect(self._heard)
+        bridge.partial.connect(self.set_partial)
+        bridge.voice.connect(self.set_voice)
         self.stt_label = ""
+        self.voice_label = ""
+        self.partial = ""               # what you've said so far (listening modes)
 
         # Hotkey "talk or type" field (see inputbox.py); attach_input() turns it on.
         self.session = None
@@ -284,6 +290,8 @@ class Island(QWidget):
 
     # -- inputs from the assistant --------------------------------------------
     def set_state(self, mode: str, text: str):
+        if mode not in ("listening", "holding", "followup"):
+            self.partial = ""
         self.mode, self.text = mode, text
         self.mode_at = time.perf_counter()
         self._place()
@@ -295,8 +303,22 @@ class Island(QWidget):
 
     def set_stt(self, label: str):
         self.stt_label = label
-        self.setToolTip(f"speech-to-text: {label}")
+        self._tooltip()
         self._place()
+        self.update()
+
+    def set_voice(self, label: str):
+        self.voice_label = label
+        self._tooltip()
+
+    def _tooltip(self):
+        lines = (f"speech-to-text: {self.stt_label}" if self.stt_label else "",
+                 f"voice: {self.voice_label}" if self.voice_label else "")
+        self.setToolTip("\n".join(x for x in lines if x))
+
+    def set_partial(self, text: str):
+        """Live transcript while listening (M4 hook; drawn after the level meter)."""
+        self.partial = text if self.mode in ("listening", "holding", "followup") else ""
         self.update()
 
     def _stt_short(self) -> str:
@@ -428,7 +450,14 @@ class Island(QWidget):
             p.drawRoundedRect(QRectF(x0 + i * (bw + 3), cy - hh / 2, bw, hh), 2, 2)
         p.setFont(self.font_small)
         p.setPen(DIM)
-        p.drawText(QRectF(x0 + n * (bw + 3) + 4, 0, 60, head.height()), Qt.AlignVCenter, "listening")
+        tx = x0 + n * (bw + 3) + 4
+        if self.partial:                 # live transcript, newest words visible
+            avail = head.width() - tx - 10
+            text = QFontMetrics(self.font_small).elidedText(self.partial, Qt.ElideLeft, int(avail))
+            p.setPen(FG)
+            p.drawText(QRectF(tx, 0, avail, head.height()), Qt.AlignVCenter | Qt.AlignLeft, text)
+        else:
+            p.drawText(QRectF(tx, 0, 60, head.height()), Qt.AlignVCenter, "listening")
 
     def _paint_holding(self, p, head, t):
         """Hold key down: still listening, pauses don't end it."""
@@ -609,6 +638,8 @@ class Island(QWidget):
         m.addAction("Stop speaking", self.stop_speaking.emit)
         if self.stt_label:
             m.addAction(f"Speech-to-text: {self.stt_label}").setEnabled(False)
+        if self.voice_label:
+            m.addAction(f"Voice: {self.voice_label}").setEnabled(False)
         m.addSeparator()
         m.addAction("Open logs folder", lambda: os.startfile(str(Path(__file__).resolve().parent.parent / "state" / "logs")))
         m.addSeparator()
@@ -681,7 +712,8 @@ class LogWindow(QWidget):
         exe = self.tm.exe if self.tm else "claude"
         sid = self.row["session_id"]
         # A new console window running the interactive session in the task's folder.
-        subprocess.Popen(["cmd", "/k", exe, "--resume", sid], cwd=self.row["path"],
+        from .claude_cli import child_env
+        subprocess.Popen(["cmd", "/k", exe, "--resume", sid], cwd=self.row["path"], env=child_env(),
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
 
     def stop_task(self):

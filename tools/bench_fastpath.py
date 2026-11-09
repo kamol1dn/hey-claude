@@ -12,7 +12,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from heyclaude.claude_cli import find_claude, fast_args  # noqa: E402
+from heyclaude.claude_cli import child_env, fast_args, find_claude  # noqa: E402
 
 QUESTIONS = [
     "What is the capital of France?",
@@ -25,7 +25,7 @@ def one_shot(exe, q):
     t0 = time.perf_counter()
     p = subprocess.Popen(
         [exe, "-p", q, *fast_args("haiku", "You are a terse voice assistant.")],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=child_env(),
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     first = None
@@ -43,7 +43,7 @@ def persistent(exe):
         [exe, "-p", "--input-format", "stream-json",
          *fast_args("haiku", "You are a terse voice assistant.")],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        text=True, encoding="utf-8", bufsize=1,
+        text=True, encoding="utf-8", bufsize=1, env=child_env(),
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     time.sleep(3)  # let it boot, as the app would at startup

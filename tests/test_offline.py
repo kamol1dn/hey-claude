@@ -154,13 +154,13 @@ def test_config_round_trip(tmp_path):
     new["wake"]["threshold"] = 0.6
     new["projects"]["My  New App"] = "C:/x"
     new["tasks"]["allowed_tools"] = ["Read"]
-    new["tts"]["voice"] = None
+    new["tts"]["sapi_voice"] = None
     path = C.save(new, tmp_path / "config.yaml")
     back = C.load(path)
     assert back["wake"]["threshold"] == 0.6
     assert back["projects"]["my new app"] == "C:/x"
     assert back["tasks"]["allowed_tools"] == ["Read"]
-    assert back["tts"]["voice"] is None
+    assert back["tts"]["sapi_voice"] is None
     assert back["listen"] == cfg["listen"] and back["claude"] == cfg["claude"]
     changed = C.diff(cfg, back)
     assert set(changed) == {"wake.threshold", "projects", "tasks.allowed_tools"}

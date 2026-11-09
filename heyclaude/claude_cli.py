@@ -18,6 +18,11 @@ _SESSION_VARS = (
     "CLAUDE_CODE_SESSION_ATTENDED",
 )
 
+# An API key in the environment makes the claude CLI bill the API instead of
+# the user's subscription login. hey-claude reads its own key for the direct
+# API path (brain._SdkChat) and never passes one to a `claude` process.
+_BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
 
 def _version_key(path: str):
     m = re.search(r"claude-code[\\/](\d+)\.(\d+)\.(\d+)", path)
@@ -48,9 +53,11 @@ def find_claude(configured: str | None = None) -> str:
     )
 
 
-def child_env() -> dict:
-    env = dict(os.environ)
-    for k in _SESSION_VARS:
+def child_env(base: dict | None = None) -> dict:
+    """Environment for every `claude` process hey-claude starts: no parent
+    session variables, and no API key (so it uses the subscription login)."""
+    env = dict(os.environ if base is None else base)
+    for k in _SESSION_VARS + _BILLING_VARS:
         env.pop(k, None)
     return env
 

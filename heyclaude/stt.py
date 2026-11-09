@@ -2,7 +2,7 @@
 
 `stt.device: gpu` picks the device per request from actual load:
 
-- GPU (`stt.gpu_model`, large-v3) unless it's busy: utilisation
+- GPU (`stt.gpu_model`, large-v3-turbo) unless it's busy: utilisation
   >= `stt.gpu_busy_pct` (70) averaged over ~0.5 s, or too little free VRAM to
   load the model. Once on the CPU it goes back only below `gpu_resume_pct`
   (60), so it doesn't flip back and forth.
@@ -161,7 +161,7 @@ class SpeechToText:
         self.want = normalize_device(device or cfg.get("device", "gpu"))
         self.cpu_model = cfg.get("cpu_model") or "base.en"     # config.load migrates v1's `model`
         self.cpu_compute = cfg.get("cpu_compute_type") or "int8"
-        self.gpu_model = cfg.get("gpu_model") or "large-v3"
+        self.gpu_model = cfg.get("gpu_model") or "large-v3-turbo"
         self.gpu_compute = cfg.get("gpu_compute_type") or "int8_float16"
         # A spelling hint for project names. Not phrased like a request: large-v3
         # treats a prompt such as "Start a task in X." as already said and drops
@@ -180,6 +180,7 @@ class SpeechToText:
         self.choice, self.reason = "gpu", ""     # last decision and why
         self._premiere_seen, self._premiere_t = False, 0.0
         self._lock = threading.RLock()
+        self._run_lock = threading.Lock()
         self._loading = False
         self.monitor = monitor
         if self.monitor is None and self.want == "gpu":
@@ -337,11 +338,18 @@ class SpeechToText:
 
     # -- transcription -------------------------------------------------------------
     def transcribe(self, audio: np.ndarray) -> str:
+        """Thread-safe: pause/partial transcripts (vad.TurnListener) and the
+        final one take turns on the model."""
+        with self._run_lock:
+            return self._transcribe(audio)
+
+    def _transcribe(self, audio: np.ndarray) -> str:
         self.poll(background=True)
         model = self.gpu if self.device == "cuda" else None
         if model is not None:
             try:
-                return model.transcribe(audio)
+                with own_gpu(self.monitor):
+                    return model.transcribe(audio)
             except Exception as e:
                 if not is_cuda_error(e):
                     raise
@@ -360,6 +368,13 @@ class SpeechToText:
         g, f, c = m.gpu_util(), m.gpu_free_mb(), m.cpu_pct()
         return ", ".join(x for x in (f"gpu {g:.0f}%" if g is not None else "", f"vram free {f / 1024:.1f} GB"
                                      if f is not None else "", f"cpu {c:.0f}%" if c is not None else "") if x)
+
+
+def own_gpu(monitor):
+    """monitor.own() if the monitor tracks our own GPU work (sysload.LoadMonitor), else a no-op."""
+    import contextlib
+    own = getattr(monitor, "own", None)
+    return own() if own is not None else contextlib.nullcontext()
 
 
 def _premiere_running() -> bool:

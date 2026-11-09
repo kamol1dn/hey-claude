@@ -1,6 +1,7 @@
 """Glue: mic loop -> wake -> record -> STT -> brain -> TTS / tasks, plus UI updates."""
 from __future__ import annotations
 
+import collections
 import csv
 import threading
 import time
@@ -14,6 +15,7 @@ from .listen import MicSource, SpeakingGate, WakeWord, WavSource, record_utteran
 from .stt import SpeechToText, normalize_device
 from .tasks import TaskManager
 from .tts import Speaker
+from .vad import TurnListener, make_vad
 
 
 class _Either:
@@ -78,6 +80,14 @@ class Assistant:
         self.followup = FollowUp(cfg.setdefault("conversation", {}), self.wake_gate, busy=self._busy)
         self._user_stopped: set[str] = set()   # tasks stopped by voice: no "was stopped" announcement
         self._reply: list[str] = []            # what the current request has said so far
+        # M4: echo cancellation + barge-in, Silero VAD, transcripts while you talk.
+        self.far = None                        # aec.FarEnd: what the speaker is playing
+        self.aec = None                        # aec.EchoCanceller (None = off/unavailable)
+        self.barge = None                      # aec.BargeIn
+        self.vad = None                        # for recording
+        self.barge_vad = None                  # for barge-in (its own state)
+        self.monitor = None                    # sysload.LoadMonitor shared by STT and TTS
+        self.turn: TurnListener | None = None  # the utterance being recorded
 
     # -- UI helpers -----------------------------------------------------------
     def set_mode(self, mode, text=""):
@@ -198,6 +208,23 @@ class Assistant:
         if sig is not None:
             sig.emit(label)
 
+    def _voice_changed(self, label: str):
+        sig = getattr(self.ui, "voice", None)
+        if sig is not None:
+            sig.emit(label)
+
+    def _partial(self, text: str):
+        sig = getattr(self.ui, "partial", None)
+        if sig is not None:
+            sig.emit(text)
+
+    def _partials_on(self) -> bool:
+        """listen.partials: auto = only while whisper runs on the GPU."""
+        v = str(self.cfg["listen"].get("partials", "auto")).lower()
+        if v in ("false", "off", "no", "0"):
+            return False
+        return v in ("true", "on", "yes", "1") or getattr(self.stt, "device", "cpu") == "cuda"
+
     def _stt_poll_loop(self):
         """Re-check GPU/CPU load every 10 s so the island stays current (each
         request also re-checks right before transcribing)."""
@@ -221,8 +248,23 @@ class Assistant:
     # -- startup --------------------------------------------------------------
     def load(self):
         c = self.cfg
+        gpu_wanted = self.stt_device() == "gpu" or str(c["tts"].get("device", "gpu")).lower() in ("gpu", "cuda")
+        if gpu_wanted and self.monitor is None:
+            try:
+                from .sysload import LoadMonitor
+                self.monitor = LoadMonitor()
+            except Exception as e:
+                print(f"[load] no load monitor: {e}")
+        if not self.text_mode:
+            from .aec import BargeIn, FarEnd, make_canceller
+            self.far = FarEnd()
+            self.aec = make_canceller(c["listen"], self.far)
+            self.barge = BargeIn(c["listen"])
         self.set_mode("loading", "loading voice…")
-        self.speaker = Speaker(c["tts"], on_start=self._tts_started, on_idle=self._tts_idle)
+        self.speaker = Speaker(c["tts"], on_start=self._tts_started, on_idle=self._tts_idle, stt_cfg=c["stt"],
+                               monitor=self.monitor, far_tap=self.far.push if self.aec else None,
+                               on_label=self._voice_changed)
+        self._voice_changed(self.speaker.label)
         self.tasks = TaskManager(c, on_change=self.push_tasks, on_finish=self._task_finished)
         self.push_tasks()
         self.set_mode("loading", "loading brain…")
@@ -232,14 +274,18 @@ class Assistant:
             self.wake = WakeWord(c["wake"]["model"], float(c["wake"]["threshold"]), gate=self.wake_gate)
             self.set_mode("loading", f"loading whisper ({self.stt_device()})…")
             self.stt = SpeechToText(c["stt"], device=self.stt_device(), hint_words=list(c["projects"]),
-                                    on_change=self._stt_changed)
+                                    on_change=self._stt_changed, monitor=self.monitor)
+            self.vad = make_vad(c["listen"])
+            self.barge_vad = make_vad(c["listen"]) if self.aec else None
             self._stt_changed(self.stt.label)
             if self.stt.want == "gpu" and not self.stt.gpu_failed:
                 threading.Thread(target=self._stt_poll_loop, daemon=True, name="stt-load").start()
         self.ready.set()
         self.rest()
         load = f" [{self.stt.readings()}]" if self.stt and self.stt.readings() else ""
-        print(f"[ready] fast path: {self.brain.backend}; stt: {self.stt.label if self.stt else '-'}{load}")
+        print(f"[ready] fast path: {self.brain.backend}; stt: {self.stt.label if self.stt else '-'}; "
+              f"voice: {self.speaker.label}; vad: {type(self.vad).__name__ if self.vad else '-'}; "
+              f"aec: {'on' if self.aec else 'off'}{load}")
 
     # -- TTS callbacks --------------------------------------------------------
     def _tts_started(self):
@@ -261,6 +307,7 @@ class Assistant:
             threading.Timer(0.5, self.ui.quit.emit).start()
 
     _sim_done = False
+    _sim_idle_end = False                       # --simulate: last utterance asked for nothing
 
     # -- task callbacks -------------------------------------------------------
     def _task_finished(self, t):
@@ -360,12 +407,21 @@ class Assistant:
     def _pump(self, src, one_shot: bool):
         """Wake -> record -> transcribe over one audio source. Returns when the
         source ends, listening is switched off, or (one_shot) after one request."""
-        blocks = iter(src)
+        blocks = self._cleaned(iter(src))
         cooldown_until = 0.0
         first = True
+        recent: collections.deque = collections.deque(maxlen=8)   # ~0.6 s of cleaned audio, for barge-in
         for block in blocks:
             if self.stopping:
                 return
+            recent.append(block)
+            if self._sim_idle_end and getattr(src, "finished", False):
+                # --simulate: the last clip ended without a request (an end phrase,
+                # silence) before its trailing silence had been fed; exit now.
+                self._sim_idle_end = False
+                self._sim_done = True
+                self._maybe_exit()
+            barged = self._barge_check(block)
             if one_shot and first and not self.manual.is_set():
                 return                          # the request was cancelled before the mic opened
             first = False
@@ -379,17 +435,25 @@ class Assistant:
                 hit = True
                 from_input = self.input_open
             followup = False
+            if barged and not hit:
+                hit = followup = True           # talked over the answer: it stops, and we listen
             if not hit and not one_shot and not self.input_open and self.followup.poll():
                 hit = followup = True           # answered and done speaking: listen without the wake word
             if not hit or (not followup and time.perf_counter() < cooldown_until):
                 continue
             t_wake = time.perf_counter()
-            if not followup:
+            if barged:
+                print("[barge-in] you talked over it: stopped speaking, listening")
+                self.followup.cancel()
+                self.speaker.stop()
+                if self.far is not None:
+                    self.far.clear()
+            elif not followup:
                 self.followup.cancel()
                 self.speaker.stop()             # barge-in: wake word cuts off speech
             self.gen += 1
             lcfg = self.cfg["listen"]
-            if followup:
+            if followup and not barged:
                 print(f"[followup] listening {self.followup.remaining():.1f}s without the wake word")
                 self.set_mode("followup", f"{self.followup.length:.0f}")
                 lcfg = dict(lcfg, start_timeout=self.followup.remaining())
@@ -403,11 +467,17 @@ class Assistant:
                 if from_input:
                     stops.append(self._cancel_utt)
                 stop = _AnyEvent(stops) if stops else None
-                if followup:
+                if followup and not barged:
                     # An announcement starting meanwhile closes the window (it re-opens after).
                     stop = _Either(stop.is_set if stop else None, self.wake_gate.busy)
+                if self.vad is not None:
+                    self.vad.reset()
+                self.turn = TurnListener(self.stt.transcribe, self.cfg["listen"], on_partial=self._partial,
+                                         partials=self._partials_on()) if self.stt is not None else None
                 audio, t_end = record_utterance(blocks, lcfg, on_level=self.ui.level.emit,
-                                                stop_event=stop, hold=hold.state if hold else None)
+                                                stop_event=stop, hold=hold.state if hold else None,
+                                                vad=self.vad, listener=self.turn,
+                                                preroll=list(recent)[-6:] if barged else None)
             finally:
                 if hold:
                     hold.disarm()
@@ -426,10 +496,14 @@ class Assistant:
                     return
                 continue
             t_rec = time.perf_counter()
-            self.set_mode("thinking", "…")
-            text = self.stt.transcribe(audio)
+            self.set_mode("thinking", self.turn.partial_text if self.turn and self.turn.partial_text else "…")
+            text = self.turn.final() if self.turn is not None else None
+            reused = text is not None
+            if text is None:
+                text = self.stt.transcribe(audio)
             t_stt = time.perf_counter()
-            print(f"[heard] {text!r}" + (" (follow-up)" if followup else ""))
+            print(f"[heard] {text!r}" + (" (follow-up)" if followup and not barged else "")
+                  + (" (barge-in)" if barged else "") + (" [transcribed at the pause]" if reused else ""))
             if from_input:
                 self._heard(text)
             cooldown_until = time.perf_counter() + float(self.cfg["wake"]["cooldown"])
@@ -441,15 +515,42 @@ class Assistant:
                 if text.strip():
                     print(f"[followup] ended by {text!r}")
                 self.rest()
+                self._sim_idle_end = bool(self.simulate)
                 self._maybe_exit()
                 if one_shot:
                     return
                 continue
             timing = dict(wake=t_wake, speech_end=t_end or t_rec, vad_done=t_rec, stt_done=t_stt,
-                          audio_s=len(audio) / 16000, text=text)
-            self.request(text, timing, source="followup" if followup else "voice")
+                          audio_s=len(audio) / 16000, text=text, stt_reused=reused,
+                          stt_device=getattr(self.stt, "label", ""))
+            self.request(text, timing, source="barge-in" if barged else "followup" if followup else "voice")
             if one_shot:
                 return
+
+    def _cleaned(self, blocks):
+        """Mic blocks with the assistant's own voice cancelled (when AEC is on)."""
+        for b in blocks:
+            if self.aec is not None:
+                try:
+                    b = self.aec.process(b)
+                except Exception as e:
+                    print(f"[aec] off after an error: {e}")
+                    self.aec = None
+            yield b
+
+    def _barge_check(self, block) -> bool:
+        """While it's talking (PCM voice, echo-cancelled mic): did the user talk over it?"""
+        if self.barge is None or self.aec is None or self.barge_vad is None:
+            return False
+        speaking = self.wake_gate.speaking and getattr(self.speaker.voice.current, "pcm", False)
+        if not speaking:
+            if self.barge._since is not None:
+                self.barge.speaking(False)
+                self.barge_vad.reset()
+            return False
+        self.barge.speaking(True)
+        from .aec import rms
+        return self.barge.feed(self.barge_vad.frames(block), self.barge_vad.frame_ms, rms(block))
 
     def _text_loop(self):
         print("text mode: type a request, empty line to quit")
@@ -556,7 +657,7 @@ class Assistant:
         t_wait = time.perf_counter()
         while self.speaker.first_audio_t is None and time.perf_counter() - t_wait < 20 and gen == self.gen:
             time.sleep(0.01)
-        timing.update(llm_start=t_llm0, route=self.brain.timing.get("route"),
+        timing.update(llm_start=t_llm0, route=self.brain.timing.get("route"), voice=getattr(self.speaker, "label", ""),
                       first_token=self.brain.timing.get("first_token"),
                       first_audio=self.speaker.first_audio_t, reply="".join(said).strip())
         self._log_timing(timing)
@@ -688,11 +789,18 @@ class Assistant:
             first_token=round(tm["first_token"], 3) if tm.get("first_token") else None,
             tts_start=round(tm["first_audio"] - tm["llm_start"] - (tm.get("first_token") or 0), 3)
             if tm.get("first_audio") else None,
+            stt_reused=tm.get("stt_reused"), stt_device=tm.get("stt_device"),
+            voice=tm.get("voice"), source=tm.get("source"),
             text=tm["text"], reply=tm.get("reply", "")[:120],
         )
         self.timings.append(row)
         print("[latency] " + "  ".join(f"{k}={v}" for k, v in row.items() if k not in ("text", "reply", "when")))
         f = STATE_DIR / "latency.csv"
+        if f.exists():                          # columns changed (M4 added some): start a new file
+            with open(f, encoding="utf-8") as fh:
+                head = fh.readline().strip()
+            if head != ",".join(row):
+                f.rename(f.with_name(f"latency-{time.strftime('%Y%m%d-%H%M%S')}.csv"))
         new = not f.exists()
         with open(f, "a", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=list(row))

@@ -27,9 +27,37 @@ wake:
 
 listen:
   device: null            # sounddevice input index or name; null = Windows default mic
-  vad_aggressiveness: 2   # 0..3, higher = stricter about what counts as speech
+  # Voice activity: silero (default; the Silero VAD model faster-whisper ships,
+  # on the CPU) or webrtc (the older, cruder webrtcvad).
+  vad: silero
+  silero_threshold: 0.5   # speech probability that counts as speech (0..1)
+  vad_aggressiveness: 2   # webrtc only: 0..3, higher = stricter about what counts as speech
   start_timeout: 5.0      # give up if no speech starts within this many seconds
-  end_silence_ms: 700     # this much silence after speech ends the utterance
+  # End of turn. At each pause the words so far are transcribed in the
+  # background; a finished sentence ends the turn after short_silence_ms, one
+  # that trails off ("and...", "the", "um") waits long_silence_ms, anything
+  # else end_silence_ms. If you don't speak again, that transcript is used as
+  # is, so speech-to-text costs nothing after you stop.
+  end_silence_ms: 700
+  smart_end: true
+  short_silence_ms: 300
+  long_silence_ms: 1200
+  pause_probe_ms: 160     # silence before the pause is transcribed
+  # Live transcript on the island while you talk: auto = when whisper is on the GPU.
+  partials: auto
+  partial_interval_s: 0.8
+  # Echo cancellation (WebRTC AEC3, from the livekit package) removes the
+  # assistant's own voice from the mic, so it can hear you over it.
+  aec: true
+  aec_noise_suppression: false
+  # Barge-in: talk over an answer and it stops and listens (Kokoro/Piper only;
+  # SAPI plays audio itself, so there's nothing to cancel). Fires after
+  # barge_in_ms of speech, not in the first barge_in_grace_ms of a reply.
+  barge_in: true
+  barge_in_ms: 200
+  barge_in_grace_ms: 400
+  barge_in_gap_ms: 100
+  barge_in_min_rms: 300
   max_seconds: 20
   # Hold this key while talking to keep listening through pauses (silence won't
   # end the utterance until you let go). ctrl = either Ctrl; also right ctrl,
@@ -43,9 +71,12 @@ stt:
   # load fails, or a transcription hits a CUDA error (that request is retried
   # on the CPU). cpu: always cpu_model. --gpu / --cpu override this.
   device: gpu
-  # large-v3: ~0.5 s per request on an RTX 4060, ~2 GB VRAM in int8_float16.
-  # large-v3-turbo is faster still (~1.6 GB download); set it here once you have it.
-  gpu_model: large-v3
+  # large-v3-turbo (default: ~0.25 s per request on an RTX 4060, which also
+  # makes the end of turn quicker) or large-v3 (~0.4 s). A name, or a folder
+  # with a converted model, e.g. state/models/faster-whisper-large-v3-turbo.
+  # README "Voice" has the measured speed and accuracy of each, and how to
+  # compare them on your own voice (tools/stt_eval.py).
+  gpu_model: large-v3-turbo
   gpu_compute_type: int8_float16   # or float16 (more VRAM)
   cpu_model: base.en          # tiny.en / base.en / small.en / small: loaded only when needed
   cpu_compute_type: int8
@@ -62,10 +93,15 @@ stt:
   yield_to_premiere: false
 
 fast:
-  # auto  = Anthropic SDK if ANTHROPIC_API_KEY is set, otherwise the claude CLI
+  # auto  = the Anthropic API if there's a key (see api_key_file), otherwise the claude CLI
   # cli   = always the claude CLI (your subscription login)
   # sdk   = always the Anthropic SDK
   backend: auto
+  # The direct API path (the low-latency option) needs a key: ANTHROPIC_API_KEY
+  # in hey-claude's environment, or the key on the first line of this file
+  # (git-ignored). The key is never passed to a `claude` process: lookups and
+  # tasks stay on your subscription login.
+  api_key_file: state/anthropic-api-key.txt
   cli_model: haiku
   sdk_model: claude-haiku-5-5
   # Keep one claude CLI process alive between questions (much faster, and it
@@ -172,14 +208,29 @@ projects:
   timetable bot: D:\coding\timetable_bot
 
 tts:
-  backend: sapi          # sapi (pyttsx3) | piper | kokoro
-  rate: 190              # sapi words per minute
-  voice: null            # sapi voice name substring, e.g. "Zira"; null = default
-  piper_exe: piper       # piper backend: path to piper.exe
-  piper_model: null      # piper backend: path to a .onnx voice
-  kokoro_model: null     # kokoro backend: path to kokoro-v1.0.onnx
-  kokoro_voices: null    # kokoro backend: path to voices-v1.0.bin
-  kokoro_voice: af_heart
+  # kokoro (default): natural voice, on the GPU with a CPU fallback, then SAPI.
+  # sapi: Windows voices. piper: a separate executable (piper_exe/piper_model).
+  engine: kokoro
+  # gpu: picked per reply from GPU load, like speech-to-text (stt.gpu_busy_pct,
+  # stt.yield_to_premiere); cpu: always the CPU.
+  device: gpu
+  voice: af_heart        # kokoro voice: af_heart, af_bella, af_nicole, am_michael, bf_emma, bm_george...
+  speed: 1.0
+  # Model files (null = state/models/kokoro/kokoro-v1.0.onnx and voices-v1.0.bin;
+  # README "Kokoro voice" says where to get them).
+  kokoro_model: null
+  kokoro_voices: null
+  cpu_threads: 8         # kokoro on the CPU
+  # The first sentence of a reply is cut at a comma once it's this many words,
+  # so the first audio comes sooner. 0 = whole sentences only.
+  first_chunk_words: 9
+  idle_close_s: 4        # close the audio output this long after speaking (lets Windows sleep)
+  # SAPI (engine: sapi, or the last fallback)
+  rate: 190              # words per minute
+  sapi_voice: null       # voice name substring, e.g. "Zira"; null = the Windows default
+  # piper
+  piper_exe: piper
+  piper_model: null
 
 island:
   screen: primary        # primary, or a screen index

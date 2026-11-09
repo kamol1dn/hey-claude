@@ -1,0 +1,132 @@
+# Copy to config.yaml and edit. config.yaml is git-ignored.
+
+wake:
+  # Stock openWakeWord model until a custom "hey claude" one is trained
+  # (see docs/train-hey-claude.md). Either a stock name (hey_jarvis, alexa,
+  # hey_mycroft, hey_rhasspy) or a path to a .onnx file.
+  model: hey_jarvis
+  threshold: 0.5
+  # Seconds to ignore the wake word after an interaction ends.
+  cooldown: 1.0
+
+listen:
+  device: null            # sounddevice input index or name; null = Windows default mic
+  vad_aggressiveness: 2   # 0..3, higher = stricter about what counts as speech
+  start_timeout: 5.0      # give up if no speech starts within this many seconds
+  end_silence_ms: 700     # this much silence after speech ends the utterance
+  max_seconds: 20
+
+stt:
+  model: base.en          # tiny.en / base.en / small.en / small / medium ...
+  device: cpu             # cpu by default so Premiere keeps the GPU; --gpu flips to cuda
+  compute_type: int8      # int8 on cpu, float16 on cuda
+  cpu_threads: 4
+  language: en
+
+fast:
+  # auto  = Anthropic SDK if ANTHROPIC_API_KEY is set, otherwise the claude CLI
+  # cli   = always the claude CLI (your subscription login)
+  # sdk   = always the Anthropic SDK
+  backend: auto
+  cli_model: haiku
+  sdk_model: claude-haiku-5-5
+  # Keep one claude CLI process alive between questions (much faster, and it
+  # remembers the conversation). It is recycled after this many turns.
+  persistent: true
+  max_turns: 20
+  max_tokens: 300
+
+agent:
+  # Tier (b): questions that need your tools ("who messaged me on Telegram",
+  # "what's on my calendar") go to ONE warm Claude Code process, started at
+  # launch and reused, so there's no start-up delay per question and no pile
+  # of throwaway sessions. It sees whatever MCP servers Claude Code itself is
+  # configured with (`claude mcp list`), plus your claude.ai connectors
+  # (Gmail, Calendar, Drive...) once the CLI is signed in.
+  enabled: true
+  model: haiku                 # sonnet for harder lookups, at some latency cost
+  cwd: null                    # null = this repo folder
+  permission_mode: default
+  # What it may use without asking; anything else is denied automatically.
+  # Add MCP servers by name prefix, e.g. "mcp__telegram" allows all of that
+  # server's tools. Leave out tools that send or change things unless you want
+  # "send Sam a message saying ..." to just do it.
+  # Defaults: built-in read tools plus the READ-ONLY tools of the claude.ai
+  # Calendar / Gmail / Drive connectors (names as the signed-in CLI reports
+  # them). Nothing here sends, deletes or edits anything.
+  allowed_tools:
+    - Read
+    - Glob
+    - Grep
+    - WebSearch
+    - WebFetch
+    - mcp__claude_ai_Google_Calendar__list_calendars
+    - mcp__claude_ai_Google_Calendar__list_events
+    - mcp__claude_ai_Google_Calendar__search_events
+    - mcp__claude_ai_Google_Calendar__get_event
+    - mcp__claude_ai_Gmail__search_threads
+    - mcp__claude_ai_Gmail__get_thread
+    - mcp__claude_ai_Gmail__get_message
+    - mcp__claude_ai_Gmail__list_labels
+    - mcp__claude_ai_Google_Drive__search_files
+    - mcp__claude_ai_Google_Drive__list_recent_files
+    - mcp__claude_ai_Google_Drive__get_file_metadata
+    - mcp__claude_ai_Google_Drive__read_file_content
+  # MCP servers that live in the Claude *desktop app's* config
+  # (claude_desktop_config.json) are invisible to the CLI. List names here to
+  # copy them into state/agent-mcp.json and pass them with --mcp-config.
+  # Caution for telegram: the copy reuses the same TELEGRAM_SESSION as the
+  # desktop app's copy, and Telegram delivers updates to only one connection of
+  # an authorization (see telegram-mcp-server's README). Reading history works,
+  # but give it its own session if the desktop copy must keep live updates.
+  import_desktop_mcp: []       # e.g. [telegram]
+  mcp_configs: []              # extra --mcp-config files
+  max_turns: 30                # recycle the process after this many questions
+  timeout: 180                 # seconds to wait for one answer
+  filler: "Let me check."      # spoken right away while it looks things up
+  extra_args: []
+
+claude:
+  # Path to claude.exe. null = look on PATH, then in the Claude desktop
+  # app's bundled copy (%LOCALAPPDATA%\Claude-Data\*\claude-code\<ver>\...).
+  exe: null
+
+tasks:
+  model: null                    # null = your Claude Code default model
+  permission_mode: acceptEdits   # acceptEdits | auto | dontAsk | plan | bypassPermissions
+  # Tools the headless run may use without asking. Anything else that would
+  # need a permission prompt is denied automatically (--permission-prompts none).
+  allowed_tools:
+    - Read
+    - Glob
+    - Grep
+    - Edit
+    - Write
+    - "Bash(git status:*)"
+    - "Bash(git diff:*)"
+    - "Bash(git log:*)"
+    - "Bash(ls:*)"
+  extra_args: []                 # anything else to pass to claude -p
+  max_parallel: 3
+
+# Spoken name -> folder. Say "start a task in <name>: <thing>".
+# Several spoken names can point at the same folder.
+projects:
+  hey claude: D:\coding\hey-claude
+  telegram server: D:\coding\telegram-mcp-server
+  inha app: D:\coding\inha_app
+  timetable bot: D:\coding\timetable_bot
+
+tts:
+  backend: sapi          # sapi (pyttsx3) | piper | kokoro
+  rate: 190              # sapi words per minute
+  voice: null            # sapi voice name substring, e.g. "Zira"; null = default
+  piper_exe: piper       # piper backend: path to piper.exe
+  piper_model: null      # piper backend: path to a .onnx voice
+  kokoro_model: null     # kokoro backend: path to kokoro-v1.0.onnx
+  kokoro_voices: null    # kokoro backend: path to voices-v1.0.bin
+  kokoro_voice: af_heart
+
+island:
+  screen: primary        # primary, or a screen index
+  top_margin: 8

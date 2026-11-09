@@ -1,0 +1,12 @@
+openwakeword>=0.6
+faster-whisper>=1.2
+sounddevice>=0.5
+webrtcvad-wheels>=2.0
+pyttsx3>=2.99        # pulls in pywin32, which the SAPI backend uses directly
+PySide6>=6.8
+numpy
+pyyaml
+anthropic>=0.40      # only used when ANTHROPIC_API_KEY is set
+# optional TTS backends:
+# kokoro-onnx        # tts.backend: kokoro
+# (piper is a separate executable: https://github.com/rhasspy/piper/releases)

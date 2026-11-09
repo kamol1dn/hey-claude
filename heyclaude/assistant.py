@@ -9,7 +9,7 @@ import traceback
 from . import config as config_mod
 from .brain import Brain, Projects
 from .config import STATE_DIR
-from .listen import MicSource, WakeWord, WavSource, record_utterance
+from .listen import MicSource, SpeakingGate, WakeWord, WavSource, record_utterance
 from .stt import SpeechToText, normalize_device
 from .tasks import TaskManager
 from .tts import Speaker
@@ -48,6 +48,7 @@ class Assistant:
         self.on_listening = None                # callback(on: bool, paused_until: float | None)
         self.stt: SpeechToText | None = None
         self.hold = None                        # holdkey.HoldKey, set by __main__ (mic runs only)
+        self.wake_gate = SpeakingGate(cfg["wake"])   # no wake triggers while it talks (+ a short tail)
 
     # -- UI helpers -----------------------------------------------------------
     def set_mode(self, mode, text=""):
@@ -158,7 +159,7 @@ class Assistant:
         self.brain = Brain(c)
         if not self.text_mode:
             self.set_mode("loading", "loading wake word…")
-            self.wake = WakeWord(c["wake"]["model"], float(c["wake"]["threshold"]))
+            self.wake = WakeWord(c["wake"]["model"], float(c["wake"]["threshold"]), gate=self.wake_gate)
             self.set_mode("loading", f"loading whisper ({self.stt_device()})…")
             self.stt = SpeechToText(c["stt"], device=self.stt_device(), hint_words=list(c["projects"]),
                                     on_change=self._stt_changed)
@@ -172,10 +173,12 @@ class Assistant:
 
     # -- TTS callbacks --------------------------------------------------------
     def _tts_started(self):
+        self.wake_gate.set_speaking(True)
         if self.mode not in ("listening",):
             self.set_mode("speaking", self._speaking_text)
 
     def _tts_idle(self):
+        self.wake_gate.set_speaking(False)
         if self.mode in ("speaking",):
             self.rest()
         self._maybe_exit()

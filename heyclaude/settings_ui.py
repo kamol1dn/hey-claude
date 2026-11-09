@@ -66,7 +66,7 @@ QLabel#hint {{ color: #9A9A9A; font-size: 9pt; }}
 QLabel#warn {{ color: #E5A04A; font-size: 9pt; }}
 """
 
-WAKE_MODELS = ["hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy"]
+WAKE_MODELS = ["models/hey_claude.onnx", "hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy"]
 STT_MODELS = ["tiny.en", "base.en", "small.en", "small", "medium"]
 STT_GPU_MODELS = ["large-v3", "large-v3-turbo", "distil-large-v3", "medium", "small"]
 CLI_MODELS = ["haiku", "sonnet", "opus"]
@@ -80,9 +80,11 @@ TIPS = {
     "listen.hold_key": "Hold while talking to keep listening through pauses; let go and it stops when you stop "
                        "talking. ctrl (either), right ctrl, caps lock, f13... Empty = off. Pressing another key "
                        "during the hold (Ctrl+C...) makes it a shortcut, not a hold.",
-    "wake.model": "Stock openWakeWord model (hey_jarvis, alexa, hey_mycroft, hey_rhasspy) until a custom "
-                  "\"hey claude\" one is trained (see docs/train-hey-claude.md), or a path to a .onnx file.",
-    "wake.threshold": "How sure the wake-word model must be. Higher = fewer false wakes, but it may miss you.",
+    "wake.model": "The trained \"hey claude\" model (models/hey_claude.onnx; see docs/train-hey-claude.md), "
+                  "another .onnx path, or a stock openWakeWord name (hey_jarvis, alexa, hey_mycroft, "
+                  "hey_rhasspy). A missing file falls back to hey_jarvis at 0.5.",
+    "wake.threshold": "How sure the wake-word model must be. Higher = fewer false wakes, but it may miss you. "
+                      "tools/wake_eval.py recommends one.",
     "wake.cooldown": "Seconds to ignore the wake word after an interaction ends.",
     "stt.device": "GPU: the GPU model is loaded once and kept in VRAM; falls back to the CPU when CUDA is "
                   "missing, the load fails or runs out of memory, or a transcription hits a CUDA error.\n"

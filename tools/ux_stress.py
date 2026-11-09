@@ -234,6 +234,10 @@ def harness_config(user_cfg: dict, scratch: Path) -> dict:
     c["agent"]["windows_mcp"] = dict(c["agent"].get("windows_mcp") or {}, exclude_tools=[
         "PowerShell", "Registry", "Click", "Type", "Shortcut", "Drag", "App", "Move", "Scroll", "Wait", "Launch",
         "Switch", "Resize", "Clipboard", "Key", "Notification", "Process"])
+    # tools the agent must not even see in a test run (it then never tries them)
+    extra = list(c["agent"].get("extra_args") or [])
+    extra += ["--disallowedTools", "PowerShell,Bash,KillShell,NotebookEdit"]
+    c["agent"]["extra_args"] = extra
     c["projects"] = {"scratch": str(scratch)}
     c.setdefault("tasks", {})
     c["tasks"]["permission_mode"] = "acceptEdits"
@@ -244,10 +248,14 @@ def harness_config(user_cfg: dict, scratch: Path) -> dict:
 
 
 class Audit:
-    """Every tool the agent calls is checked against SAFE_TOOL; anything else stops the run."""
+    """Every tool the agent calls is checked against SAFE_TOOL. An attempt at anything
+    else is logged; if it then ran (its result isn't a refusal) the run stops. Claude Code
+    refuses tools outside --allowedTools (--permission-prompts none), so an attempt alone
+    is the model asking, not something happening."""
 
     def __init__(self, on_violation):
         self.calls: list[str] = []
+        self.attempts: list[str] = []
         self.violations: list[str] = []
         self.on_violation = on_violation
 
@@ -257,9 +265,19 @@ class Audit:
             return
         self.calls.append(name)
         if not SAFE_TOOL.match(name):
-            self.violations.append(name)
-            print(f"[ux] SAFETY: the agent called {name}; stopping the run")
-            self.on_violation(name)
+            self.attempts.append(name)
+            print(f"[ux] SAFETY: the agent asked for {name}; watching its result")
+
+    def result(self, name: str, is_error: bool, content) -> None:
+        if SAFE_TOOL.match(name or ""):
+            return
+        text = str(content)[:200]
+        if is_error:
+            print(f"[ux] SAFETY: {name} was refused ({text[:100]!r})")
+            return
+        self.violations.append(name)
+        print(f"[ux] SAFETY: {name} RAN ({text[:100]!r}); stopping the run")
+        self.on_violation(name)
 
 
 def volume_now():
@@ -460,6 +478,14 @@ class Harness:
                         orig(s)
                     asst.far.push = push
             self.rec.hook_assistant(asst)
+            ag = getattr(getattr(asst, "brain", None), "agent", None)
+            if ag is not None and ag.on_tool_result is not None:
+                orig_res = ag.on_tool_result
+
+                def on_res(name, args, result, is_error, orig_res=orig_res):
+                    self.audit.result(name, is_error, result)
+                    return orig_res(name, args, result, is_error)
+                ag.on_tool_result = on_res
             time.sleep(1.5)
             for rep in range(self.args.repeat):
                 order = list(self.scenarios)
@@ -756,7 +782,8 @@ def write_summary(out: Path, results: list[dict], audit: Audit, args):
     lines = [f"# UX stress run {out.name}", "",
              f"Mode: {'offline (fake brain/voice)' if args.offline else 'live (real app)'}; "
              f"scenarios run: {len(results)}; audited tool calls: {len(audit.calls)}; "
-             f"safety violations: {', '.join(audit.violations) or 'none'}", "",
+             f"refused attempts: {', '.join(audit.attempts) or 'none'}; "
+             f"safety violations (a tool outside the safe list that ran): {', '.join(audit.violations) or 'none'}", "",
              "## Findings by how janky they feel", ""]
     order = sorted(rows, key=lambda k: -max(f["severity"] for _, f in rows[k]))
     if not order:

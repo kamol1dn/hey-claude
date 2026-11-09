@@ -205,7 +205,9 @@ def main():
         island = Island(bridge, cfg["island"], wake_label=wake_label(resolve_wake_model(cfg["wake"]["model"])[0]))
         island.activate.connect(asst.talk_now)
         island.attach_input(asst.begin_input, asst.cancel_input_mic, asst.submit_text, closed=asst.end_input)
-        island.stop_speaking.connect(lambda: asst.speaker.stop())
+        island.stop_speaking.connect(asst.hush)
+        # Mic button while it talks: stop, then listen (same as the hotkey: the talk-or-type field).
+        island.interrupt_talk.connect(lambda: (asst.hush(), bridge.talk.emit()))
         island.quit_requested.connect(app.quit)
 
         def attach_tm():
@@ -231,7 +233,12 @@ def main():
         tray.set_listening(asst.listening.is_set())
 
     # The hotkey opens the island ready to talk or type (toggle); without an island, it just listens.
-    bridge.talk.connect(lambda: island.toggle_input() if island and island.session else asst.talk_now())
+    def talk_key():
+        if asst.mode in ("speaking", "thinking"):
+            asst.hush()                             # the hotkey also cuts it off mid-answer
+        island.toggle_input() if island and island.session else asst.talk_now()
+    bridge.talk.connect(talk_key)
+    bridge.hush.connect(asst.hush)
 
     if interactive:
         from .hotkey import GlobalHotkey
@@ -244,6 +251,23 @@ def main():
         hk = GlobalHotkey(lambda: bridge.talk.emit())
         set_hotkey(cfg["app"].get("hotkey"))
         set_hold_key(cfg["listen"].get("hold_key"))
+
+        # Stop key (default Esc): registered only while it thinks or talks, so Esc is
+        # never taken from other apps the rest of the time.
+        stop_hk = GlobalHotkey(lambda: bridge.hush.emit())
+        stop_state = {"on": False, "warned": False}
+
+        def stop_key_for(mode, _text=""):
+            spec = str(cfg["app"].get("stop_hotkey", "esc") or "").strip()
+            want = bool(spec) and mode in ("speaking", "thinking")
+            if want == stop_state["on"]:
+                return
+            err = stop_hk.set(spec if want else None)
+            if err and not stop_state["warned"]:
+                stop_state["warned"] = True
+                print(f"[stop key] not registered: {err}")
+            stop_state["on"] = want and not err
+        bridge.state.connect(stop_key_for)
 
         def poked(msg):
             print(f"[app] second launch: {msg}")
@@ -274,6 +298,8 @@ def main():
     asst.stop()
     if hk:
         hk.close()
+    if interactive:
+        stop_hk.close()
     if asst.hold:
         asst.hold.close()
     try:

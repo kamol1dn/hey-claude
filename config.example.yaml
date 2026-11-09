@@ -4,6 +4,7 @@
 app:
   listening: true            # wake word on at start; off = mic closed until you turn it on
   hotkey: ctrl+alt+space     # global push-to-talk, e.g. ctrl+shift+h, win+alt+j, f9; "" = none
+  stop_hotkey: esc           # stops it mid-answer; registered only while it thinks or talks; "" = none
   start_with_windows: false  # Startup-folder shortcut (pythonw -m heyclaude, no console)
 
 wake:

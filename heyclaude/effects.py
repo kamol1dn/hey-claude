@@ -24,7 +24,6 @@ import os
 import re
 import uuid
 from functools import lru_cache
-from pathlib import Path
 
 from .config import ROOT
 

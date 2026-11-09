@@ -668,7 +668,28 @@ Design notes from studying Coucou, plus our handoff test: `docs/m7-hooks-notes.m
 - removing the hooks from Settings leaves `~/.claude/settings.json` exactly as
   it was before.
 
-## M9: Control Windows by voice (settings MCP, UI automation, effects)
+## M9: Control Windows by voice (settings MCP, UI automation, effects) ✅ built (2026-11-09)
+
+**Status:** built; see README "Control Windows by voice". The settings server
+(`heyclaude/mcp_windows/`, 37 tools) runs in the tool agent, with every group
+below except the night-light and default-device writes on the allow-list
+(those two are experimental). `tools/check_windows_settings.py` passed on the
+dev laptop: 18 checks, every value restored. Typed "volume 30", "light mode" /
+"dark mode", "next song", "brightness down" and "change my wallpaper to
+<file>" each worked through the agent, with its effect and a working "undo
+that". **Not met: the ≤ 2.5 s target.** Through the agent (Sonnet, with ~690
+tools loaded from the claude.ai connectors and plugins), a command took
+6.5–18 s to the spoken reply; the change itself lands a moment before.
+"Undo that" takes 0.1–0.2 s because it runs locally. The fix is a local fast
+path for the simplest commands, which parses "volume 30" with no model, still
+shows the same effect and has an undo; that's the next step. Windows-MCP is
+installed apart (`uv tool install windows-mcp`) and allowed only `Snapshot` /
+`Screenshot`. Its acting tools are dropped from the allow-list in code until
+M7's approvals exist. Effects (`ui/effects.json` → `effects.py` →
+`island_effects.py`): generic old → new, the volume slider, mute, brightness
+(a ring of dots, not rays: island-motion.md §1), the sun ↔ moon flip, the media
+card with album art, the screenshot flash, and Confirm for power actions.
+Not built yet: the wallpaper wipe, the battery pulse, the app-launch zoom.
 
 **Goal:** "volume 30", "dark mode", "next song", "brightness down", "change my
 wallpaper", "open Wi-Fi settings" just work, each with its own little

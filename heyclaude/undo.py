@@ -32,7 +32,8 @@ def describe(ch: Change) -> str:
     label = (ev.get("label") or ch.tool.split("__")[-1].replace("_", " ")).strip()
     old = ev.get("text_from") or ""
     if ev.get("effect") == "media":
-        return "Okay, undone."
+        old = ev.get("from") if isinstance(ev.get("from"), dict) else {}
+        return f"Back to {old['title']}." if old.get("title") else "Okay, undone."
     if old:
         return f"{label} back to {old}."
     return f"Undone: {label.lower()}."

@@ -282,6 +282,7 @@ OVERLAP_S = 0.6                # the assistant keeps talking over the user this 
 HITCH_MS = 34                  # an engine tick this late while it wanted every frame = a dropped frame
 STAGE_JUMPS = 1                # panel size changes allowed per stage
 JUMP_PX = 3.0
+MERGE_S = 0.3                  # same-direction size changes this close together read as one motion
 
 
 def _words(s: str) -> list[str]:
@@ -555,7 +556,12 @@ def _layout_jumps(ev, tr, ss):
         for s in st[1:]:
             cur = (s.get("wt"), s.get("ht"))
             if prev[0] is not None and cur[0] is not None and (abs(cur[0] - prev[0]) > JUMP_PX or abs(cur[1] - prev[1]) > JUMP_PX):
-                changes.append((s["t"], prev, cur))
+                last = changes[-1] if changes else None
+                same_dir = last is not None and (cur[0] - prev[0]) * (last[2][0] - last[1][0]) >= 0 and                     (cur[1] - prev[1]) * (last[2][1] - last[1][1]) >= 0
+                if same_dir and s["t"] - last[3] < MERGE_S:
+                    changes[-1] = (last[0], last[1], cur, s["t"])     # one motion, retargeted on the way
+                else:
+                    changes.append((s["t"], prev, cur, s["t"]))
             prev = cur
         if len(changes) > STAGE_JUMPS and (worst is None or len(changes) > len(worst[1])):
             worst = (name, changes)
@@ -564,7 +570,7 @@ def _layout_jumps(ev, tr, ss):
         out.append(_finding("layout_jump", 2 if len(ch) <= 3 else 3, ch[0][0],
                             f"{len(ch)} size changes while {name}",
                             changes=[[round(t - tr["t0"], 2), [round(a[0] or 0), round(a[1] or 0)], [round(b[0] or 0), round(b[1] or 0)]]
-                                     for t, a, b in ch[:8]]))
+                                     for t, a, b, _ in ch[:8]]))
     return out
 
 

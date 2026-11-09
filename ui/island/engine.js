@@ -365,7 +365,9 @@ function resize(pre) {
     if (S.extraW) w = Math.max(w, S.extraW);
     if (S.extraH) h += S.extraH;
     if (S.listGeom) { w = Math.max(w, 460); h = head + 12 + listRowsH() + (S.extraH || 0); }
-    W.to(Math.round(w), pre === 'snap' ? 'snap' : 'glide'); H.to(Math.round(h), pre); HEAD.to(head, pre);
+    // in a turn the panel's height glides too: an answer streaming in grows it line after line,
+    // and a bouncy spring restarted every few frames reads as a wobbling bottom edge
+    W.to(Math.round(w), pre === 'snap' ? 'snap' : 'glide'); H.to(Math.round(h), S.turn && pre !== 'snap' ? 'glide' : pre); HEAD.to(head, pre);
     EX.to(head >= 46 ? 22 : head >= 40 ? 20 : 18, 'soft');
 }
 

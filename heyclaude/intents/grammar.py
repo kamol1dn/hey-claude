@@ -31,7 +31,7 @@ AMT = r"(?P<a>[a-z0-9 ]+?)"
 TO = r"(?:(?:to|at|on|as|of|is|equal to|=)\s+)?"
 UP_V = (r"raise|increase|boost|lift|amplify|bump up|turn up|crank up|pump up|amp up|ramp up|kick up|jack up|"
         r"push up|bring up|dial up|crank|pump|bump|up|max out|louden|heighten")
-DOWN_V = (r"lower|decrease|reduce|cut|drop|lessen|soften|quieten|quiet down|dial down|turn down|bring down|"
+DOWN_V = (r"lower|decrease|reduce|drop|lessen|soften|quieten|quiet down|dial down|turn down|bring down|"
           r"knock down|tone down|take down|drop down|down|dampen|muffle")
 PHRASAL = r"turn|crank|pump|bump|bring|ramp|kick|jack|push|dial|tone|knock|take|put|move|nudge|notch"
 PHRASAL_IT = r"turn|crank|pump|bump|ramp|kick|jack|dial|tone|knock|nudge|notch"

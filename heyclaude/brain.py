@@ -674,6 +674,10 @@ class Agent:
                 print(f"[agent] not allowed without approvals (M7): {', '.join(dropped)}")
             if kept:
                 args += ["--allowedTools", ",".join(kept)]
+        # Tools it must not even be offered: Claude Code's own PowerShell (Windows) would be
+        # refused anyway (not allowed), but the model asking for it costs a turn.
+        dis = ["PowerShell"] + [str(t) for t in a.get("disallowed_tools") or [] if str(t) != "PowerShell"]
+        args += ["--disallowedTools", ",".join(dis)]
         mcp = list(a.get("mcp_configs") or [])
         if a.get("import_desktop_mcp"):
             f = _desktop_mcp_file(list(a["import_desktop_mcp"]), STATE_DIR / "agent-mcp.json")

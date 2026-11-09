@@ -234,10 +234,8 @@ def harness_config(user_cfg: dict, scratch: Path) -> dict:
     c["agent"]["windows_mcp"] = dict(c["agent"].get("windows_mcp") or {}, exclude_tools=[
         "PowerShell", "Registry", "Click", "Type", "Shortcut", "Drag", "App", "Move", "Scroll", "Wait", "Launch",
         "Switch", "Resize", "Clipboard", "Key", "Notification", "Process"])
-    # tools the agent must not even see in a test run (it then never tries them)
-    extra = list(c["agent"].get("extra_args") or [])
-    extra += ["--disallowedTools", "PowerShell,Bash,KillShell,NotebookEdit"]
-    c["agent"]["extra_args"] = extra
+    # tools the agent must not even see in a test run (it then never tries them; PowerShell always)
+    c["agent"]["disallowed_tools"] = ["Bash", "KillShell", "NotebookEdit"]
     c["projects"] = {"scratch": str(scratch)}
     c.setdefault("tasks", {})
     c["tasks"]["permission_mode"] = "acceptEdits"

@@ -625,6 +625,30 @@ motion and character.
     click, never voice alone.
 - **Jump to the session:** open the terminal window or the desktop-app session
   the event came from.
+- **Hand serious sessions to the Claude desktop app** ("move it to the
+  desktop", or automatically for tasks marked serious). The session keeps
+  running there without hey-claude. Remote Control comes from the desktop
+  app's "Remote Control for all sessions" preference, so the phone and
+  claude.ai/code see it too. Tested on 2026-11-09 with CLI 2.1.317:
+  - `claude --desktop --resume <session-id>` opens a CLI/headless session in
+    the desktop app under the same id (`local_<session-id>`), and it continues
+    with its full context.
+  - It **refuses redirected output**, so start it in its own console window
+    (`CREATE_NEW_CONSOLE`, minimized); it exits 0 once the app has it.
+  - Only hand off between turns: stop or await the current `-p` turn first,
+    so two processes never write the same transcript.
+  - **User hooks fire inside desktop-app sessions** with the same
+    `session_id`: SessionStart on handoff, then UserPromptSubmit / Stop per
+    turn. So the hook-based watching above follows the session into the
+    desktop app with no extra work.
+  - Desktop links: each desktop session has `claude://claude.ai/epitaxy/local_<id>`
+    (seen in the app's session list). Opening it from the island jumps to the
+    session. Verify that the scheme opens a session from outside the app
+    before relying on it.
+  - Not used: Remote Control on `-p` runs (undocumented, and needs the
+    process alive); `claude --cloud` (works on a GitHub copy, with no
+    personal-account way to read its status back). Keep cloud as an explicit
+    "run it in the cloud" voice command only.
 - Optional git worktree per task, so tasks never touch your working tree;
   "merge it" by voice after review.
 - Windows toast notifications, and an optional Telegram message when a task

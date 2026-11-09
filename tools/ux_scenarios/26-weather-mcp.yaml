@@ -1,0 +1,10 @@
+name: weather_mcp
+desc: "M5b: weather-mcp's extra depth on the local route (air quality, then a follow-up for tomorrow): the card first, no agent"
+steps:
+  - ask: "How's the air quality today?"
+  - until: {what: answer, timeout: 30}
+  - until: {what: followup, timeout: 20}
+  - wait: 0.6
+  - say: {text: "And what about tomorrow?", voice: am_michael}
+  - until: {what: done, timeout: 30}
+expect: {route: weather, widget: weather, answer: true, turns: 2}

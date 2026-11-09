@@ -37,9 +37,8 @@ def _cap(s: str) -> str:
 
 def _default_runner(name: str, args: dict):
     from ..mcp_windows import registry
-    from ..mcp_windows._util import com_init
-    com_init()
-    return registry.call(name, args)
+    from ..mcp_windows._util import com_call
+    return com_call(registry.call, name, args)      # on the one COM thread, not this turn's
 
 
 class Executor:

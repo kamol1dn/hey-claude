@@ -1,6 +1,6 @@
 # UX stress test: what made the back-and-forth janky, and what changed
 
-*2026-11-09/10. Harness: `tools/ux_stress.py` (+ `heyclaude/ux_probe.py`, `tools/ux_offline.py`, 18 scenarios in `tools/ux_scenarios/`).*
+*2026-11-09/10. Harness: `tools/ux_stress.py` (+ `heyclaude/ux_probe.py`, `tools/ux_offline.py`, 26 scenarios in `tools/ux_scenarios/`). The live re-check of 2026-11-10 (PR #15's open items, M10 and weather-mcp) is in its own section below.*
 
 ## How it was measured
 
@@ -190,6 +190,57 @@ You reported this live.
   - no late engine ticks during transitions in any run (worst single late tick: 66 ms, outside a transition);
   - presented frames p50 13.9 ms, p95 21 ms during turns; the ~125 ms p99 is the 8 fps idle tier by design.
 - **The island never took focus** except while the talk-or-type field was open, which is by design.
+
+## Live re-check, 2026-11-10 (PR #15's open items, then M10 and weather-mcp)
+
+Two live passes on the dev laptop, with the user's hey-claude quit for each.
+
+### Pass 1: PR #15's fixes on `main` 690c350
+
+Ten runs: `task_then_question`, `long_answer`, `weather_short`, `volume_undo` and `quick`, twice each. Run `state/ux/runs/20261110-004116`. Two subagents were building M10 and weather-mcp on the same machine (CPU ~76%), and Kokoro logged audio underruns in most replies, so the sync and latency numbers are pessimistic.
+
+| item (PR #15) | live result |
+|---|---|
+| idle mid-turn / answer restarts (`task_then_question`, #1) | **Fixed for answers:** no restart, filler not glued on (2/2 runs). **One new case:** the "your task is done" *announcement* sat as a resting pill under its open question for ~1.5 s while its voice was synthesised (detector: idle_mid_turn). Fixed in #17 (the announcement turn shows thinking until its voice starts). |
+| text revealed twice / panel opened twice | 0 / 0 in 10 runs |
+| reveal lead (#9) | **Fixed on long answers:** `long_answer` 0/2. The 2 `quick` runs still show words finishing 1.0–1.3 s early, with heavy underruns stretching the audio in both. |
+| hover-list pop (#8) | **No stale-hover pop.** The task list still pops by design when a task starts or ends (once with 4 size changes while ready). |
+| late filler (#6) | It fires, but late. "Let me check." starts 5.3–6.1 s after the end of speech (3.5 s timer from the route, plus synthesis), so dead air on agent turns is still 4–5 s. Settings commands no longer use this path (M10 below). |
+| talked over at a mid-sentence pause (#4) | Joined into one request as designed, but the assistant still talked for 1.4 s before barge-in stopped it (1/2 runs). |
+| **harness bug found** | The harness's tool-result hook rejected the agent's new `raw` argument. In pass 1 that meant no effects, no weather card and no result audit. Probably the same held in PR #15's after-fix pass too: `raw` arrived with PR #14, which was merged during that run. The summary also printed "audited tool calls: 0" because the list was cleared per scenario; tool starts *were* audited per scenario and none was outside the safe list. Both are fixed. |
+
+### Pass 2: M10 + weather-mcp on `main` 14d34e5, interrupted by two crashes
+
+Live, instant commands (`state/ux/runs/20261110-020113`; speech end = the end of the simulated voice):
+
+| turn | speech end → effect on the island (harness) | app's own log (speech end → effect) | of which end-of-turn wait (VAD tail) |
+|---|---|---|---|
+| "Turn the volume down a bit." | 0.44 s | 0.63 s | 0.57 s |
+| "A bit more." (context) | 0.35 s | 0.53 s | 0.48 s |
+| "Mute." | 0.76 s | 0.85 s | 0.80 s |
+| "Unmute." | 0.60 s | 0.68 s | 0.64 s |
+| "Switch to light mode." | — | 0.57 s | 0.56 s |
+
+- **Median: 0.52 s on the harness clock (0.63 s in the app log).** Matching and running take 5–60 ms; the rest is the end-of-turn VAD. Before this, "set the volume to 30" took 5.7–11.5 s through the agent.
+- The ≤ 0.5 s target is met only on the follow-up turn. Getting the rest below it means acting on a confident partial transcript (left open in M10) or a shorter end-of-turn tail for short commands.
+- Every expectation passed: route instant, the effect, effect within 1.5 s, both turns.
+
+**Weather-mcp was not reached live:**
+- Before (pass 1, agent path, `weather_short-11`): first audio 4.7 s, answer 12.9 s after the end of speech.
+- After: the warm local route answered in about 35 ms at text level (card and summary together; median of 5, through weather-mcp's cache) in the subagent's measurement. weather-mcp itself was ready 8.8 s after start, and the home forecast was prefetched 2 s after that.
+- Its live scenario (`weather_mcp`) is in the harness, waiting for the next live run.
+
+**Two native crashes stopped pass 2.** In both, the harness process died with no Python error:
+1. An illegal instruction in no known module, at a barge-in in `task_then_question`.
+2. An access violation on a native thread right after the in-process "light mode". The harness's restore never ran; the colour mode was put back by hand straight away.
+
+What was ruled out:
+- The real island cycling states while the colour mode is switched in-process from a worker thread (6 switches) does not crash, and the user's running hey-claude survived the same switches.
+- 400 read-only `get_volume` calls from short-lived threads, with the garbage collector running on other threads, did not crash.
+
+What changed anyway, as hardening:
+- Every Windows tool that hey-claude runs in its own process (M10's executor, "undo that", album art, the start-up app list) now runs on one persistent COM thread (`mcp_windows._util.com_call`), never on a turn's short-lived thread.
+- **This is not shown to fix the crashes.** The next live run (pass 2 again, with `-X faulthandler`) is what tells.
 
 ## Harness artifacts (excluded from scoring)
 

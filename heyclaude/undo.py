@@ -39,11 +39,18 @@ def describe(ch: Change) -> str:
     return f"Undone: {label.lower()}."
 
 
+def _com_runner(name: str, args: dict):
+    """registry.call on hey-claude's one COM thread (mcp_windows._util.com_call)."""
+    from .mcp_windows import registry
+    from .mcp_windows._util import com_call
+    return com_call(registry.call, name, args)
+
+
 class UndoStack:
     def __init__(self, runner=None):
         from .mcp_windows import registry
         self._registry = registry
-        self.runner = runner or registry.call      # (name, args) -> result
+        self.runner = runner or _com_runner         # (name, args) -> result
         self.items: list[Change] = []
         self.lock = threading.Lock()
 
@@ -88,8 +95,6 @@ class UndoStack:
         ch = self.pop(change_id)
         if ch is None:
             return None
-        from .mcp_windows._util import com_init
-        com_init()
         res = None
         try:
             for name, a in ch.calls:

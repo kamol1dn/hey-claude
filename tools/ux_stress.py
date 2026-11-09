@@ -555,9 +555,11 @@ class Harness:
             if ag is not None and ag.on_tool_result is not None:
                 orig_res = ag.on_tool_result
 
-                def on_res(name, args, result, is_error, orig_res=orig_res):
+                def on_res(name, args, result, is_error, *a, orig_res=orig_res, **kw):
+                    # pass every extra argument through (the agent added `raw`; a fixed
+                    # signature here failed every call, so no effect, card or audit)
                     self.audit.result(name, is_error, result)
-                    return orig_res(name, args, result, is_error)
+                    return orig_res(name, args, result, is_error, *a, **kw)
                 ag.on_tool_result = on_res
             time.sleep(1.5)
             for rep in range(self.args.repeat):
@@ -894,7 +896,7 @@ def write_summary(out: Path, results: list[dict], audit: Audit, args):
             rows.setdefault(f["kind"], []).append((r["name"], f))
     lines = [f"# UX stress run {out.name}", "",
              f"Mode: {'offline (fake brain/voice)' if args.offline else 'live (real app)'}; "
-             f"scenarios run: {len(results)}; audited tool calls: {len(audit.calls)}; "
+             f"scenarios run: {len(results)}; audited tool calls: {sum(len(r.get('tools') or []) for r in results)}; "
              f"refused attempts: {', '.join(audit.attempts) or 'none'}; "
              f"safety violations (a tool outside the safe list that ran): {', '.join(audit.violations) or 'none'}", "",
              "## Findings by how janky they feel", ""]

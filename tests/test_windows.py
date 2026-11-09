@@ -768,6 +768,36 @@ def test_island_effect_row_and_buttons():
     isl.close()
 
 
+def test_in_process_tools_run_on_one_lasting_com_thread():
+    """M10/undo run the tools inside hey-claude: always on the same persistent thread
+    (never the short-lived turn threads, whose COM objects would be freed after the
+    thread is gone), errors come back to the caller, and a nested call doesn't deadlock."""
+    import threading
+
+    from heyclaude.intents import executors
+    from heyclaude.mcp_windows._util import com_call
+    seen = set()
+
+    def where():
+        seen.add(threading.get_ident())
+        return threading.current_thread().name
+
+    names = []
+    for _ in range(3):                      # three "turns", each its own thread that then ends
+        t = threading.Thread(target=lambda: names.append(com_call(where)))
+        t.start()
+        t.join()
+    assert len(seen) == 1 and names[0].startswith("com") and threading.get_ident() not in seen
+    assert com_call(lambda: com_call(where)).startswith("com")             # nested: runs inline
+    e = raises(KeyError, com_call, registry.call, "no_such_tool", {})
+    assert e is not None
+    ran_on = []
+    with mock.patch.object(registry, "call", lambda n, a: ran_on.append(threading.current_thread().name) or {}):
+        executors._default_runner("get_volume", {})
+        UndoStack().runner("get_volume", {})
+    assert len(ran_on) == 2 and all(n.startswith("com") for n in ran_on)
+
+
 if __name__ == "__main__":
     import pathlib
     import tempfile

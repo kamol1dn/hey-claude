@@ -116,9 +116,14 @@ TIPS = {
     "tasks.model": "Model for headless tasks. Empty = your Claude Code default model.",
     "tasks.permission_mode": "Permission mode for headless tasks (claude -p).",
     "tasks.max_parallel": "How many background tasks may run at once.",
-    "tts.backend": "sapi = Windows voices (default); piper / kokoro need their model paths set in config.yaml.",
+    "tts.engine": "Kokoro (default): natural voice, GPU with a CPU fallback, then Windows voices if it can't "
+                  "load. Windows voices (SAPI) can't be talked over (no barge-in). Piper: set its paths in config.yaml.",
+    "tts.device": "GPU: picked per reply from GPU load, like speech-to-text (uses the CPU while the GPU is busy). "
+                  "CPU: always the CPU (slower first word, ~0.5-0.8 s).",
+    "tts.voice": "Kokoro voice. a = American, b = British; f = female, m = male. Applies from the next sentence.",
+    "tts.speed": "Kokoro speaking speed (1.0 = normal).",
     "tts.rate": "SAPI speaking rate in words per minute.",
-    "tts.voice": "SAPI voice name substring, e.g. \"Zira\". Empty = the Windows default voice.",
+    "tts.sapi_voice": "SAPI voice name substring, e.g. \"Zira\". Empty = the Windows default voice.",
 }
 BYPASS_TIP = ("bypassPermissions skips every permission check: tasks can run any command and edit any file "
               "without asking. Only use it in folders you can afford to lose.")
@@ -457,15 +462,22 @@ class SettingsWindow(QWidget):
 
         g = QGroupBox("Speech output")
         f = self._form(g)
-        self.cmb_tts_backend = self._combo([("Windows voices (SAPI)", "sapi"), ("Piper", "piper"),
-                                            ("Kokoro", "kokoro")])
-        self._row(f, "tts.backend", "Engine", self.cmb_tts_backend)
+        from .tts import KOKORO_VOICES
+        self.cmb_tts_backend = self._combo([("Kokoro", "kokoro"), ("Windows voices (SAPI)", "sapi"),
+                                            ("Piper", "piper")])
+        self._row(f, "tts.engine", "Engine", self.cmb_tts_backend)
+        self.cmb_tts_device = self._combo([("GPU (CPU when busy)", "gpu"), ("CPU", "cpu")])
+        self._row(f, "tts.device", "Device", self.cmb_tts_device)
+        self.cmb_kokoro_voice = self._combo([(x, x) for x in KOKORO_VOICES], editable=True)
+        self._row(f, "tts.voice", "Kokoro voice", self.cmb_kokoro_voice)
+        self.sp_tts_speed = QDoubleSpinBox(minimum=0.5, maximum=2.0, singleStep=0.05, decimals=2)
+        self._row(f, "tts.speed", "Speed", self.sp_tts_speed)
         self.sp_rate = QSpinBox(minimum=80, maximum=400, singleStep=10, suffix=" wpm")
-        self._row(f, "tts.rate", "Rate", self.sp_rate)
+        self._row(f, "tts.rate", "SAPI rate", self.sp_rate)
         self.cmb_voice = self._combo([("(Windows default)", "")] + [(d, d) for d in self._sapi_voices()],
                                      editable=True)
-        self.btn_test_voice = QPushButton("Test voice", clicked=self._test_voice)
-        self._row(f, "tts.voice", "Voice", self.cmb_voice, self.btn_test_voice)
+        self.btn_test_voice = QPushButton("Test SAPI voice", clicked=self._test_voice)
+        self._row(f, "tts.sapi_voice", "SAPI voice", self.cmb_voice, self.btn_test_voice)
         v.addWidget(g)
         v.addStretch(1)
 
@@ -593,9 +605,12 @@ class SettingsWindow(QWidget):
         self.cb_premiere.setChecked(bool(_get(cfg, "stt.yield_to_premiere", False)))
         self.sp_gpu_busy.setValue(int(_get(cfg, "stt.gpu_busy_pct", 70)))
         self.sp_cpu_busy.setValue(int(_get(cfg, "stt.cpu_busy_pct", 85)))
-        self._set_combo(self.cmb_tts_backend, _get(cfg, "tts.backend", "sapi"))
+        self._set_combo(self.cmb_tts_backend, _get(cfg, "tts.engine", "kokoro"))
+        self._set_combo(self.cmb_tts_device, str(_get(cfg, "tts.device", "gpu")).lower())
+        self._set_combo(self.cmb_kokoro_voice, _get(cfg, "tts.voice", "af_heart"))
+        self.sp_tts_speed.setValue(float(_get(cfg, "tts.speed", 1.0) or 1.0))
         self.sp_rate.setValue(int(_get(cfg, "tts.rate", 190)))
-        self._set_combo(self.cmb_voice, _get(cfg, "tts.voice"))
+        self._set_combo(self.cmb_voice, _get(cfg, "tts.sapi_voice"))
 
         self._set_combo(self.cmb_fast_backend, _get(cfg, "fast.backend", "auto"))
         self._set_combo(self.cmb_fast_cli, _get(cfg, "fast.cli_model", "haiku"))
@@ -676,9 +691,12 @@ class SettingsWindow(QWidget):
         # keep the resume point 10 below the busy point unless set by hand lower
         if int(_get(new, "stt.gpu_resume_pct", 60)) >= self.sp_gpu_busy.value():
             _set(new, "stt.gpu_resume_pct", max(5, self.sp_gpu_busy.value() - 10))
-        _set(new, "tts.backend", self._combo_value(self.cmb_tts_backend))
+        _set(new, "tts.engine", self._combo_value(self.cmb_tts_backend))
+        _set(new, "tts.device", self._combo_value(self.cmb_tts_device))
+        _set(new, "tts.voice", self._combo_value(self.cmb_kokoro_voice) or "af_heart")
+        _set(new, "tts.speed", round(self.sp_tts_speed.value(), 2))
         _set(new, "tts.rate", self.sp_rate.value())
-        _set(new, "tts.voice", self._combo_value(self.cmb_voice) or None)
+        _set(new, "tts.sapi_voice", self._combo_value(self.cmb_voice) or None)
 
         _set(new, "fast.backend", self._combo_value(self.cmb_fast_backend))
         _set(new, "fast.cli_model", self._combo_value(self.cmb_fast_cli))

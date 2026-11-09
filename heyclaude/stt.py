@@ -180,6 +180,7 @@ class SpeechToText:
         self.choice, self.reason = "gpu", ""     # last decision and why
         self._premiere_seen, self._premiere_t = False, 0.0
         self._lock = threading.RLock()
+        self._run_lock = threading.Lock()
         self._loading = False
         self.monitor = monitor
         if self.monitor is None and self.want == "gpu":
@@ -337,6 +338,12 @@ class SpeechToText:
 
     # -- transcription -------------------------------------------------------------
     def transcribe(self, audio: np.ndarray) -> str:
+        """Thread-safe: pause/partial transcripts (vad.TurnListener) and the
+        final one take turns on the model."""
+        with self._run_lock:
+            return self._transcribe(audio)
+
+    def _transcribe(self, audio: np.ndarray) -> str:
         self.poll(background=True)
         model = self.gpu if self.device == "cuda" else None
         if model is not None:

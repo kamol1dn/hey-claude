@@ -20,8 +20,11 @@ sent with the turns that tier hasn't seen yet, so context survives a switch
 between the quick model, the tool agent and tasks.
 
 Three tiers:
-  (a) quick answers, no tools: Anthropic SDK (haiku) if ANTHROPIC_API_KEY is
-      set, else one warm tool-less `claude` process.
+  (a) quick answers, no tools: the Anthropic API directly (haiku, the
+      low-latency option) when hey-claude has an API key (ANTHROPIC_API_KEY,
+      or the file `fast.api_key_file`), else one warm tool-less `claude`
+      process on the subscription login. No `claude` process ever gets the
+      key (claude_cli.child_env strips it).
   (b) questions that need the user's tools ("who messaged me on Telegram"):
       `Agent`, one warm Claude Code process with tools and MCP servers,
       started at launch and reused for every such question.
@@ -351,13 +354,31 @@ class _CliChat:
                 return
 
 
-class _SdkChat:
-    """Anthropic SDK backend for tier (a), used when ANTHROPIC_API_KEY is set."""
+def api_key(fast_cfg: dict | None = None) -> str | None:
+    """The key for the direct API path: ANTHROPIC_API_KEY, else the first
+    line of `fast.api_key_file` (default state/anthropic-api-key.txt, git-ignored)."""
+    k = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if k:
+        return k
+    from .config import ROOT, STATE_DIR
+    f = (fast_cfg or {}).get("api_key_file") or str(STATE_DIR / "anthropic-api-key.txt")
+    f = os.path.expandvars(os.path.expanduser(str(f)))
+    if not os.path.isabs(f):
+        f = str(ROOT / f)
+    try:
+        with open(f, encoding="utf-8") as fh:
+            return (fh.readline().strip() or None)
+    except OSError:
+        return None
 
-    def __init__(self, model: str, sys_prompt: str, max_tokens: int):
+
+class _SdkChat:
+    """Tier (a) straight to the Anthropic API (streaming), used when there's a key."""
+
+    def __init__(self, model: str, sys_prompt: str, max_tokens: int, key: str | None = None):
         import anthropic
 
-        self.client = anthropic.Anthropic()
+        self.client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
         self.model, self.sys_prompt, self.max_tokens = model, sys_prompt, max_tokens
         self.history: list[dict] = []
         self.epoch = 1
@@ -365,6 +386,11 @@ class _SdkChat:
     def recycle(self, warm: bool = False):
         self.history = []
         self.epoch += 1
+
+    def warm(self):
+        """Open the HTTPS connection (token counting is free), so the first
+        question doesn't pay the TLS handshake."""
+        self.client.messages.count_tokens(model=self.model, messages=[{"role": "user", "content": "ok"}])
 
     def stream(self, text: str):
         self.history.append({"role": "user", "content": text})
@@ -478,15 +504,16 @@ class Brain:
         self.projects = Projects(cfg["projects"])
         fast = cfg["fast"]
         backend = fast["backend"]
+        key = api_key(fast) if backend in ("auto", "sdk") else None
         if backend == "auto":
-            backend = "sdk" if os.environ.get("ANTHROPIC_API_KEY") else "cli"
+            backend = "sdk" if key else "cli"
         self.backend = backend
         exe = find_claude(cfg["claude"].get("exe")) if backend == "cli" or cfg["agent"]["enabled"] else None
         self.exe = exe
         self.agent = Agent(cfg, exe) if cfg["agent"]["enabled"] else None
         sp = system_prompt(self.projects, has_agent=self.agent is not None)
         if backend == "sdk":
-            self.chat = _SdkChat(fast["sdk_model"], sp, int(fast["max_tokens"]))
+            self.chat = _SdkChat(fast["sdk_model"], sp, int(fast["max_tokens"]), key)
         else:
             self.chat = _CliChat(exe, fast_args(fast["cli_model"], sp), cwd=os.path.expanduser("~"),
                                  persistent=bool(fast["persistent"]), max_turns=int(fast["max_turns"]))
@@ -500,6 +527,8 @@ class Brain:
         jobs = []
         if isinstance(self.chat, _CliChat) and self.chat.persistent:
             jobs.append(("fast", lambda: self.chat.stream("Reply with just: ok")))
+        elif isinstance(self.chat, _SdkChat):
+            jobs.append(("fast (api)", lambda: iter([self.chat.warm()])))
         if self.agent:
             jobs.append(("agent", lambda: self.agent.ask("Reply with just: ok. Don't use any tools.")))
         for name, job in jobs:

@@ -196,7 +196,7 @@ class TaskManager:
         """A new console window running the interactive session in the task's folder."""
         if not t.session_id:
             raise RuntimeError("that task has no session to resume")
-        return popen(["cmd", "/k", self.exe, "--resume", t.session_id], cwd=t.path,
+        return popen(["cmd", "/k", self.exe, "--resume", t.session_id], cwd=t.path, env=child_env(),
                      creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
 
     def _pump(self, t: Task, proc: subprocess.Popen):

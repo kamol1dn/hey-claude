@@ -532,7 +532,7 @@ def test_mic_loop_followup_window(tmp_path):
     a.request = lambda text, timing=None, source="voice", wait=False: requests.append((text, source))
     script = iter([True, True, False])    # speech, speech, then silence
 
-    def fake_record(blocks, cfg, on_level=None, stop_event=None, hold=None):
+    def fake_record(blocks, cfg, on_level=None, stop_event=None, hold=None, **_m4):  # vad, listener, preroll
         recs.append(cfg["start_timeout"])
         next(blocks)
         return (np.zeros(1600, np.int16), time.perf_counter()) if next(script) else (None, None)

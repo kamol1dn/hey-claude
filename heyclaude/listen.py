@@ -221,6 +221,11 @@ class SpeakingGate:
             self._speaking = False
             self._until = self.clock() + float(self.cfg.get("speaking_tail_s", 0.7))
 
+    @property
+    def speaking(self) -> bool:
+        """Audio is playing right now (no tail)."""
+        return self._speaking
+
     def busy(self) -> bool:
         """Talking, or within the tail after it, whatever suppress_while_speaking
         says. The follow-up window waits for this to clear."""
@@ -321,8 +326,15 @@ def trim_silences(blocks: list, voiced: list[bool], keep: int = 6) -> list:
 
 
 def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Event | None = None,
-                     hold=None, is_speech=None, clock=time.perf_counter):
-    """Pull blocks until speech has started and then `end_silence_ms` of silence.
+                     hold=None, is_speech=None, clock=time.perf_counter, vad=None, listener=None,
+                     preroll: list | None = None):
+    """Pull blocks until speech has started and then enough silence.
+
+    `vad` has `frames(block) -> [bool]` and `frame_ms` (vad.SileroVad or
+    WebrtcVad); without one, `is_speech(20 ms frame bytes)` or webrtcvad.
+    How much silence ends it: `listener.silence_needed_ms()` if a listener
+    (vad.TurnListener) is given, which also hears `on_block` / `on_pause`;
+    otherwise `end_silence_ms`.
 
     `hold` (a holdkey.HoldState, optional): while `hold.held`, silence never
     ends the utterance and the start timeout waits; after release the silence
@@ -330,13 +342,17 @@ def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Eve
     was used the length cap is `max_utterance_s` instead of `max_seconds`,
     and long silences are trimmed out before returning.
 
+    `preroll`: blocks heard just before (barge-in), counted as speech already.
+
     Returns (int16 audio, speech_end_wall_time) or (None, None) on timeout.
     """
-    if is_speech is None:
-        import webrtcvad
-        vad = webrtcvad.Vad(int(cfg["vad_aggressiveness"]))
-        is_speech = lambda frame: vad.is_speech(frame, RATE)  # noqa: E731
-    end_frames = max(1, int(cfg["end_silence_ms"] / 20))
+    if vad is None:
+        from .vad import WebrtcVad
+        vad = WebrtcVad(int(cfg.get("vad_aggressiveness", 2)), is_speech=is_speech)
+    frame_ms = float(vad.frame_ms)
+    end_ms = float(cfg["end_silence_ms"])
+    probe_ms = float(cfg.get("pause_probe_ms", 160))
+    start_ms = float(cfg.get("start_speech_ms", 120))
     start_timeout = float(cfg["start_timeout"])
     start_deadline = clock() + start_timeout
     max_blocks = int(cfg["max_seconds"] * RATE / BLOCK)
@@ -346,27 +362,35 @@ def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Eve
     out: list[np.ndarray] = []
     flags: list[bool] = []            # per block in `out`: any speech in it?
     started = False
-    silent = 0
-    voiced_run = 0
+    silent_ms = 0.0
+    probed = False
+    voiced_ms = 0.0
     last_voice_t = None
+    if preroll:
+        started = True
+        out.extend(preroll)
+        flags.extend([True] * len(preroll))
+        last_voice_t = clock()
     for block in blocks:
         if stop_event is not None and stop_event.is_set():
             return None, None
         if on_level:
             on_level(level(block))
-        voiced = [is_speech(block[i:i + VAD_FRAME].tobytes()) for i in range(0, BLOCK, VAD_FRAME)]
+        voiced = vad.frames(block)
         held = bool(hold is not None and hold.held)
         if not started:
             pre_roll.append(block)
             pre_roll = pre_roll[-4:]
             if held:                       # thinking first, then talking: keep waiting
                 start_deadline = clock() + start_timeout
-            voiced_run = voiced_run + sum(voiced) if any(voiced) else 0
-            if voiced_run >= 6:            # ~120 ms of speech: it's real
+            voiced_ms = voiced_ms + sum(voiced) * frame_ms if any(voiced) else 0.0
+            if voiced_ms >= start_ms:      # ~120 ms of speech: it's real
                 started = True
                 out.extend(pre_roll)
                 flags.extend([True] * len(pre_roll))
                 last_voice_t = clock()
+                if listener is not None:
+                    listener.on_block(out, True)
             elif clock() > start_deadline:
                 return None, None
             continue
@@ -374,14 +398,24 @@ def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Eve
         flags.append(any(voiced))
         for v in voiced:
             if v:
-                silent = 0
+                silent_ms = 0.0
+                probed = False
                 last_voice_t = clock()
             else:
-                silent += 1
+                silent_ms += frame_ms
         if held:
-            silent = 0                     # the silence window restarts at release
+            silent_ms = 0.0                # the silence window restarts at release
+            probed = False
+        if listener is not None:
+            listener.on_block(out, any(voiced))
+            if not probed and silent_ms >= probe_ms:
+                probed = True
+                listener.on_pause(out)
+            need = listener.silence_needed_ms()
+        else:
+            need = end_ms
         limit = cap_blocks if (hold is not None and hold.used) else max_blocks
-        if (silent >= end_frames and not held) or len(out) >= limit:
+        if (silent_ms >= need and not held) or len(out) >= limit:
             break
     if not started or not out:      # source closed before speech
         return None, None

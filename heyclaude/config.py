@@ -33,6 +33,7 @@ LIVE = (
     "tasks.",                        # read when each task starts
     "projects",                      # spoken routing; whisper hints + quick-model prompt after restart
     "agent.filler",
+    "tts.voice", "tts.speed", "tts.first_chunk_words",   # read per sentence
     "conversation.",                 # read per request (save: the agent's next lookup)
     "island.",
     "app.",                          # hotkey re-registered, autostart toggled, guard re-read
@@ -75,6 +76,18 @@ def _migrate(user: dict) -> dict:
     a = user.get("app")
     if isinstance(a, dict):
         a.pop("premiere_guard", None)            # replaced by the load-based choice in stt
+    t = user.get("tts")
+    if isinstance(t, dict) and "backend" in t and "engine" not in t:
+        # Before M4: `backend` (sapi default), `voice` = SAPI voice, `kokoro_voice`.
+        # The settings window wrote the default sapi into every config.yaml, so
+        # it isn't a choice: move to Kokoro (falls back to SAPI by itself), keep piper.
+        b = str(t.pop("backend") or "sapi").lower()
+        t["engine"] = "piper" if b == "piper" else "kokoro"
+        if "voice" in t:
+            t["sapi_voice"] = t.pop("voice")
+        kv = t.pop("kokoro_voice", None)
+        if kv:
+            t["voice"] = kv
     return user
 
 

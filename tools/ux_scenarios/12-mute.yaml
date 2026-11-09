@@ -1,0 +1,14 @@
+name: mute_mid
+desc: Ctrl+Shift mute in the middle of a sentence (the muted part must not be heard)
+steps:
+  - wake: {}
+  - hold: down
+  - say: {text: "What is the boiling point", voice: am_michael}
+  - mute: down
+  - say: {text: "please ignore this part, I am talking to someone else", voice: af_sarah}
+  - mute: up
+  - say: {text: "of water at the top of Mount Everest?", voice: am_michael}
+  - wait: 0.4
+  - hold: up
+  - until: {what: answer, timeout: 40}
+expect: {answer: true}

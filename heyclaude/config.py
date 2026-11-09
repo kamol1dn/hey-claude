@@ -34,6 +34,7 @@ LIVE = (
     "projects",                      # spoken routing; whisper hints + quick-model prompt after restart
     "agent.filler",
     "agent.filler_min_words",
+    "agent.filler_after_s",
     "tts.voice", "tts.speed", "tts.first_chunk_words",   # read per sentence
     "conversation.",                 # read per request (save: the agent's next lookup)
     "island.",

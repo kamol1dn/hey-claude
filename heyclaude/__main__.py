@@ -17,7 +17,11 @@ import sys
 import threading
 
 
-def main():
+def main(argv=None, harness=None):
+    """`harness` (tools/ux_stress.py): runs the real app in this process with a
+    simulated microphone. It may have `configure(cfg)`, `mic_factory(device)` and
+    `started(ctx)` (called with the app's parts just before the Qt loop starts).
+    A harness run is not interactive: no single-instance lock, no global hotkeys."""
     # Hugging Face's xet transfer can stall at 0 bytes on slow lines; plain HTTP resumes.
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     ap = argparse.ArgumentParser(prog="heyclaude")
@@ -37,7 +41,7 @@ def main():
     ap.add_argument("--record-wake-samples", nargs="?", type=int, const=40, metavar="N",
                     help="record N (default 40) clips of you saying \"hey claude\" into state/wake_samples")
     ap.add_argument("--auto", action="store_true", help="with --record-wake-samples: no Enter between clips")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     from . import config
     if args.record_wake_samples is not None:
@@ -47,11 +51,13 @@ def main():
     from . import applog
     log_path = applog.setup()
     cfg = config.load(args.config)
+    if harness is not None and hasattr(harness, "configure"):
+        harness.configure(cfg)
     if args.muted:
         cfg["app"]["listening"] = False
     # Simulated/typed runs are tests: they don't take the single-instance lock,
     # the global hotkey or the Startup shortcut away from a running copy.
-    interactive = not (args.simulate or args.text)
+    interactive = not (args.simulate or args.text or harness is not None)
     if args.quit:
         from PySide6.QtCore import QCoreApplication
         from .winsys import SingleInstance
@@ -68,7 +74,7 @@ def main():
     from PySide6.QtCore import QProcess, QTimer
     from PySide6.QtWidgets import QApplication
 
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("hey-claude")
 
@@ -88,7 +94,7 @@ def main():
     bridge.quit.connect(app.quit)
     asst = Assistant(cfg, bridge, stt_device="gpu" if args.gpu else "cpu" if args.cpu else None,
                      simulate=args.simulate, text_mode=args.text,
-                     exit_when_done=args.exit)
+                     exit_when_done=args.exit, mic_factory=getattr(harness, "mic_factory", None))
     asst.on_listening = lambda on, until: bridge.listening.emit(on, float(until or 0))
     state = {"restart": False}
 
@@ -336,6 +342,8 @@ def main():
         instance.poked.connect(poked)
 
     print(f"[app] log: {log_path}")
+    if harness is not None and hasattr(harness, "started"):
+        harness.started(dict(app=app, asst=asst, bridge=bridge, island=island, tray=tray, cfg=cfg))
     threading.Thread(target=asst.run, daemon=True, name="assistant").start()
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     # Let Python see Ctrl+C while Qt's loop runs.

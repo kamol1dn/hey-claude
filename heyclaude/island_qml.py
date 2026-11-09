@@ -32,6 +32,7 @@ from .config import ROOT
 QML_DIR = ROOT / "ui" / "island"
 WIN_W, WIN_H = 600, 400
 NOT_ME_S = 120
+FIELD_IDLE_S = 20      # an empty talk-or-type field that heard nothing closes after this (it blocks the wake word)
 
 
 # ----------------------------------------------------------------- mode routing
@@ -313,6 +314,8 @@ class IslandModel(QObject):
 
     @Slot(str)
     def inputEdited(self, text):
+        self.o._field_text = text
+        self.o._last_edit = time.monotonic()
         if self.o.session is not None:
             self.o.session.edited(text)
 
@@ -755,6 +758,7 @@ class QmlIsland(QObject):
         self._restore_focus = True
         self._away_since = 0.0
         self._opened_at = time.monotonic()
+        self._field_text, self._last_edit = "", self._opened_at
         self.input_open = True
         hwnd = int(self.view.winId())
         set_no_activate(hwnd, False)
@@ -796,6 +800,14 @@ class QmlIsland(QObject):
 
     def _check_focus(self):
         if not self.input_open or time.monotonic() - self._opened_at < 0.5:
+            return
+        s = self.session
+        if (s is not None and s.state == "open" and not getattr(self, "_field_text", "").strip()
+                and time.monotonic() - max(self._opened_at, getattr(self, "_last_edit", 0.0)) > FIELD_IDLE_S):
+            # Heard nothing, nothing typed: close it, so the wake word works again
+            # (while the field is open the wake word is off: you might be typing).
+            print(f"[input] nothing said or typed for {FIELD_IDLE_S}s: closing the field")
+            s.cancel()
             return
         from .winsys import foreground_is_ours, foreground_window, window_title
         if foreground_is_ours():
@@ -895,8 +907,10 @@ class QmlIsland(QObject):
             n = len(self.tools)
             label = d["label"] + (f"  +{n - 1}" if n > 1 else "")
             self._send("setTool", [label, ""])
-        else:
+        elif self.mode != "thinking":
             self._send("setTool", ["", ""])
+        # else: the last tool's label stays until the answer starts (going back to
+        # "Let me check." / "checking with your tools…" would look like it started over)
 
     # -- plan usage ----------------------------------------------------------------------
     def set_usage(self, info: dict):

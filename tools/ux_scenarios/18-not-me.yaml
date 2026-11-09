@@ -1,0 +1,8 @@
+name: not_me
+desc: a false wake (no request follows), then "not me" on the island
+steps:
+  - wake: {}
+  - wait: 0.5
+  - click: notme
+  - wait: 2
+expect: {}

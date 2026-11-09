@@ -47,6 +47,7 @@ KOKORO_VRAM_MB = 700        # fp32 model + activations, measured ~450 MB on an R
 
 
 def clean_for_speech(s: str) -> str:
+    s = re.sub(r"(?im)^\s*(summary|tl;?dr)\s*:\s*", "", s)      # a section label, not something to say
     s = re.sub(r"`{1,3}[^`]*`{1,3}", "", s)
     s = re.sub(r"[*_#>\[\]]", "", s)
     s = re.sub(r"https?://\S+", "a link", s)

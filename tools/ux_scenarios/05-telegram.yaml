@@ -1,0 +1,7 @@
+name: telegram
+desc: a Telegram lookup (read only, nothing is sent)
+personal: true
+steps:
+  - ask: {text: "Who was the last person to message me on Telegram?", voice: am_michael}
+  - until: {what: answer, timeout: 120}
+expect: {answer: true}

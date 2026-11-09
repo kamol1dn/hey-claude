@@ -1,0 +1,12 @@
+name: followup_chain
+desc: three turns, the second and third in the follow-up window (no wake word)
+steps:
+  - ask: "What's the capital of Australia?"
+  - until: {what: followup, timeout: 40}
+  - wait: 0.6
+  - say: {text: "And how many people live there?", voice: am_michael}
+  - until: {what: followup, timeout: 40}
+  - wait: 0.8
+  - say: {text: "What is it best known for?", voice: am_michael}
+  - until: {what: answer, timeout: 40}
+expect: {turns: 3, answer: true}

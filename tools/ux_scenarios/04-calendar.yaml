@@ -1,0 +1,7 @@
+name: calendar
+desc: calendar lookup (read only)
+personal: true
+steps:
+  - ask: {text: "What's on my calendar tomorrow?", voice: am_adam}
+  - until: {what: answer, timeout: 120}
+expect: {answer: true}

@@ -1,0 +1,8 @@
+name: stop_esc
+desc: stop a long answer with Esc (the stop key)
+steps:
+  - ask: "Explain in a few sentences why the sky is blue."
+  - until: {what: speaking, timeout: 40}
+  - wait: 1.8
+  - esc: {}
+expect: {answer: true}

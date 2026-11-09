@@ -1,0 +1,9 @@
+name: barge_in
+desc: talk over a long answer
+steps:
+  - ask: "Tell me a short story about a lighthouse keeper, in four or five sentences."
+  - until: {what: speaking, timeout: 40}
+  - wait: 2.5
+  - barge: {text: "Okay, stop. What's two plus two?", voice: am_adam}
+  - until: {what: answer, timeout: 40}
+expect: {turns: 2}

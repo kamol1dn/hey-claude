@@ -71,7 +71,21 @@ Item {
         rest.stop()
         frames.start()
     }
+    // Frame pacing for the UX recorder: while the engine wants every frame (live tier),
+    // ticks further apart than ~2 frames are hitches. Bounded; drained by takeHitches().
+    property string rowKey: ""
+    property int sentRowMax: -1
+    property real lastTickMs: 0
+    property var hitches: []
+    property int liveTicks: 0
     function tick() {
+        var tnow = Date.now()
+        if (root.lastGap >= 0 && root.lastGap <= 40 && root.lastTickMs > 0) {   // live tier (60 fps, or 30 on battery/software)
+            root.liveTicks++
+            var dms = tnow - root.lastTickMs
+            if (dms > 2 * Math.max(16, root.lastGap) + 2 && root.hitches.length < 4000) root.hitches.push([tnow, dms])
+        }
+        root.lastTickMs = tnow
         var gap = E.frame()
         root.o = E.out
         root.oChanged()                         // same object every frame: tell the bindings
@@ -158,6 +172,15 @@ Item {
         }
         if (words0.text !== lines[0]) words0.text = lines[0]
         if (words1.text !== lines[1]) words1.text = lines[1]
+        // in a turn the answer is revealed in the row under the question instead
+        if (extras.rowMax !== root.sentRowMax) { root.sentRowMax = extras.rowMax; E.setRowMax(extras.rowMax) }
+        var R = o.row
+        if (R && R.key !== root.rowKey) {
+            root.rowKey = R.key
+            extras.rowLines = R.lines.slice(0, R.n)
+            if (extras.rowN !== R.n) extras.rowN = R.n
+            if (extras.rowTop !== R.top) extras.rowTop = R.top
+        }
     }
     function escapeHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
     function setLabel(item, l, xo) {
@@ -422,35 +445,52 @@ Item {
         }
 
         // ---- under the head: effects, approvals, response widgets ----------------
-        Extras {
-            id: extras
+        Item {
+            id: extrasClip
             x: 0; y: o.headFull || o.head
-            width: o.w
-            visible: !o.listGeom && contentHeight > 0
-            resting: o.state === "ready" || o.state === "off" || o.state === "paused"
-            reduced: o.motion !== "full"
-            engineState: o.state || ""
-            // the panel never grows past the window (the stage's bottom, less room for the glow)
-            maxHeight: root.stageH - root.pillY - (o.headFull || o.head) - 18
+            width: o.w; height: Math.max(0, o.h - y)
             clip: true
-            onContentHeightChanged: root.extraChanged()
-            onMinWidthChanged: root.extraChanged()
+            visible: !o.listGeom && extras.contentHeight > 0
+            Extras {
+                id: extras
+                // Laid out on the pill's target width and held still on screen while the pill
+                // morphs around it: the card and the answer never re-flow or slide per frame.
+                readonly property real contentW: Math.round(o.wt || o.w)
+                x: Math.round((root.stageW - contentW) / 2) - root.pillX
+                y: 0
+                width: contentW
+                resting: o.state === "ready" || o.state === "off" || o.state === "paused"
+                reduced: o.motion !== "full"
+                engineState: o.state || ""
+                // the panel never grows past the window (the stage's bottom, less room for the glow)
+                maxHeight: root.stageH - root.pillY - (o.headFull || o.head) - 18
+                clip: true
+                onContentHeightChanged: root.extraChanged()
+                onMinWidthChanged: root.extraChanged()
+                onTurnCleared: { E.setTurn(false); root.kick() }
+            }
         }
+        Connections { target: model; function onQuestionShown(q) { if (q) { E.newTurn(); root.kick() } } }
         // screenshot effect: a shutter flash over the whole pill
         Rectangle {
             anchors.fill: parent; radius: o.rad
             visible: extras.flash > 0.005
             color: "white"; opacity: extras.flash
         }
-        // quiet followup (a card or the turn is open): a hairline along the panel's
-        // bottom edge, centred, shrinking as the followup window runs out
-        Rectangle {
+        // followup: the window's countdown, a ring around the ember draining clockwise
+        // from 12 o'clock (the paused arc's look); nothing sweeps across the pill
+        Shape {
+            id: followupDrain
             objectName: "followupDrain"
-            readonly property real span: Math.max(0, o.w - 2 * Math.max(o.rad, 14))
             visible: (o.drainA || 0) > 0.01
-            x: (o.w - width) / 2; y: o.h - 3
-            width: span * (o.drainU || 0); height: 1.5; radius: 0.75
-            color: root.cLive; opacity: 0.85 * (o.drainA || 0)
+            anchors.fill: parent
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath { strokeColor: Qt.rgba(92 / 255, 86 / 255, 82 / 255, 0.35 * (o.drainA || 0)); strokeWidth: 1; fillColor: "transparent"
+                PathAngleArc { centerX: o.ex; centerY: o.cy; radiusX: 9.5; radiusY: 9.5; startAngle: 0; sweepAngle: 360 } }
+            ShapePath { strokeColor: Qt.rgba(217 / 255, 119 / 255, 87 / 255, 0.9 * (o.drainA || 0)); strokeWidth: 1.4
+                capStyle: ShapePath.RoundCap; fillColor: "transparent"
+                PathAngleArc { centerX: o.ex; centerY: o.cy; radiusX: 9.5; radiusY: 9.5; startAngle: -90
+                    sweepAngle: 360 * Math.max(0.001, o.drainU || 0) } }
         }
 
         // ---- tools in use (thinking): service icons, stacked for parallel calls --------
@@ -577,6 +617,11 @@ Item {
     function busyWhy() { return E.busyWhy() + " | frames.running " + frames.running + " rest " + rest.running + "/" + rest.interval }
     function extrasInfo() { var i = extras.info(); i.pillW = o.w; i.pillH = o.h; i.head = o.head; return i }
     function hit(x, y) { return hitCtl(x, y) }
+    function probeUx() { var p = E.probeForUx(); var i = extras.info(); p.question = i.question; p.answer = i.answer;
+        p.widget = i.widget; p.widgetReady = i.widgetReady; p.pending = i.pending; p.extrasH = i.height; p.tier = root.lastGap === Infinity ? -1 : root.lastGap
+        p.ctl = o.ctl || 0; p.notme = o.notme || 0; p.ctlCy = o.ctlCy; p.pillX = root.pillX; p.pillY = root.pillY; p.ow = o.w; p.oh = o.h
+        return p }
+    function takeHitches() { var h = root.hitches; root.hitches = []; var n = root.liveTicks; root.liveTicks = 0; return { hitches: h, live: n } }
     function probe() { return { er: o.er, w: o.w, h: o.h, state: o.state, glowA: o.glowA, hide: o.hide,
                                 thrA: o.thrA || 0, washA: o.washA || 0, dotsA: o.dotsA || 0, drainA: o.drainA || 0, drainU: o.drainU || 0,
                                 labels: (o.lb || []).filter(function (l) { return !l.out && (l.a || 0) > 0.05 }).map(function (l) { return l.text }) } }

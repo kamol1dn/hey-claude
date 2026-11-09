@@ -1,0 +1,8 @@
+name: typed
+desc: the hotkey's field, a typed request
+steps:
+  - hotkey: {}
+  - wait: 0.9
+  - type: "what's seventeen times twenty three?"
+  - until: {what: answer, timeout: 40}
+expect: {answer: true}

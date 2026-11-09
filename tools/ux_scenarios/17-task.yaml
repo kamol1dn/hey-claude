@@ -1,0 +1,12 @@
+name: task_then_question
+desc: a task in the scratch folder, then a question about it
+settle_s: 120
+steps:
+  - ask: {text: "Start a task in the scratch project: create a file called haiku.txt with a short haiku about autumn.", voice: am_michael}
+  - until: {what: answer, timeout: 60}
+  - until: {what: idle, timeout: 60}
+  - wait: 45
+  - until: {what: idle, timeout: 120}
+  - ask: "What did the scratch task do?"
+  - until: {what: answer, timeout: 120}
+expect: {answer: true}

@@ -221,7 +221,9 @@ agent:
   timeout: 180                 # seconds to wait for one answer
   filler: "Let me check."      # spoken right away while it looks things up
   filler_min_words: 8          # ...but only for requests of at least this many words (0 = always)
+  filler_after_s: 3.5          # a shorter request still gets it if nothing has been said after this long (0 = never)
   extra_args: []
+  disallowed_tools: []         # more tools the agent is never offered (Claude Code's own PowerShell never is)
 
 conversation:
   # One conversation shared by the quick model, the tool agent and tasks:

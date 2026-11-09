@@ -1,0 +1,8 @@
+name: rapid_wakes
+desc: the wake word three times in a row, then the question
+steps:
+  - wake: {gap: 0.5}
+  - wake: {gap: 0.4}
+  - ask: "What time is it in Tokyo?"
+  - until: {what: answer, timeout: 60}
+expect: {answer: true}

@@ -1,0 +1,6 @@
+name: weather
+desc: weather with the card (tool agent, long question so the filler plays)
+steps:
+  - ask: {text: "Can you check what the weather is going to be like later this afternoon?", voice: bf_emma}
+  - until: {what: answer, timeout: 90}
+expect: {widget: weather, answer: true}

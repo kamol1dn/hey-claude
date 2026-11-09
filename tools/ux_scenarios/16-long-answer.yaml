@@ -1,0 +1,6 @@
+name: long_answer
+desc: a long multi-sentence answer
+steps:
+  - ask: "Explain how tides work, in five or six sentences."
+  - until: {what: answer, timeout: 40}
+expect: {answer: true}

@@ -1,0 +1,8 @@
+name: stop_button
+desc: stop a long answer with the island's stop button
+steps:
+  - ask: "Explain in a few sentences how a rainbow forms."
+  - until: {what: speaking, timeout: 40}
+  - wait: 1.8
+  - click: stop
+expect: {answer: true}

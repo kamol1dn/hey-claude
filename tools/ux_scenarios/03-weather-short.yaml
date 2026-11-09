@@ -1,0 +1,7 @@
+name: weather_short
+desc: weather, short question (no filler), a bit of background noise while asking
+steps:
+  - noise: {dbfs: -44, secs: 4}
+  - ask: "What's the weather today?"
+  - until: {what: answer, timeout: 90}
+expect: {widget: weather, answer: true}

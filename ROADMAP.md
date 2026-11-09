@@ -98,11 +98,38 @@ training (the user runs Colab) and the ≥95% / <1 per 3 h measurement with
 **Done when:** ≥95% hit rate on the user's samples and fewer than 1 false
 wake per 3 hours of background audio.
 
-## M2b: Train the wake word inside Settings, locally
+## M2a: Ship one default "hey claude" model for everyone
 
-**Goal:** anyone setting hey-claude up trains their own wake word from
-Settings in about 15 minutes, with no Colab, terminal or WSL. The M2 Colab
-route stays in the docs as the "advanced, best quality" option.
+**Goal:** new users never train anything. The wake word detects the phrase,
+not the person, so one model trained once works for anyone who says "hey
+claude".
+- Train it **on synthetic voices only**, never the maintainer's clips (no
+  personal voice in a public repo, and no bias toward one accent):
+  - many Piper/Kokoro voices with a deliberate mix of accents (including
+    Russian/Uzbek-style spellings from M2), speeds and pitches;
+  - the M2 look-alike negatives.
+- Measure it with `wake_eval.py` on held-out *real* clips from several people,
+  if volunteers donate some. Their clips are used only for evaluation and are
+  never committed.
+- Ship `models/hey_claude.onnx` as a GitHub release asset, downloaded on first
+  run and checked with SHA-256, and make it the default `wake.model`.
+  `hey_jarvis` stays the fallback.
+- **Licence check before shipping:** openWakeWord's pretrained models are CC
+  BY-NC-SA 4.0 because of their training data. Work out what applies to a
+  model trained with the same negative features, and state it in
+  `models/LICENSE` and the README.
+
+**Done when:** a fresh install wakes on "hey claude" with no training step,
+with ≥ 95% hits on the donated real clips and < 1 false wake per 3 h of
+lecture audio.
+
+## M2b: Personal tune-up and custom phrases, inside Settings, locally
+
+**Goal:** optional. Most users keep the M2a default. The wizard is for people
+who want it tuned to **their** accent, or a **different phrase**. It runs in
+about 15 minutes with no Colab, terminal or WSL. The result stays on that PC
+(`state/`), never in the repo. The M2 Colab route stays in the docs as the
+"advanced, best quality" option.
 
 Settings → **Wake word** wizard:
 1. **Phrase:** "hey claude" by default. Any short phrase works, so another user
@@ -597,7 +624,7 @@ motion and character.
 
 - PyInstaller or Nuitka build with an installer; models downloaded on
   first run.
-- First-run wizard: find or install the `claude` CLI, check `claude auth
+- First-run wizard (no wake-word training: the M2a model is the default; the M2b tune-up is optional): find or install the `claude` CLI, check `claude auth
   status`, mic test, pick projects, choose a voice.
 - Auto-update check; uninstall cleanly (Startup entry, state).
 - CI: offline tests plus a simulated-audio smoke test on Windows.

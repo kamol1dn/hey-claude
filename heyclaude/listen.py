@@ -20,7 +20,11 @@ VAD_FRAME = 320       # 20 ms
 
 
 class MicSource:
-    """Live microphone via sounddevice. Iterating yields int16 blocks."""
+    """Live microphone via sounddevice. Iterating yields int16 blocks.
+
+    close() releases the device (Windows' mic-in-use indicator goes off) and
+    ends any iteration in progress; make a new MicSource to listen again.
+    """
 
     def __init__(self, device=None):
         import sounddevice as sd
@@ -43,13 +47,28 @@ class MicSource:
     def stop(self):
         self._stream.stop()
 
+    def close(self):
+        try:
+            self._stream.stop()
+            self._stream.close()
+        except Exception:
+            pass
+        self.drain()
+        self._q.put(None)          # wake and end a blocked iterator
+
     def drain(self):
         while not self._q.empty():
-            self._q.get_nowait()
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                break
 
     def __iter__(self):
         while True:
-            yield self._q.get()
+            b = self._q.get()
+            if b is None:
+                return
+            yield b
 
 
 class WavSource:
@@ -74,6 +93,9 @@ class WavSource:
         pass
 
     def stop(self):
+        pass
+
+    def close(self):
         pass
 
     def drain(self):
@@ -170,4 +192,6 @@ def record_utterance(blocks, cfg: dict, on_level=None, stop_event: threading.Eve
                 silent += 1
         if silent >= end_frames or len(out) >= max_blocks:
             break
+    if not started or not out:      # source closed before speech
+        return None, None
     return np.concatenate(out), last_voice_t

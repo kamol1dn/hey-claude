@@ -656,6 +656,8 @@ motion and character.
 - Task dashboard window: history, cost, diff preview, open in terminal, and
   try "open in the Claude desktop app" (`claude --resume <id> --desktop`).
 
+Design notes from studying Coucou, plus our handoff test: `docs/m7-hooks-notes.md`.
+
 **Touches:** `tasks.py`, new `hookrelay/` (relay + pipe server),
 `permissions_mcp.py` (fallback only), `ui/`.
 **Done when:**
@@ -665,6 +667,93 @@ motion and character.
   island and can be approved from it;
 - removing the hooks from Settings leaves `~/.claude/settings.json` exactly as
   it was before.
+
+## M9: Control Windows by voice (settings MCP, UI automation, effects)
+
+**Goal:** "volume 30", "dark mode", "next song", "brightness down", "change my
+wallpaper", "open Wi-Fi settings" just work, each with its own little
+animation on the island.
+
+**1. Our own Windows settings MCP server** (`heyclaude/mcp_windows/`, Python,
+FastMCP over stdio, loaded by the tool agent like any MCP). Comfort settings
+only. Each write tool returns the old and new value, which feeds "undo that"
+and the animation.
+- **Audio:** master volume get/set/step, mute, per-app volume (Core Audio via
+  pycaw), list output devices. Switching the default device uses the
+  undocumented IPolicyConfig, so mark it experimental.
+- **Display:**
+  - brightness: laptop panel through WMI `WmiMonitorBrightnessMethods`,
+    external monitors through DDC/CI (`monitorcontrol`);
+  - dark/light mode: registry plus a `WM_SETTINGCHANGE` broadcast;
+  - wallpaper get/set, per monitor through `IDesktopWallpaper`;
+  - night light: registry blob, experimental.
+- **Radios:** Wi-Fi / Bluetooth on/off and airplane mode status (WinRT
+  `Windows.Devices.Radios`).
+- **Power:**
+  - battery status, and power mode (best performance / balanced /
+    efficiency, via `PowerSetActiveOverlayScheme`);
+  - lock;
+  - sleep, restart and shutdown always need a click, never voice alone.
+- **Media:** what's playing (title, artist, art) and play/pause/next/previous
+  through WinRT `GlobalSystemMediaTransportControlsSessionManager`.
+- **Apps and windows:** launch an app by name, list/focus/minimize/close
+  windows, snap left/right.
+- **Clipboard:** read/write.
+- **Screen:** "what's on my screen?" sends a screenshot to the agent.
+- **Open any Settings page** through `ms-settings:` URIs, the fallback for
+  anything without a tool.
+- **Never exposed:** Defender, firewall, UAC, user accounts, raw registry
+  editing, arbitrary PowerShell, drivers/services.
+- Read tools go on the agent's allow-list. Write tools are allowed too, but
+  each change is announced on the island with an undo button for ~8 s.
+
+**2. Windows-MCP for general UI automation** ([CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP),
+MIT, actively maintained). Accessibility-tree snapshots plus click, type,
+scroll, shortcuts and app launch, so it can work any app.
+- Add it as an optional MCP. Run it with `--exclude-tools "PowerShell,Registry"`
+  for the always-on tool agent.
+- A voice assistant can be set off by a video, a podcast or another person in
+  the room. So:
+  - read-only tools (Snapshot, Screenshot) are allowed;
+  - acting tools (Click, Type, Shortcut, Drag, App) need an island
+    confirmation the first time per app per session, using M7's approvals;
+  - PowerShell / Registry only inside tasks, with approvals, never in the
+    always-on agent.
+- Prefer our settings tools over clicking through Settings, because they are
+  faster, exact and undoable. The agent prompt says so.
+
+**3. Per-tool effects:** custom animations in the M5/M6 registry. A new
+`ui/effects.json` maps a tool to a widget plus an animation, with a generic
+fallback (service icon + old → new value morph). Characters react through the
+existing `working`/`done` states and can add tool-specific antics.
+- **Volume:** the pill becomes a slider that glides to the new level.
+- **Mute:** a speaker icon with a slash drawn in.
+- **Brightness:** sun rays grow or shrink.
+- **Dark mode:** sun ↔ moon flip while the pill's own background crossfades.
+- **Wallpaper:** the old wallpaper's thumbnail wipes into the new one.
+- **Wi-Fi / Bluetooth:** the icon's bars or waves animate on or off.
+- **Battery:** fill level with a charging pulse.
+- **Media:** the album art flips in with a progress line; skip slides it out.
+- **App launch:** the app's icon zooms out of the island towards the screen.
+- **Screenshot:** a shutter flash.
+- **Undo:** the effect plays in reverse.
+
+**4. Smaller capacity ideas** for after this milestone, if wanted:
+- timers, alarms and reminders (local scheduler, island countdown widget,
+  toast);
+- file search through the Windows Search index;
+- clipboard history ("paste what I copied before that");
+- "read my notifications": check whether the WinRT listener works without
+  package identity.
+
+**Touches:** new `heyclaude/mcp_windows/`, `config.example.yaml` (agent MCPs and
+allow-list), `ui/effects.json` (with M5), README.
+**Done when:**
+- each settings tool has offline tests with the Windows APIs mocked, plus a
+  live check script;
+- "volume 30", "dark mode", "next song", "brightness down" and "change my
+  wallpaper" work end to end in ≤ 2.5 s with their effect and an undo;
+- Windows-MCP's acting tools are confirmed on the island before they run.
 
 ## M8: Package and ship
 

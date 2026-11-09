@@ -422,22 +422,81 @@ the user's top misheard words in a simulated test.
 **Done when:** each widget type renders from a simulated reply; 60 fps
 transitions measured; no focus stealing.
 
-## M6: Claude character
+## M6: Characters as plug-ins (pick one in Settings, add new ones by PR)
 
-**Goal:** an animated character that reacts to the conversation.
+**Goal:** the character is a swappable pack behind one interface. All five
+original designs in `docs/character-options.html` ship as built-in packs, the
+user picks one in Settings, and anyone can add a new pack with a PR. The
+interface grows as hey-claude gains features, without breaking older packs.
 
-- An **original** character design. Don't copy existing mascots or logos.
-  States: idle, listening, thinking, talking (lip-flap synced to TTS
-  amplitude), happy, confused, working (task running), done, error.
-- Assets as Lottie (QML Lottie) or sprite sheets; a small state machine
-  blends between them.
-- The model picks a `mood` in its structured reply (from a fixed list); the
-  app maps tool/task events to `working` / `done` automatically.
-- Settings: character on/off, size, which corner/in-island.
+**The interface: one versioned state registry** (`ui/states.json`), shared by
+characters and island themes (M5's Ember & Thread is the first island theme):
+- Each entry has an `id`, a description, the live inputs it gets (mic `level`,
+  TTS `amplitude`, `progress`, `count`, `mood`, cursor position, theme colours),
+  `oneshot` or `loop`, and a **`fallback`** state.
+- Core states every pack must implement: `idle`, `off`, `listening`,
+  `thinking`, `talking`.
+- Everything else is optional and falls back, so adding a new state never
+  breaks an old pack:
+  - `woke` → `listening`
+  - `holding` → `listening`
+  - `holding_muted` (Ctrl+Shift) → `off`
+  - `followup` → `listening`
+  - `loading` → `thinking`
+  - `paused` → `off`
+  - `working` (task) → `thinking`
+  - `done` → `happy` → `idle`
+  - `error` → `confused` → `idle`
+  - `voice_mismatch` → `confused`
+  - `sending` (Telegram etc.) → `working`
+  - `dictating` (M4d) → `listening`
+  - `approval_needed` (M7) → `confused`
+- New feature = add a registry entry with a sensible fallback, bump the
+  registry's minor version, and optionally update the built-in packs.
 
-**Touches:** `ui/character/`, a few lines in the reply schema.
-**Done when:** every state is reachable from a scripted demo, and moods
-switch from model output.
+**A pack** is a folder `characters/<id>/`:
+- `character.json`: id, name, author, licence, `registry` version supported,
+  the list of implemented states, size hints (in-pill ~24 px, desktop ~120 px),
+  and optional settings (e.g. colour variants).
+- `Character.qml`: implements the QML interface: properties `state`, `level`,
+  `amplitude`, `progress`, `mood`, `size`, `reducedMotion`, and a
+  `finished(state)` signal for one-shots. Pure QML/Shapes/ShaderEffect, no
+  native code, no network.
+- `preview.gif` or a generated preview for the picker.
+
+**App side:**
+- A pack loader with state resolution through fallbacks, logged once per
+  missing state.
+- **Settings → Character:** a gallery of the installed packs, a live preview
+  with a button per state, on/off, size, and in-island or desktop companion.
+- The model's `mood` field (fixed list) and app events (task, tool, Telegram
+  send) map onto registry states.
+- User packs can also live in `state/characters/` (git-ignored) for local
+  experiments without a PR.
+
+**Contributing** (`characters/README.md`):
+- How to make a pack and test it with `tools/character_lab.py`, which cycles
+  every state, fakes the inputs and measures fps.
+- CI validates every pack:
+  - the manifest schema;
+  - the core states are present;
+  - each state renders offscreen without QML errors;
+  - an idle budget: no continuous animation above the registry's idle fps;
+  - originality: no known mascots or logos (reviewed by hand in the PR
+    template).
+
+**Port the five designs** from the HTML gallery to QML packs, keeping their
+motion and character.
+
+**Touches:** new `characters/` (5 packs + README), `ui/states.json`,
+`ui/CharacterHost.qml`, `settings_ui.py` (picker), `brain.py` (mood field),
+`tools/character_lab.py`, CI.
+**Done when:**
+- all five packs pass the CI checks;
+- the picker switches packs live;
+- a test pack that implements only the five core states runs every app state
+  through fallbacks;
+- adding a new state to the registry needs no change to any existing pack.
 
 ## M7: Tasks v2
 

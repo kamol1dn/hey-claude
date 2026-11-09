@@ -163,7 +163,10 @@ class SpeechToText:
         self.cpu_compute = cfg.get("cpu_compute_type") or "int8"
         self.gpu_model = cfg.get("gpu_model") or "large-v3"
         self.gpu_compute = cfg.get("gpu_compute_type") or "int8_float16"
-        self.prompt = ("Hey Claude. Start a task in " + ", ".join(hint_words) + ".") if hint_words else None
+        # A spelling hint for project names. Not phrased like a request: large-v3
+        # treats a prompt such as "Start a task in X." as already said and drops
+        # those words from the start of the transcript.
+        self.prompt = ("Vocabulary: Claude, " + ", ".join(hint_words) + ".") if hint_words else None
         self._loader = loader or self._load
         self._cuda_check = cuda_check or cuda_available
         self._cached = cached or is_cached

@@ -120,7 +120,7 @@ def test_task_pump(tmp_path):
     tm.lock = threading.Lock()
     finished = []
     tm.on_change, tm.on_finish = (lambda t: None), finished.append
-    tm.command = lambda prompt: [sys.executable, str(fake)]
+    tm.command = lambda prompt, name=None: [sys.executable, str(fake)]
     t = tm.spawn("hey claude", str(tmp_path), "count py files")
     for _ in range(100):
         if finished:

@@ -123,6 +123,22 @@ agent:
   filler: "Let me check."      # spoken right away while it looks things up
   extra_args: []
 
+conversation:
+  # One conversation shared by the quick model, the tool agent and tasks:
+  # whichever answers next is told what the others said, so "what's on my
+  # calendar?" -> "and the weather then?" keeps context.
+  followup_s: 5                # after an answer, listen this long without the wake word (0 = off)
+  max_turns: 8                 # turns of context passed between tiers
+  max_tokens: 1500             # ...and at most about this many tokens of it
+  idle_reset_s: 600            # start a new conversation after this much silence
+  # Save the conversation: turns go to state/conversations/<date>.jsonl
+  # (git-ignored) and are picked up again after a restart; the tool agent's
+  # Claude Code session is saved and named "hey-claude <date>". Off: nothing
+  # is written to disk. "Start fresh" (said out loud) forgets it either way.
+  save: false
+  task_question_model: haiku   # answers "what did the <name> task change?" (null = your default)
+  task_question_timeout: 120
+
 claude:
   # Path to claude.exe. null = look on PATH, then in the Claude desktop
   # app's bundled copy (%LOCALAPPDATA%\Claude-Data\*\claude-code\<ver>\...).

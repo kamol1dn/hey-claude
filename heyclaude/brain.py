@@ -7,6 +7,17 @@ Every utterance goes through `Brain.handle(text)`, which yields events:
     ("task", project, task)     launch a headless Claude Code run
     ("status",)                 user asked how the tasks are going
     ("noop",)                   nothing to do ("never mind")
+    ("fresh",)                  "start fresh": forget the conversation
+    ("task_ask", ref, question) "what did the inha app task change?"
+    ("task_stop", ref)          "stop the task"
+    ("task_resume", ref)        "resume the last task in a terminal"
+
+`ref` is how the user named a task ("inha app", "last", "readme", "#<id>");
+tasks.find_task turns it into a task.
+
+All tiers share one conversation (conversation.Transcript): each request is
+sent with the turns that tier hasn't seen yet, so context survives a switch
+between the quick model, the tool agent and tasks.
 
 Three tiers:
   (a) quick answers, no tools: Anthropic SDK (haiku) if ANTHROPIC_API_KEY is
@@ -33,6 +44,7 @@ import time
 from datetime import datetime
 
 from .claude_cli import NO_WINDOW, child_env, fast_args, find_claude
+from .conversation import Transcript, session_name
 
 _WORD = re.compile(r"[^a-z0-9 ]+")
 
@@ -83,12 +95,72 @@ _LOOKUP_RE = re.compile(
     r"search (the web|online|for)|look up|google)\b", re.I)
 
 
+_POLITE = r"^(?:(?:and|so|ok(?:ay)?|please|now|then|can you|could you|would you|hey)[,\s]+)*"
+_FRESH_RE = re.compile(
+    _POLITE + r"(?:let'?s\s+)?(?:start (?:fresh|over|again|a new conversation)|new conversation|"
+    r"forget (?:this|that|our|the|everything)(?: conversation| chat)?|clear (?:the |our )?(?:conversation|context|chat))"
+    r"\b[^?]*[.!]?$", re.I)
+_TASK_WORD = r"(?:tasks?|jobs?|runs?|sessions?)"
+_TSTOP_RE = re.compile(
+    _POLITE + r"(?:stop|cancel|kill|abort|end|halt|terminate)\s+(?:the\s+|my\s+|that\s+|this\s+)?"
+    r"(?P<ref>[^.?!]*?)\s*\b" + _TASK_WORD + r"\b(?:\s+(?:in|for|on)\s+(?:the\s+)?(?P<ref2>[^.?!]+?))?"
+    r"\s*(?:now|please)?[.!?]*$", re.I)
+_TRESUME_RE = re.compile(
+    _POLITE + r"(?P<verb>resume|continue|reopen|re-open|open|pick up|bring up)\s+(?:the\s+|my\s+|that\s+)?"
+    r"(?P<ref>[^.?!]*?)\s*\b(?:task|job|session)\b(?P<tail>[^?]*)$", re.I)
+_TERMINAL = re.compile(r"\b(terminal|console|command line|window|claude code)\b", re.I)
+# Words that make "... task ..." a question about what a task did. Status
+# questions ("how's the task going") are caught before this.
+_TASK_VERB = (r"\b(?:did|does|has|have|was|were|change[sd]?|do|done|find|found|fix(?:ed)?|add(?:ed)?|make|made|"
+              r"write|wrote|results?|summary|summari[sz]e|happen(?:ed)?|go|went|say|said|touch(?:ed)?|"
+              r"modif(?:y|ied)|edit(?:ed)?|break|broke|explain|tell)\b")
+_TASK_ASK_RE = re.compile(_POLITE + r"(?:what|which|how|why|did|does|has|was|were|tell me|summari[sz]e|explain|"
+                          r"give me|can you tell)\b.*\b(?:task|job)s?\b", re.I)
+_REF_RE = re.compile(r"\b(?:the|that|my|this|last)\s+(?P<ref>[\w' -]*?)\s*\b(?:task|job)\b", re.I)
+# "what did it change?" right after a task was announced or talked about.
+_IT_RE = re.compile(_POLITE + r"(?:what|how|did|does|has|was|why|tell me|which)\b.*\b(?:it|that)\b.*" + _TASK_VERB,
+                    re.I)
+
+
+def _task_ref(text: str, projects: Projects) -> str:
+    """'what did the inha app task change' -> 'inha app'; 'the last task' -> 'last'."""
+    m = _REF_RE.search(text)
+    ref = m.group("ref").strip() if m else ""
+    if m and not ref and norm(m.group(0)).startswith("last"):
+        ref = "last"
+    if not ref or ref.lower() in ("last", "latest"):
+        # "the task in inha app", "what did inha app's task do"
+        s = f" {norm(text)} "
+        for key in sorted(projects.map, key=len, reverse=True):
+            if f" {norm(key)} " in s:
+                return key
+    return ref
+
+
 def local_route(text: str, projects: Projects):
     t = text.strip()
     if _NOOP_RE.match(t):
         return ("noop",)
+    if _FRESH_RE.match(t):
+        return ("fresh",)
+    m = _TSTOP_RE.match(t)
+    if m:
+        ref = (m.group("ref2") or m.group("ref") or "").strip()
+        if norm(ref) in ("all", "all the", "all of the", "all my", "every", "all running", "all of my"):
+            ref = "all"
+        return ("task_stop", ref)
+    m = _TRESUME_RE.match(t)
+    if m and (m.group("verb").lower() != "open" or _TERMINAL.search(m.group("tail") or "")):
+        ref = m.group("ref").strip()
+        if not ref:
+            tail = re.sub(r"\b(in|on|inside)\s+(a|the|my)?\s*(new\s+)?(terminal|console|window|command line)\b.*",
+                          "", m.group("tail") or "", flags=re.I).strip()
+            ref = _task_ref(f"the task {tail}", projects) if tail else ""
+        return ("task_resume", ref)
     if _STATUS_RE.search(t):
         return ("status",)
+    if _TASK_ASK_RE.match(t) and re.search(_TASK_VERB, t, re.I) and not _TASK_RE.match(t):
+        return ("task_ask", _task_ref(t, projects), t)
     m = _TASK_RE.match(t)
     if not m:
         if _LOOKUP_RE.search(t):
@@ -133,6 +205,9 @@ def system_prompt(projects: Projects, has_agent: bool = True) -> str:
         "reply with exactly one line:\n"
         "TASK <project> :: <one-line task in imperative form>\n"
         "where <project> is one of: " + names + ". Use TASK ? :: <task> if none fits.\n"
+        "A message may start with a note in parentheses holding earlier turns of this conversation "
+        "that another part of the assistant answered (lookups with the user's tools, tasks); treat "
+        "them as part of the conversation, e.g. to know what 'there' or 'then' refers to.\n"
         "Otherwise just answer."
     )
 
@@ -142,7 +217,17 @@ AGENT_PROMPT = (
     "was spoken aloud and your final reply will be read aloud by TTS. Use your tools and MCP "
     "servers to look things up. Do not narrate what you are doing. Your final reply must be one "
     "to three short plain sentences: no markdown, lists, links, file paths or code. Don't change "
-    "files or send anything on the user's behalf unless they explicitly asked for exactly that."
+    "files or send anything on the user's behalf unless they explicitly asked for exactly that. "
+    "A message may start with a note in parentheses holding earlier turns of the same voice "
+    "conversation that another part of the assistant answered; use it to resolve 'there', "
+    "'then', 'that' and the like."
+)
+
+TASK_QA_PROMPT = (
+    "The user is asking about this session's work by voice, after it finished. Answer from what "
+    "was done in this session; check git diff or git log if that helps. Do not change any "
+    "files. Your reply is read aloud: one to three short plain sentences, no markdown, lists, "
+    "file paths or code."
 )
 
 
@@ -165,6 +250,7 @@ class _CliChat:
         self.turns = 0
         self.lock = threading.Lock()
         self.init_info: dict | None = None
+        self.epoch = 0      # bumped on every new process: the Transcript re-sends context then
         if persistent:
             self._spawn()
 
@@ -181,6 +267,7 @@ class _CliChat:
             errors="replace", bufsize=1, env=child_env(), creationflags=NO_WINDOW, cwd=self.cwd,
         )
         self.turns = 0
+        self.epoch += 1
         q, p = self.lines, self.proc
         threading.Thread(target=lambda: [q.put(l) for l in p.stdout] + [q.put(None)], daemon=True).start()
 
@@ -192,6 +279,17 @@ class _CliChat:
                 self.proc.wait(timeout=3)
             except Exception:
                 self.proc.kill()
+
+    def recycle(self, warm: bool = True):
+        """Forget the conversation: a new process (and, warm, one throwaway turn)."""
+        with self.lock:
+            self.close()
+            if not self.persistent:
+                return
+            self._spawn()
+        if warm:
+            for _ in self.stream("Reply with just: ok"):
+                pass
 
     def stream(self, text: str):
         with self.lock:
@@ -262,6 +360,11 @@ class _SdkChat:
         self.client = anthropic.Anthropic()
         self.model, self.sys_prompt, self.max_tokens = model, sys_prompt, max_tokens
         self.history: list[dict] = []
+        self.epoch = 1
+
+    def recycle(self, warm: bool = False):
+        self.history = []
+        self.epoch += 1
 
     def stream(self, text: str):
         self.history.append({"role": "user", "content": text})
@@ -316,12 +419,27 @@ class Agent:
     """Tier (b): one warm Claude Code process with tools, reused for every lookup."""
 
     def __init__(self, cfg: dict, exe: str):
-        from .config import ROOT, STATE_DIR
+        from .config import ROOT
 
+        self.cfg = cfg
         a = cfg["agent"]
+        self.chat = _CliChat(exe, self._args(), cwd=a.get("cwd") or str(ROOT), persistent=True,
+                             max_turns=int(a.get("max_turns", 30)), final_only=True, name="agent",
+                             timeout=float(a.get("timeout", 180)))
+        self.reported = False
+
+    def _args(self) -> list[str]:
+        """With conversation.save on, the session is saved and named per day
+        ("hey-claude 2026-11-09"); with it off, nothing is written to disk."""
+        from .config import STATE_DIR
+
+        a = self.cfg["agent"]
+        day = self.day = session_name(self.cfg.get("conversation"))
         args = ["--model", a["model"], "--output-format", "stream-json", "--verbose",
                 "--permission-mode", a["permission_mode"], "--permission-prompts", "none",
-                "--append-system-prompt", AGENT_PROMPT, "--name", "hey-claude assistant"]
+                "--append-system-prompt", AGENT_PROMPT, "--name", day or "hey-claude assistant"]
+        if not day:
+            args.append("--no-session-persistence")
         if a.get("allowed_tools"):
             args += ["--allowedTools", ",".join(a["allowed_tools"])]
         mcp = list(a.get("mcp_configs") or [])
@@ -332,12 +450,13 @@ class Agent:
         if mcp:
             args += ["--mcp-config", *mcp]
         args += [str(x) for x in a.get("extra_args") or []]
-        self.chat = _CliChat(exe, args, cwd=a.get("cwd") or str(ROOT), persistent=True,
-                             max_turns=int(a.get("max_turns", 30)), final_only=True, name="agent",
-                             timeout=float(a.get("timeout", 180)))
-        self.reported = False
+        return args
 
     def ask(self, text: str):
+        if session_name(self.cfg.get("conversation")) != self.day:   # a new day, or "save" changed
+            with self.chat.lock:
+                self.chat.args = self._args()
+                self.chat.close()          # the next stream() starts a new process
         for chunk in self.chat.stream(text):
             yield chunk
         if not self.reported and self.chat.init_info:
@@ -351,7 +470,11 @@ class Agent:
 
 
 class Brain:
+    convo: Transcript | None = None
+
     def __init__(self, cfg: dict):
+        self.cfg = cfg
+        self.convo = Transcript(cfg.setdefault("conversation", {}))
         self.projects = Projects(cfg["projects"])
         fast = cfg["fast"]
         backend = fast["backend"]
@@ -359,6 +482,7 @@ class Brain:
             backend = "sdk" if os.environ.get("ANTHROPIC_API_KEY") else "cli"
         self.backend = backend
         exe = find_claude(cfg["claude"].get("exe")) if backend == "cli" or cfg["agent"]["enabled"] else None
+        self.exe = exe
         self.agent = Agent(cfg, exe) if cfg["agent"]["enabled"] else None
         sp = system_prompt(self.projects, has_agent=self.agent is not None)
         if backend == "sdk":
@@ -393,8 +517,69 @@ class Brain:
         if self.agent:
             self.agent.close()
 
+    # -- shared conversation -----------------------------------------------------
+    def with_context(self, consumer: str, chat, text: str) -> str:
+        """`text` plus the conversation turns `consumer` hasn't seen."""
+        if self.convo is None:
+            return text
+        out = self.convo.prompt_for(consumer, getattr(chat, "epoch", 0), text)
+        if out != text:
+            print(f"[context] {consumer} gets {out.count('User: ')} earlier turn(s)")
+        return out
+
+    def lookup(self, text: str):
+        """Tier (b), with the shared conversation."""
+        yield from self.agent.ask(self.with_context("agent", self.agent.chat, text))
+
+    def forget(self):
+        """'Start fresh': a new conversation, and new warm processes (in the
+        background) so nothing of the old one is remembered."""
+        if self.convo is not None:
+            self.convo.reset("start fresh")
+
+        def recycle():
+            for name, chat in (("fast", self.chat), ("agent", self.agent.chat if self.agent else None)):
+                if chat is None:
+                    continue
+                try:
+                    chat.recycle(warm=True)
+                    print(f"[conversation] {name} restarted")
+                except Exception as e:
+                    print(f"[conversation] {name} restart failed: {e}")
+        threading.Thread(target=recycle, daemon=True, name="forget").start()
+
+    def task_question_cmd(self, task, question: str) -> tuple[list[str], str]:
+        """`claude -p <question> --resume <session> --fork-session ...` and its folder."""
+        c = self.cfg.get("conversation") or {}
+        args = ["--resume", task.session_id, "--fork-session", "--no-session-persistence",
+                "--output-format", "stream-json", "--verbose",
+                "--permission-mode", "default", "--permission-prompts", "none",
+                "--allowedTools", "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(git show:*)",
+                "--append-system-prompt", TASK_QA_PROMPT]
+        if c.get("task_question_model"):
+            args += ["--model", str(c["task_question_model"])]
+        return args, task.path
+
+    def ask_task(self, task, question: str):
+        """Answer a question about a finished task by resuming its session
+        headlessly (forked and not saved, so the task's own session is left as
+        it was; read-only tools). Yields the answer."""
+        args, cwd = self.task_question_cmd(task, question)
+        exe = self.exe or find_claude(self.cfg["claude"].get("exe"))
+        timeout = float((self.cfg.get("conversation") or {}).get("task_question_timeout") or 120)
+        chat = _CliChat(exe, args, cwd=cwd, persistent=False, final_only=True, name="task-question", timeout=timeout)
+        # Said again in the message: after a long session the system prompt alone gets markdown back.
+        yield from chat.stream(question + "\n\n(This answer is read aloud: one to three short plain "
+                               "sentences, no markdown, bullet points, file paths or code.)")
+
     def handle(self, text: str):
+        if self.convo is not None:
+            self.convo.expire_if_idle()
         routed = local_route(text, self.projects)
+        if routed is None and self.convo is not None and _IT_RE.match(text.strip()):
+            tid = self.convo.last_task_id()
+            if tid:
+                routed = ("task_ask", "#" + tid, text.strip())
         if routed and not (routed[0] == "lookup" and not self.agent):
             self.timing["route"] = "local-" + routed[0]
             yield routed
@@ -403,7 +588,7 @@ class Brain:
         t0 = time.perf_counter()
         buf = ""
         decided = None   # None until we know if it's a TASK/LOOKUP line or an answer
-        for chunk in self.chat.stream(text):
+        for chunk in self.chat.stream(self.with_context("fast", self.chat, text)):
             if "first_token" not in self.timing:
                 self.timing["first_token"] = time.perf_counter() - t0
             if decided is None:

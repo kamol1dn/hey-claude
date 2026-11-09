@@ -33,6 +33,7 @@ LIVE = (
     "tasks.",                        # read when each task starts
     "projects",                      # spoken routing; whisper hints + quick-model prompt after restart
     "agent.filler",
+    "conversation.",                 # read per request (save: the agent's next lookup)
     "island.",
     "app.",                          # hotkey re-registered, autostart toggled, guard re-read
 )

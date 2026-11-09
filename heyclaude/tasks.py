@@ -71,6 +71,49 @@ def extract_summary(result: str) -> str:
     return _short(first, 200) or "It finished without saying anything."
 
 
+_RECENT = {"", "last", "latest", "previous", "recent", "most recent", "that", "this", "the", "my", "it",
+           "current", "running", "one", "last one", "that one", "this one", "same"}
+_STOP = {"the", "a", "an", "my", "task", "job", "session", "that", "this", "which", "in", "on", "for",
+         "to", "of", "and", "with", "about", "one", "it"}
+
+
+def find_task(tasks: list[Task], ref: str | None, projects=None, running: bool | None = None) -> Task | None:
+    """The task a spoken reference means: "last" / nothing = the most recent;
+    a project name ("inha app", misheard is fine) = its most recent task;
+    otherwise the task whose prompt shares the most words with `ref`.
+    running=True/False limits it to running / finished tasks."""
+    from .brain import norm
+
+    pool = [t for t in tasks if running is None or (t.status in ("starting", "running")) == running]
+    pool.sort(key=lambda t: t.started)
+    if not pool:
+        return None
+    r = norm(ref or "")
+    r = " ".join(w for w in r.split() if w not in ("task", "job", "session"))
+    if r in _RECENT:
+        return pool[-1]
+    if projects is not None:
+        key = projects.resolve(r)
+        if not key:
+            words = r.split()
+            for n in range(len(words), 0, -1):          # "inha app login" -> "inha app"
+                key = projects.resolve(" ".join(words[:n]))
+                if key:
+                    break
+        if key:
+            hit = [t for t in pool if t.project == key]
+            if hit:
+                return hit[-1]
+    want = {w for w in r.split() if w not in _STOP and len(w) > 2}
+    best, score = None, 0
+    for t in pool:
+        have = set(norm(t.prompt + " " + t.project).split())
+        s = len(want & have)
+        if s and s >= score:
+            best, score = t, s
+    return best
+
+
 class TaskManager:
     def __init__(self, cfg: dict, on_change=None, on_finish=None):
         self.cfg = cfg["tasks"]
@@ -103,13 +146,13 @@ class TaskManager:
     def running(self) -> list[Task]:
         return [t for t in self.tasks.values() if t.status in ("starting", "running")]
 
-    def command(self, prompt: str) -> list[str]:
+    def command(self, prompt: str, name: str | None = None) -> list[str]:
         c = self.cfg
         args = [self.exe, "-p", prompt, "--output-format", "stream-json", "--verbose",
                 "--permission-mode", c["permission_mode"],
                 "--permission-prompts", "none",
                 "--append-system-prompt", SUMMARY_INSTRUCTION,
-                "--name", "voice: " + _short(prompt, 40)]
+                "--name", "voice: " + _short(name or prompt, 40)]
         if c.get("allowed_tools"):
             args += ["--allowedTools", ",".join(c["allowed_tools"])]
         if c.get("model"):
@@ -117,7 +160,9 @@ class TaskManager:
         args += [str(a) for a in c.get("extra_args") or []]
         return args
 
-    def spawn(self, project: str, path: str, prompt: str) -> Task:
+    def spawn(self, project: str, path: str, prompt: str, context: str = "") -> Task:
+        """Start a run. `context` (the conversation that led to it) is appended
+        to what Claude Code is told; `prompt` alone is what the island shows."""
         if len(self.running()) >= int(self.cfg.get("max_parallel", 3)):
             raise RuntimeError("too many tasks are already running")
         tid = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
@@ -125,7 +170,8 @@ class TaskManager:
         with self.lock:
             self.tasks[tid] = t
         proc = subprocess.Popen(
-            self.command(prompt), cwd=path, stdin=subprocess.DEVNULL,
+            self.command(prompt + ("\n\n" + context if context else ""), name=prompt), cwd=path,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
             errors="replace", bufsize=1, env=child_env(), creationflags=NO_WINDOW,
         )
@@ -135,11 +181,23 @@ class TaskManager:
         self.on_change(t)
         return t
 
-    def stop(self, tid: str):
+    def stop(self, tid: str) -> bool:
         p = self.procs.get(tid)
         if p and p.poll() is None:
-            p.terminate()
             self.tasks[tid].status = "stopped"
+            p.terminate()
+            return True
+        return False
+
+    def find(self, ref: str | None, projects=None, running: bool | None = None) -> Task | None:
+        return find_task(list(self.tasks.values()), ref, projects, running)
+
+    def open_terminal(self, t: Task, popen=subprocess.Popen):
+        """A new console window running the interactive session in the task's folder."""
+        if not t.session_id:
+            raise RuntimeError("that task has no session to resume")
+        return popen(["cmd", "/k", self.exe, "--resume", t.session_id], cwd=t.path,
+                     creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
 
     def _pump(self, t: Task, proc: subprocess.Popen):
         raw = open(LOG_DIR / f"{t.id}.jsonl", "w", encoding="utf-8")

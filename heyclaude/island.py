@@ -223,7 +223,7 @@ class Island(QWidget):
             w, h = max(120, QFontMetrics(self.font_small).horizontalAdvance(label) + 46), 28
         elif self.mode == "off":
             w, h = (170 if n_running or "until" in self.text else 130), 28
-        elif self.mode in ("listening", "holding"):
+        elif self.mode in ("listening", "holding", "followup"):
             w, h = 300, PILL_H
         elif self.mode in ("thinking", "speaking", "loading", "error"):
             w = min(560, max(300, fm.horizontalAdvance(self.text) + 80))
@@ -264,6 +264,7 @@ class Island(QWidget):
     # -- inputs from the assistant --------------------------------------------
     def set_state(self, mode: str, text: str):
         self.mode, self.text = mode, text
+        self.mode_at = time.perf_counter()
         self._place()
         self.update()
         snap = os.environ.get("HEYCLAUDE_SNAP")   # debug: save a png of each state
@@ -424,6 +425,28 @@ class Island(QWidget):
         p.setFont(self.font_small)
         p.setPen(ACCENT)
         p.drawText(QRectF(x0 + len(self.levels) * (bw + 3) + 4, 0, 60, head.height()), Qt.AlignVCenter, "holding")
+
+    def _paint_followup(self, p, head, t):
+        """Listening again without the wake word; the ring drains as the window runs out."""
+        cy = head.center().y()
+        self._dot(p, 20, cy, 4, ACCENT)
+        try:
+            total = float(self.text or 5)
+        except ValueError:
+            total = 5.0
+        left = max(0.0, 1 - (time.perf_counter() - getattr(self, "mode_at", 0)) / max(total, 0.1))
+        p.setPen(QPen(ACCENT, 1.6))
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(QRectF(20 - 9, cy - 9, 18, 18), 90 * 16, int(left * 360 * 16))
+        bw, x0 = 5, 40
+        p.setPen(Qt.NoPen)
+        p.setBrush(FG)
+        for i, v in enumerate(self.levels):
+            hh = 3 + v * (head.height() - 16)
+            p.drawRoundedRect(QRectF(x0 + i * (bw + 3), cy - hh / 2, bw, hh), 2, 2)
+        p.setFont(self.font_small)
+        p.setPen(DIM)
+        p.drawText(QRectF(x0 + len(self.levels) * (bw + 3) + 4, 0, 70, head.height()), Qt.AlignVCenter, "go on…")
 
     def _paint_thinking(self, p, head, t):
         cy = head.center().y()

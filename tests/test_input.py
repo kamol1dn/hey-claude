@@ -152,7 +152,7 @@ class _Tasks:
     def __init__(self):
         self.spawned, self.tasks = [], {}
 
-    def spawn(self, project, path, task):
+    def spawn(self, project, path, task, context=""):
         self.spawned.append((project, path, task))
         return type("T", (), {"id": "t1"})()
 

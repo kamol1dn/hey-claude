@@ -3,7 +3,10 @@
     .venv\\Scripts\\python tools\\make_test_wav.py "Hey Jarvis" "what is the capital of France?" samples\\q.wav [Zira]
 
 The wake phrase and the request are rendered separately with a short pause
-between them, like a person would say it.
+between them, like a person would say it. Use "-" as the wake phrase for a
+follow-up clip (said within the follow-up window, so no wake word):
+
+    .venv\\Scripts\\python tools\\make_test_wav.py - "and the weather there?" samples\\f.wav
 """
 import os
 import sys
@@ -41,10 +44,13 @@ def main(wake, request, out, voice_name=None):
         for i in range(vs.Count):
             if voice_name.lower() in vs.Item(i).GetDescription().lower():
                 v.Voice = vs.Item(i)
-    a = render(v, wake, -1)
     b = render(v, request, 0)
-    gap = np.zeros(int(16000 * 0.35), np.int16)
-    audio = np.concatenate([a, gap, b])
+    if wake.strip() in ("", "-"):
+        audio = b
+    else:
+        a = render(v, wake, -1)
+        gap = np.zeros(int(16000 * 0.35), np.int16)
+        audio = np.concatenate([a, gap, b])
     with wave.open(out, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)

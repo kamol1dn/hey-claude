@@ -103,6 +103,7 @@ mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ fas
 | `--gpu` / `--cpu` | whisper on the GPU / the CPU, overriding `stt.device`. |
 | `--text` | type requests instead of speaking (no mic, no whisper). |
 | `--simulate x.wav` | use a 16 kHz mono wav as the microphone. Good for testing and timing. |
+| `--simulate a.wav b.wav …` | a simulated conversation: each clip after the first is played into the follow-up window (so it needs no wake word; make one with `tools\make_test_wav.py - "and tomorrow?" f.wav`), or, if that's closed, once it's idle. It waits for running tasks to finish first. |
 | `--exit` | with `--simulate`: quit after the request (and any task it started) is done. |
 | `--muted` | start with listening off (mic closed); the hotkey and "Talk now" still work. |
 | `--quit` | ask the running hey-claude to quit, then exit. |
@@ -260,6 +261,11 @@ Make a test clip with a Windows voice:
 | *hey claude … in the inha app, find why login is slow* | the model notices it's real work and turns it into a task |
 | *hey claude … who messaged me on Telegram today?* | "Let me check." → the warm tool agent answers (needs the MCP set up, see below) |
 | *hey claude … how are my tasks going?* | spoken status of running tasks |
+| *(after an answer, no wake word)* … *and the weather there?* | a follow-up: for 5 s after it stops talking it listens without the wake word (the island shows a draining ring). "Thanks", "that's all" or silence ends it |
+| *… what did the inha app task change?* | resumes that task's session headlessly (`claude -p --resume <id> --fork-session`, read-only tools) and reads the answer out. Tasks are found by project, words of the task, or "the last task"; right after a task is announced, "what did it change?" works too |
+| *… stop the task* / *stop the inha app task* / *stop all tasks* | stops it (asks which one if several are running) |
+| *… resume the last task in a terminal* | opens a console running `claude --resume <id>` in the task's folder |
+| *… start fresh* | forgets the conversation (and restarts the warm processes so they forget too) |
 | click the idle pill | talk without the wake word |
 | press the hotkey (`Ctrl+Alt+Space`) | talk, or type into the field that opens (Enter sends) |
 | click while speaking, or the hotkey | stop speaking (and, with the hotkey, listen again) |
@@ -367,19 +373,35 @@ and editing files are denied unless you add them. To see every tool name, run
 
 ## Conversations and sessions
 
-- **Follow-ups work in tiers (a) and (b).** Each tier is one long-lived
-  process that keeps the conversation, so "what's the capital of France?" →
-  "and Germany?" works. The fast process is recycled after 20 turns and the
-  agent after 30. Both start fresh each time the app starts.
-- **The two tiers don't share memory yet.** A follow-up that switches tiers
-  ("what's on my calendar?" → "and what's the weather then?") starts without
-  the other tier's context. This is on the roadmap.
-- **What gets saved:** the fast process runs with `--no-session-persistence`,
-  so nothing is written to disk. The agent **is** a saved Claude Code session
-  named "hey-claude assistant", one per app launch, stored under
-  `~\.claude\projects\D--coding-hey-claude\`. You can `claude --resume` it,
-  but like tasks it doesn't appear in the desktop app's Code tab. Each task
-  is its own saved session.
+- **One conversation across all tiers.** hey-claude keeps a rolling
+  transcript (`heyclaude/conversation.py`) and gives each tier the turns it
+  hasn't seen: the quick model and the tool agent remember their own turns,
+  so they're only sent what the *other* tiers said since they last spoke
+  (everything, after a process restart). A task gets the whole recent
+  conversation appended to its prompt. So "what's on my calendar?" (agent) →
+  "and the weather then?" (agent or quick model) → "start a task in X:
+  write that down" keeps context. The window is the last
+  `conversation.max_turns` turns, at most `conversation.max_tokens`, and a
+  new conversation starts after `conversation.idle_reset_s` (10 min) of
+  silence or when you say "start fresh".
+- **Follow-ups without the wake word.** After an answer (and after a task is
+  announced) it listens for `conversation.followup_s` seconds once its own
+  voice has finished. It waits for the speaking gate (TTS plus
+  `wake.speaking_tail_s`), even with `wake.suppress_while_speaking` off, so it
+  can't hear itself. "Thanks", "that's all", "no thanks" or silence ends it.
+  Set `followup_s: 0` to turn it off.
+- **Typed requests** go through the same entry point,
+  `Assistant.request(text, source="typed")`, so they join the conversation
+  too (no follow-up window is opened for them).
+- **What gets saved:** by default nothing. The quick model and the tool agent
+  run with `--no-session-persistence`. With `conversation.save: true`
+  (Settings → Models → Conversation → "Save this conversation") each turn is
+  appended to `state/conversations/<date>.jsonl` (git-ignored) and picked up
+  again after a restart if it's recent, and the agent's Claude Code session
+  is saved and named "hey-claude <date>" (one per day; a new one starts at
+  midnight or when the agent is recycled after `agent.max_turns`). Tasks are
+  always their own saved sessions. Questions about a task use a forked,
+  unsaved copy of its session, so the task's own session is left as it was.
 
 ## Measured latency
 
@@ -467,14 +489,16 @@ heyclaude/
                   webrtcvad recorder, wav simulator
   wake_samples.py record your own "hey claude" clips (state/wake_samples), zip them for training
   stt.py          faster-whisper: GPU by default, CPU when the GPU is busy or fails
-  brain.py        router, tier (a) chat (CLI or SDK), tier (b) warm tool agent, TASK/LOOKUP detection
+  brain.py        router, tier (a) chat (CLI or SDK), tier (b) warm tool agent, TASK/LOOKUP detection,
+                  voice task control routes, questions about a task (claude -p --resume)
+  conversation.py the shared transcript (what each tier is told), follow-up window, end phrases
   tasks.py        headless claude runs, stream-json parsing, logs, session ids
   tts.py          SAPI (direct COM), Piper, Kokoro; sentence streaming
   island.py       the pill, task list, log window
   claude_cli.py   finds claude.exe, launch flags
 tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
                   wake_eval.py (wake word hit rate, false wakes per hour, threshold)
-tests/            offline tests (python tests\test_offline.py, python tests\test_wake.py)
+tests/            offline tests (python tests\test_offline.py, tests\test_wake.py, tests\test_conversation.py)
 models/           the trained hey_claude.onnx goes here (git-ignored)
 docs/             training a "hey claude" wake word
 ```
@@ -495,8 +519,6 @@ docs/             training a "hey claude" wake word
 - Started from inside a Claude Code session, hey-claude strips the
   parent-session variables (`CLAUDE_CODE_SESSION_ID` etc.) so each task is
   its own top-level session.
-- Not built yet: answering follow-up questions *about* a finished task
-  (resume it in a terminal for now). See [ROADMAP.md](ROADMAP.md).
 - With the default VAD, steady background sound (music, a video playing) can
   count as speech, so a "Talk now" with nobody talking may record until
   `listen.max_seconds` and whisper may invent a phrase. Silero VAD is planned

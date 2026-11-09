@@ -260,8 +260,7 @@ def main(argv=None, harness=None):
         # M5: response widgets that act (a timer ending is said aloud)
         def widget_action(wid, action, payload):
             if action == "timer_done":
-                label = str(payload or "").strip()
-                asst.announce(f"Your {label} timer is done." if label else "Your timer is done.")
+                asst.timer_widget_done(str(payload or ""))     # M10: local timers announce themselves
         if hasattr(island, "widget_action"):
             island.widget_action.connect(widget_action)
 

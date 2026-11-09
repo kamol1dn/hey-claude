@@ -297,6 +297,31 @@ tts:
   piper_exe: piper
   piper_model: null
 
+instant:
+  # M10: simple commands run locally, no model: "volume 30", "turn it up a bit",
+  # "mute", "dark mode", "brightness down", "next song", "pause", "what's
+  # playing", "set a timer for 5 minutes", "open Spotify", "lock the screen",
+  # "what time is it", "Wi-Fi off". Same tools, island effect and "undo that"
+  # as when the agent does it (M9), in well under a second. Follow-ups work
+  # on the last one: "a bit more", "again", "the other way", "make it 40".
+  # Anything it isn't sure about still goes to Claude. Sleep, restart and
+  # shutdown are never instant (they keep the click to confirm).
+  enabled: true
+  # The paraphrase classifier (for wordings the grammar doesn't know, like "my
+  # ears hurt"): how similar to one of its example phrasings a request must be,
+  # 0-1. Higher = stricter (more goes to Claude). The grammar ignores this.
+  threshold: 0.62
+  classifier: true        # false = the grammar only
+  ack: speak              # speak: a short spoken ack ("Volume 30."); silent: just the island effect
+                          # (answers like the time, and errors, are always spoken)
+  step: 10                # "turn it up" = 10; "a bit" = half of it, "a lot" = 2.5x
+  context_s: 120          # "a bit more" / "again" / "the other way" apply to the last command this recent
+  radios: true            # "Wi-Fi off" / "Bluetooth on" instantly (false: they go to the agent)
+  # Requests the agent handled with exactly one settings change are noted in
+  # state/intents_misses.jsonl (local, never committed). Say "teach it" right
+  # after to make that wording instant (state/intents_taught.yaml).
+  learn: true
+
 weather:
   # M5: the built-in weather tool (Open-Meteo: no key, no account). The tool
   # agent calls it for weather questions, and the island shows the forecast

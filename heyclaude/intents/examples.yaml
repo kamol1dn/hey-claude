@@ -1,0 +1,275 @@
+# Example phrasings for the instant-command classifier (heyclaude/intents/classifier.py).
+# The grammar (grammar.py) catches the usual wordings; these teach the second
+# layer the looser ones. "none" holds decoys: things that sound like commands
+# but are not (questions about volume, songs, screens, timers...). Phrasings
+# you teach it by voice ("teach it") go to state/intents_taught.yaml, not here.
+#
+# Keep the tests' corpus (tests/fixtures/intents_corpus.yaml) out of this file:
+# it measures how well these generalise.
+
+volume.up:
+  - it's way too quiet in here
+  - I can barely hear the music
+  - give me more sound
+  - pump up the jam
+  - crank the music
+  - make the music louder please
+  - I want it louder
+  - let's have it louder
+  - boost the audio a bit
+  - the music needs to be louder
+  - let me hear it better, louder
+  - more sound please
+  - raise the sound level
+  - the speakers are too quiet
+  - louder music please
+  - make the sound bigger
+  - bump the sound
+  - turn the music up loud
+  - the audio is too soft
+  - crank up the tunes
+  - I need it a bit louder
+
+volume.down:
+  - that's deafening
+  - it's blasting, bring it down
+  - my ears hurt, too loud
+  - lower the music a little
+  - the music is way too loud
+  - make the music quieter please
+  - I want it quieter
+  - the sound is too much
+  - tone it down a bit
+  - the speakers are too loud
+  - keep the noise down
+  - less loud please
+  - quieter music please
+  - cut the music volume a bit
+  - lower the music before the neighbours complain
+  - drop the sound a little
+  - make it less loud
+  - soften the music
+  - the audio is too loud for me
+  - can we have it a bit quieter
+
+volume.mute:
+  - mute everything
+  - silence the speakers
+  - kill all the sound
+  - no sound please
+  - make it silent
+  - switch the audio off
+  - mute the audio please
+  - go silent
+  - put the sound on mute
+  - mute the speakers now
+
+volume.unmute:
+  - turn the sound back on
+  - bring the audio back
+  - unmute the speakers
+  - give me my sound back
+  - take it off mute
+  - switch the audio back on
+  - unmute everything
+  - put the sound back
+
+brightness.up:
+  - I can't see my screen it's too dim
+  - the screen is too dark
+  - make the display brighter
+  - light up the screen more
+  - more light on the screen please
+  - boost the screen brightness
+  - the monitor is too dim
+  - raise the display brightness
+  - crank up the screen
+  - brighten the display a bit
+  - turn the screen up
+
+brightness.down:
+  - the screen is blinding me
+  - my eyes hurt from the screen
+  - too much glare on the screen
+  - make the display darker
+  - lower the screen brightness
+  - the monitor is too bright
+  - dim the display a bit
+  - reduce the glare of the screen
+  - tone down the screen
+  - the screen is too bright at night
+  - turn the screen down
+
+theme.dark:
+  - switch everything to dark
+  - make windows black
+  - I want the dark look
+  - give me the night theme for windows
+  - dark colours for windows please
+  - put windows in dark mode
+  - go to dark theme
+  - use dark colors everywhere
+  - dark appearance please
+
+theme.light:
+  - switch everything to light
+  - make windows white again
+  - I want the light look
+  - light colours for windows please
+  - put windows in light mode
+  - go to light theme
+  - use light colors everywhere
+  - light appearance please
+  - bright theme please
+
+media.next:
+  - I'm done with this song
+  - I don't like this one, next
+  - move on to the next song
+  - this song is boring, skip
+  - next tune please
+  - play something different, skip this track
+  - go to the following song
+  - skip past this track
+  - move to the next track
+  - jump to the next song
+
+media.previous:
+  - play the song before this one
+  - go back to the last track
+  - put the previous song back on
+  - back to the song before
+  - the one before this please, previous track
+  - play what was playing before
+  - go back one song
+
+media.pause:
+  - hold the music for a second
+  - pause the song for a bit
+  - stop the song for now
+  - pause playback please
+  - freeze the music
+  - stop the track
+  - pause the podcast
+  - put the music on hold
+  - pause what's playing
+
+media.play:
+  - start the music again
+  - resume the song
+  - carry on playing the music
+  - play the music again
+  - unpause the song
+  - continue the podcast
+  - get the music going again
+  - resume playback please
+  - start playing again
+
+media.now_playing:
+  - what's this tune
+  - who's singing right now
+  - what music is on
+  - tell me what song this is
+  - which track is playing right now
+  - what's the song playing
+  - who is the artist of this song
+  - what is this track called
+
+timer.cancel:
+  - I don't need the timer anymore
+  - get rid of the timer
+  - scrap the timer
+  - turn the timer off
+  - cancel my countdown
+  - kill the timer
+
+none:
+  - what's the volume of a cube
+  - how loud is a rocket launch
+  - why is my music so quiet on bluetooth
+  - the sound of silence is a great song
+  - write a poem about loud music
+  - how do I change the volume on my phone
+  - what's the brightest star in the sky
+  - is the screen on my laptop OLED
+  - how bright is a lightbulb
+  - who invented dark mode
+  - is dark mode better for your eyes
+  - the movie was too dark
+  - the light in the kitchen is broken
+  - tell me about the dark ages
+  - what's the next step in the recipe
+  - what's the next episode of the show about
+  - skip to the conclusion of the article
+  - skip the intro and tell me the answer
+  - pause for a moment and think
+  - let me pause and think about that
+  - play a game with me
+  - play chess with me
+  - what's the last song you'd want to hear
+  - who sang the national anthem at the super bowl
+  - recommend me a song
+  - add this song to my playlist
+  - like this song
+  - how long is a football match
+  - how do kitchen timers work
+  - write a countdown timer in javascript
+  - mute the microphone
+  - unmute me on the call
+  - mute this person in the chat
+  - turn on the lights
+  - dim the lights in the living room
+  - turn off the tv
+  - make the text bigger
+  - zoom in on the screen
+  - take a screenshot
+  - what's on my screen
+  - read the screen to me
+  - lower the price of the item
+  - raise the temperature
+  - turn up the heat
+  - turn down the thermostat
+  - brighten up my day
+  - say something louder
+  - speak louder please
+  - speak quieter
+  - talk slower
+  - the music in that cafe was too loud
+  - my neighbours play music too loud
+  - the song was too sad
+  - I love this song
+  - this song reminds me of summer
+  - what does the screen resolution mean
+  - set up my calendar for next week
+  - book a meeting for five minutes from now
+  - send a message to mom
+  - what's the weather like
+  - is it going to rain
+  - what's the time difference with tokyo
+  - remind me to buy milk
+  - wake me up at seven
+  - next question
+  - next please, what else is there
+  - go back to what we were talking about
+  - previous answer was wrong
+  - play back what I said
+  - play the latest episode of my podcast on spotify
+  - play some taylor swift
+  - play jazz music
+  - turn on my playlist on spotify called focus
+  - stop the task
+  - stop the build
+  - stop the download
+  - pause the download
+  - stop the recording
+  - pause the game
+  - my roommate is too loud
+  - the party next door is too loud
+  - the kids are too loud today
+  - the traffic outside is too noisy to sleep
+  - the street is too loud at night
+  - the dog is too loud
+  - the fan on my laptop is too loud
+  - the screen on my phone is too dim
+  - the sun is too bright today
+  - the room is too dark

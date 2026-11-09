@@ -44,6 +44,8 @@ corpus:
   - ["Volume twenty.", volume.set, {level: 20}]
   - ["Okay, volume 55 please.", volume.set, {level: 55}]
   - ["Please set the master volume to 25%.", volume.set, {level: 25}]
+  - ["Turn it up to 50.", volume.set, {level: 50}]
+  - ["Turn the music down to 20 percent.", volume.set, {level: 20}]
   # -- volume: up / down ------------------------------------------------------------
   - ["Volume up.", volume.step, {delta: 10}]
   - ["Volume down.", volume.step, {delta: -10}]
@@ -396,7 +398,7 @@ context:
      ["Less.", volume.step, {delta: -10}]]
   - [["Volume 30.", volume.set, {level: 30}], ["Make it 40.", volume.set, {level: 40}],
      ["A little more.", volume.step, {delta: 5}], ["Higher.", volume.step, {delta: 10}]]
-  - [["Brightness 50.", brightness.set, {level: 50}], ["Turn it up.", brightness.step, {delta: 10}],
+  - [["Brightness 50.", brightness.set, {level: 50}], ["Turn it up.", brightness.step, {delta: 10}], ["Turn it up to 80.", brightness.set, {level: 80}],
      ["Down a bit.", brightness.step, {delta: -5}], ["Set it to 70.", brightness.set, {level: 70}]]
   - [["Next song.", media.next, {}], ["Again.", media.next, {}], ["Next.", media.next, {}],
      ["No, the other way.", media.previous, {}], ["Previous.", media.previous, {}]]

@@ -105,6 +105,24 @@ def _vol_set(m, ctx):
     return _level(m)
 
 
+_IT_TO = (r"(?:turn|crank|pump|bring|dial|knock|take)\s+(?P<it>it|things|everything|the music|music|the sound)\s+"
+          r"(?:up|down|back)\s+to\s+(?:(?:about|around|like|roughly|exactly)\s+)?" + NUM + r"(?:\s+(?:percent|per cent))?")
+
+
+@rule("volume.set", _IT_TO)
+def _vol_it_to(m, ctx):
+    if _g(m, "it") in ("it", "things", "everything") and ctx.domain == "brightness":
+        return None                                    # "turn it up to 80" right after a brightness change
+    return _vol_set(m, ctx)
+
+
+@rule("brightness.set", _IT_TO)
+def _br_it_to(m, ctx):
+    if _g(m, "it") not in ("it", "things", "everything") or ctx.domain != "brightness":
+        return None
+    return _level(m)
+
+
 @rule("volume.set",
       r"(?:(?:turn|crank|pump|bring|put|take|push|set)\s+)?" + VOL + r"\s+(?:all the way|right|fully|completely)\s+(?P<d>up|down)",
       r"(?:turn|crank|pump|bring|put|take|push)\s+(?:it|the music|music|things|everything|the sound|the volume|"

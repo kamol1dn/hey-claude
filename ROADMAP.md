@@ -424,7 +424,7 @@ transitions measured; no focus stealing.
 
 ## M6: Characters as plug-ins (pick one in Settings, add new ones by PR)
 
-**Goal:** the character is a swappable pack behind one interface. All five
+**Goal:** the character is a swappable pack behind one interface. All five (Echo, Cinder, Wren, Tycho, Hum)
 original designs in `docs/character-options.html` ship as built-in packs, the
 user picks one in Settings, and anyone can add a new pack with a PR. The
 interface grows as hey-claude gains features, without breaking older packs.

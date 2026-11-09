@@ -47,6 +47,7 @@ class Assistant:
         self.stopping = False
         self.on_listening = None                # callback(on: bool, paused_until: float | None)
         self.stt: SpeechToText | None = None
+        self.hold = None                        # holdkey.HoldKey, set by __main__ (mic runs only)
 
     # -- UI helpers -----------------------------------------------------------
     def set_mode(self, mode, text=""):
@@ -87,6 +88,11 @@ class Assistant:
             self.on_listening(on, self.paused_until)
         if self.ready.is_set() and self.mode in ("idle", "off"):
             self.rest()
+
+    def on_hold(self, held: bool):
+        """Hold key went down/up (hook thread). Only shown while listening."""
+        if self.mode in ("listening", "holding"):
+            self.set_mode("holding" if held else "listening")
 
     def talk_now(self):
         """Same as clicking the island: listen for one request without the wake
@@ -269,8 +275,16 @@ class Assistant:
             self.speaker.stop()                 # barge-in: wake word cuts off speech
             self.gen += 1
             self.set_mode("listening")
-            audio, t_end = record_utterance(blocks, self.cfg["listen"], on_level=self.ui.level.emit,
-                                            stop_event=None if (self.simulate or one_shot) else self._abort_rec)
+            hold = self.hold if (self.hold is not None and not self.simulate) else None
+            if hold:
+                hold.arm()
+            try:
+                audio, t_end = record_utterance(blocks, self.cfg["listen"], on_level=self.ui.level.emit,
+                                                stop_event=None if (self.simulate or one_shot) else self._abort_rec,
+                                                hold=hold.state if hold else None)
+            finally:
+                if hold:
+                    hold.disarm()
             self.wake.reset()
             if audio is None:
                 self.rest()

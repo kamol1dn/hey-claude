@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleS
                                QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem,
                                QTabWidget, QVBoxLayout, QWidget)
 
-from . import config, hotkey
+from . import config, holdkey, hotkey
 
 ACCENT = "#D97757"
 
@@ -77,6 +77,9 @@ TIPS = {
     "app.listening": "Wake word on at start. Off = the mic stays closed until you turn listening on.",
     "app.hotkey": "Global push-to-talk, e.g. ctrl+alt+space, ctrl+shift+h, win+alt+j, f9. Empty = no hotkey.",
     "app.start_with_windows": "Adds a Startup-folder shortcut (pythonw -m heyclaude, no console window).",
+    "listen.hold_key": "Hold while talking to keep listening through pauses; let go and it stops when you stop "
+                       "talking. ctrl (either), right ctrl, caps lock, f13... Empty = off. Pressing another key "
+                       "during the hold (Ctrl+C...) makes it a shortcut, not a hold.",
     "wake.model": "Stock openWakeWord model (hey_jarvis, alexa, hey_mycroft, hey_rhasspy) until a custom "
                   "\"hey claude\" one is trained (see docs/train-hey-claude.md), or a path to a .onnx file.",
     "wake.threshold": "How sure the wake-word model must be. Higher = fewer false wakes, but it may miss you.",
@@ -399,6 +402,9 @@ class SettingsWindow(QWidget):
         f.addRow("", self.lb_hotkey)
         self._recorder = _HotkeyRecorder(self.ed_hotkey, self._hotkey_changed)
         self.ed_hotkey.textChanged.connect(self._hotkey_changed)
+        self.ed_hold = QLineEdit()
+        self.ed_hold.setPlaceholderText("e.g. ctrl, right ctrl, caps lock (empty = off)")
+        self._row(f, "listen.hold_key", "Hold to keep listening", self.ed_hold)
         v.addWidget(g)
         v.addWidget(self._help("Settings marked <span style='color:%s'>restart</span> take effect the next time "
                                "hey-claude starts; everything else applies as soon as you save. "
@@ -581,6 +587,7 @@ class SettingsWindow(QWidget):
         self.ed_tasks_tools.setPlainText("\n".join(str(t) for t in (_get(cfg, "tasks.allowed_tools") or [])))
         self._perm_changed()
         self._hotkey_changed()
+        self.ed_hold.setText(str(_get(cfg, "listen.hold_key") or ""))
 
     @staticmethod
     def _tools(edit: QPlainTextEdit) -> list[str]:
@@ -610,6 +617,13 @@ class SettingsWindow(QWidget):
                 errors.append(f"Hotkey: {e}")
         _set(new, "app.hotkey", hk)
         _set(new, "app.start_with_windows", self.cb_autostart.isChecked())
+        hold = " ".join(self.ed_hold.text().lower().split())
+        if hold:
+            try:
+                holdkey.parse(hold)
+            except ValueError as e:
+                errors.append(f"Hold key: {e}")
+        _set(new, "listen.hold_key", hold)
 
         wake = self._combo_value(self.cmb_wake)
         if not wake:

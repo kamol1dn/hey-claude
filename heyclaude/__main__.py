@@ -120,11 +120,31 @@ def main():
             tray.set_hotkey_label("" if err else (spec or ""))
         return err
 
+    def set_hold_key(spec):
+        """Hold-to-keep-listening key ("" = off)."""
+        from .holdkey import HoldKey, parse
+        if not spec:
+            asst.hold = None
+            print("[hold] off")
+            return
+        try:
+            parse(spec)
+        except ValueError as e:
+            print(f"[hold] {e}")
+            return
+        if asst.hold is None:
+            asst.hold = HoldKey(spec, on_change=asst.on_hold)
+        else:
+            asst.hold.set_key(spec)
+        print(f"[hold] {spec}")
+
     def on_saved(new: dict, _changed: list):
         changed = asst.apply_config(new)
         print(f"[settings] saved: {', '.join(changed) or 'no changes'}"
               + (f"; restart needed for {', '.join(config.needs_restart(changed))}"
                  if config.needs_restart(changed) else ""))
+        if "listen.hold_key" in changed and interactive:
+            set_hold_key(cfg["listen"].get("hold_key"))
         if "app.hotkey" in changed:
             set_hotkey(cfg["app"].get("hotkey"))
         if "app.start_with_windows" in changed and interactive:
@@ -177,6 +197,7 @@ def main():
             print(f"[autostart] can't check: {e}")
         hk = GlobalHotkey(lambda: bridge.talk.emit())
         set_hotkey(cfg["app"].get("hotkey"))
+        set_hold_key(cfg["listen"].get("hold_key"))
 
         def poked(msg):
             print(f"[app] second launch: {msg}")
@@ -207,6 +228,8 @@ def main():
     asst.stop()
     if hk:
         hk.close()
+    if asst.hold:
+        asst.hold.close()
     try:
         asst.brain.close()
     except Exception:

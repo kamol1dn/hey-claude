@@ -21,6 +21,11 @@ listen:
   start_timeout: 5.0      # give up if no speech starts within this many seconds
   end_silence_ms: 700     # this much silence after speech ends the utterance
   max_seconds: 20
+  # Hold this key while talking to keep listening through pauses (silence won't
+  # end the utterance until you let go). ctrl = either Ctrl; also right ctrl,
+  # caps lock, f13... "" = off. Ctrl+C etc. during a hold count as shortcuts.
+  hold_key: ctrl
+  max_utterance_s: 180    # safety cap once a hold was used
 
 stt:
   # gpu: load gpu_model once into VRAM and keep it there; fall back to the CPU

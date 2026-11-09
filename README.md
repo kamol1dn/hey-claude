@@ -135,9 +135,23 @@ another app already owns the combination, hey-claude shows a tray balloon
 and runs without one. On this machine PowerToys holds `Ctrl+Alt+Space`;
 `Ctrl+Shift+Space`, `Win+Alt+Space`, `Ctrl+Alt+H` and `F9` were free.
 
+**Hold to keep listening** (`listen.hold_key`, default `ctrl`): if you
+pause to think mid-sentence, hold Ctrl while you talk. While it's down the
+island shows **holding** and silence never ends the request, however long the
+pause. Let go and it goes back to normal: it stops about 0.7 s after you
+stop talking (counted from the later of the release and your last word).
+You can press it before you start talking too. Pressing another key during
+the hold (Ctrl+C, Ctrl+V...) makes it a shortcut, not a hold. The key is
+watched only while the island is listening, by a low-level keyboard hook
+that passes every key through untouched. Once a hold is used, the length
+cap is `listen.max_utterance_s` (180 s) instead of `max_seconds`, and
+pauses longer than half a second are cut out before whisper, so a 30 s
+think-pause costs nothing. Other choices: `right ctrl`, `caps lock`, `f13`,
+or `""` to turn it off.
+
 **Settings window** (tray → Settings…) edits `config.yaml`, creating it from
 `config.example.yaml` the first time. Tabs: General (listening at start,
-hotkey with a Record… button, start with Windows), Voice & wake (wake model
+hotkey with a Record… button, hold key, start with Windows), Voice & wake (wake model
 and threshold; whisper device, GPU and CPU models, GPU precision, Premiere
 yield; voice, rate, a test button), Models (quick-answer backend and models, the tool agent on/off,
 model and filler line, task model, permission mode and parallel limit),
@@ -400,6 +414,7 @@ heyclaude/
                   crash restart, latency log
   tray.py         tray icon and menu
   hotkey.py       global push-to-talk hotkey (RegisterHotKey) and hotkey parsing
+  holdkey.py      hold-to-keep-listening key (low-level hook, armed only while listening)
   settings_ui.py  the settings window
   winsys.py       Startup shortcut, single-instance lock, "is Premiere running"
   applog.py       state/logs/app.log (rotating)

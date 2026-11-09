@@ -386,6 +386,103 @@ def test_assistant_thread_restarts_once_after_a_crash():
         A.time.sleep = sleep
 
 
+# -- hold key: a key-down/up timeline plus VAD frames -------------------------
+
+CTRL, C_KEY = 0xA2, 0x43
+TAIL = 9          # end_silence_ms 700 = 35 VAD frames = 9 blocks of 80 ms
+
+
+def _timeline(n, speech, keys=None, hold=True, **cfg_over):
+    """Feed n blocks; speech(i) says if block i is voiced; keys = {i: [(vk, down)]}.
+    Returns (audio, blocks consumed, hold state)."""
+    import numpy as np
+    from heyclaude.holdkey import HoldState
+    from heyclaude.listen import BLOCK, record_utterance
+    now = {"t": 0.0}
+    clock = lambda: now["t"]  # noqa: E731
+    hs = HoldState(frozenset({0xA2, 0xA3}), clock=clock)
+    hs.reset()
+    used = {"n": 0}
+
+    def gen():
+        for i in range(n):
+            now["t"] = i * 0.08
+            for vk, down in (keys or {}).get(i, []):
+                hs.key(vk, down)
+            used["n"] = i + 1
+            yield np.full(BLOCK, 1 if speech(i) else 0, np.int16)
+    cfg = {"vad_aggressiveness": 2, "end_silence_ms": 700, "start_timeout": 5.0, "max_seconds": 20,
+           "max_utterance_s": 180}
+    cfg.update(cfg_over)
+    audio, _ = record_utterance(gen(), cfg, hold=hs if hold else None,
+                                is_speech=lambda f: f[0] != 0, clock=clock)
+    return audio, used["n"], hs
+
+
+def test_no_hold_ends_on_silence():
+    audio, n, _ = _timeline(400, lambda i: i < 25)
+    assert n == 25 + TAIL                           # ~0.7 s after the last speech
+
+
+def test_hold_keeps_listening_through_a_long_pause():
+    # talk 2 s, Ctrl down at 1.6 s, 30 s think-pause, talk again, release mid-sentence
+    speech = lambda i: i < 25 or 400 <= i < 425    # noqa: E731
+    audio, n, hs = _timeline(1000, speech, {20: [(CTRL, True)], 410: [(CTRL, False)]})
+    assert n == 425 + TAIL                          # ends ~0.7 s after the second sentence
+    assert hs.used and not hs.held
+    from heyclaude.listen import BLOCK
+    assert len(audio) // BLOCK < 100                # the 30 s pause was trimmed out
+
+
+def test_release_during_pause_starts_the_silence_window_then():
+    _, n, _ = _timeline(400, lambda i: i < 25, {10: [(CTRL, True)], 100: [(CTRL, False)]})
+    assert n == 100 + TAIL                          # counted from the release, not from block 25
+
+
+def test_hold_pressed_before_speech_starts():
+    speech = lambda i: 100 <= i < 125              # noqa: E731  (8 s of thinking first)
+    assert _timeline(400, speech, hold=False)[0] is None   # without a hold: start timeout
+    audio, n, _ = _timeline(400, speech, {0: [(CTRL, True)], 110: [(CTRL, False)]})
+    assert audio is not None and n == 125 + TAIL
+
+
+def test_ctrl_shortcut_during_hold_is_not_a_hold():
+    keys = {20: [(CTRL, True)], 22: [(C_KEY, True)], 23: [(C_KEY, False)], 300: [(CTRL, False)]}
+    _, n, hs = _timeline(400, lambda i: i < 25, keys)
+    assert n == 25 + TAIL                           # Ctrl+C: normal end-pointing despite Ctrl still down
+    assert not hs.held and not hs.used              # no long cap, no trimming
+
+
+def test_stuck_hold_key_hits_the_safety_cap():
+    _, n, _ = _timeline(2000, lambda i: i < 25, {5: [(CTRL, True)]}, max_utterance_s=10)
+    assert n == 125                                 # 10 s of audio (2-block pre-roll + 123 more)
+
+
+def test_hold_key_ignores_autorepeat_and_parses_names():
+    from heyclaude import holdkey as K
+    hs = K.HoldState(K.parse("ctrl"))
+    hs.reset()
+    assert hs.key(0xA3, True) and hs.held           # right ctrl counts for "ctrl"
+    assert not hs.key(0xA3, True)                   # auto-repeat: no change
+    assert hs.key(0xA3, False) and not hs.held
+    hs.reset(key_down_now=True)                     # already down when listening starts
+    assert not hs.held and not hs.key(0xA2, True)   # (e.g. Ctrl of the hotkey) isn't a hold
+    assert K.parse("right ctrl") == {0xA3} and K.parse("Caps Lock") == {0x14} and K.parse("f13") == {0x7C}
+    for bad in ("", "hyper", "ctrl+x"):
+        try:
+            K.parse(bad)
+        except ValueError:
+            continue
+        raise AssertionError(bad)
+
+
+def test_trim_silences_keeps_short_gaps():
+    from heyclaude.listen import trim_silences
+    blocks = list(range(20))
+    voiced = [True] * 3 + [False] * 10 + [True] * 2 + [False] * 3 + [True] * 2
+    assert trim_silences(blocks, voiced, keep=4) == [0, 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18, 19]
+
+
 def test_record_utterance_ends_when_source_closes():
     import numpy as np
     from heyclaude.listen import record_utterance

@@ -95,7 +95,7 @@ class Island(QWidget):
             w, h = max(120, QFontMetrics(self.font_small).horizontalAdvance(label) + 46), 28
         elif self.mode == "off":
             w, h = (170 if n_running or "until" in self.text else 130), 28
-        elif self.mode == "listening":
+        elif self.mode in ("listening", "holding"):
             w, h = 300, PILL_H
         elif self.mode in ("thinking", "speaking", "loading", "error"):
             w = min(560, max(300, fm.horizontalAdvance(self.text) + 80))
@@ -256,6 +256,23 @@ class Island(QWidget):
         p.setFont(self.font_small)
         p.setPen(DIM)
         p.drawText(QRectF(x0 + n * (bw + 3) + 4, 0, 60, head.height()), Qt.AlignVCenter, "listening")
+
+    def _paint_holding(self, p, head, t):
+        """Hold key down: still listening, pauses don't end it."""
+        cy = head.center().y()
+        self._dot(p, 20, cy, 5, ACCENT)
+        p.setPen(QPen(ACCENT, 1.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(20 - 9, cy - 9, 18, 18))
+        bw, x0 = 5, 40
+        p.setPen(Qt.NoPen)
+        p.setBrush(FG)
+        for i, v in enumerate(self.levels):
+            hh = 3 + v * (head.height() - 16)
+            p.drawRoundedRect(QRectF(x0 + i * (bw + 3), cy - hh / 2, bw, hh), 2, 2)
+        p.setFont(self.font_small)
+        p.setPen(ACCENT)
+        p.drawText(QRectF(x0 + len(self.levels) * (bw + 3) + 4, 0, 60, head.height()), Qt.AlignVCenter, "holding")
 
     def _paint_thinking(self, p, head, t):
         cy = head.center().y()

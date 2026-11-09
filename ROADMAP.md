@@ -37,6 +37,12 @@ launch exits and pokes the first; the hotkey opens the mic; settings save to
 during testing, and autostart is left **off** until you turn it on. Not
 tested: an actual reboot.
 
+Added to M1 on request: the speech-to-text device setting (GPU first with
+`large-v3-turbo`, CPU fallback, never on the GPU while Premiere runs; the
+fallback logic is tested with CUDA mocked, and no GPU run has been done yet)
+and hold-to-keep-listening (`listen.hold_key`). Kokoro on the GPU was
+requested at the same time; it is proposed for M4 (it needs espeak-ng, model files and a GPU onnxruntime or torch).
+
 **Goal:** it runs all day without a terminal and is easy to switch off.
 
 - Tray icon with an on/off **listening toggle** (mic released while off),

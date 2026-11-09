@@ -845,7 +845,6 @@ def rescore(run_dir: Path, exclude: list[str] | None = None) -> list[dict]:
 def wakecheck(args):
     """Does the user's wake model fire on their clips, and on Kokoro saying "hey claude"?"""
     main = main_checkout()
-    link_state(main)
     import yaml
     cfg = yaml.safe_load((main / "config.yaml").read_text(encoding="utf-8")) if (main / "config.yaml").exists() else {}
     model = (cfg.get("wake") or {}).get("model") or "state/wake_models/hey_claude-20261109-mine/hey_claude.onnx"

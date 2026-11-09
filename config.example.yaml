@@ -33,8 +33,10 @@ stt:
   # load fails, or a transcription hits a CUDA error (that request is retried
   # on the CPU). cpu: always cpu_model. --gpu / --cpu override this.
   device: gpu
-  gpu_model: large-v3-turbo   # ~1.6 GB download, ~1.6 GB VRAM in float16
-  gpu_compute_type: float16   # int8_float16 uses less VRAM
+  # large-v3: ~0.5 s per request on an RTX 4060, ~2 GB VRAM in int8_float16.
+  # large-v3-turbo is faster still (~1.6 GB download); set it here once you have it.
+  gpu_model: large-v3
+  gpu_compute_type: int8_float16   # or float16 (more VRAM)
   cpu_model: base.en          # tiny.en / base.en / small.en / small: loaded only when needed
   cpu_compute_type: int8
   cpu_threads: 4

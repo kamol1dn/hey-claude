@@ -68,7 +68,7 @@ QLabel#warn {{ color: #E5A04A; font-size: 9pt; }}
 
 WAKE_MODELS = ["hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy"]
 STT_MODELS = ["tiny.en", "base.en", "small.en", "small", "medium"]
-STT_GPU_MODELS = ["large-v3-turbo", "large-v3", "distil-large-v3", "medium", "small"]
+STT_GPU_MODELS = ["large-v3", "large-v3-turbo", "distil-large-v3", "medium", "small"]
 CLI_MODELS = ["haiku", "sonnet", "opus"]
 PERMISSION_MODES = ["acceptEdits", "auto", "dontAsk", "plan", "bypassPermissions"]
 
@@ -87,8 +87,9 @@ TIPS = {
     "stt.device": "GPU: the GPU model is loaded once and kept in VRAM; falls back to the CPU when CUDA is "
                   "missing, the load fails or runs out of memory, or a transcription hits a CUDA error.\n"
                   "--gpu / --cpu on the command line override this.",
-    "stt.gpu_model": "Whisper model on the GPU. large-v3-turbo: ~1.6 GB download and VRAM in float16.",
-    "stt.gpu_compute_type": "float16, or int8_float16 for less VRAM.",
+    "stt.gpu_model": "Whisper model on the GPU. large-v3: ~0.5 s per request, ~2 GB VRAM in int8_float16. "
+                     "large-v3-turbo is faster (~1.6 GB download).",
+    "stt.gpu_compute_type": "int8_float16 (less VRAM) or float16.",
     "stt.cpu_model": "Whisper model on the CPU (fallback): tiny.en / base.en / small.en / small. "
                      "Loaded only when needed.",
     "stt.yield_to_premiere": "Opt-in: never use the GPU while Adobe Premiere Pro is running, even when it's idle "
@@ -434,7 +435,7 @@ class SettingsWindow(QWidget):
         self._row(f, "stt.device", "Device", self.cmb_stt_device)
         self.cmb_stt_gpu_model = self._combo(STT_GPU_MODELS, editable=True)
         self._row(f, "stt.gpu_model", "GPU model", self.cmb_stt_gpu_model)
-        self.cmb_stt_gpu_compute = self._combo(["float16", "int8_float16"])
+        self.cmb_stt_gpu_compute = self._combo(["int8_float16", "float16"])
         self._row(f, "stt.gpu_compute_type", "GPU precision", self.cmb_stt_gpu_compute)
         self.cmb_stt_model = self._combo(STT_MODELS, editable=True)
         self._row(f, "stt.cpu_model", "CPU model", self.cmb_stt_model)
@@ -569,8 +570,8 @@ class SettingsWindow(QWidget):
         self._set_combo(self.cmb_stt_model, _get(cfg, "stt.cpu_model", "base.en"))
         dev = str(_get(cfg, "stt.device", "gpu")).lower()
         self._set_combo(self.cmb_stt_device, "gpu" if dev in ("gpu", "cuda") else "cpu")
-        self._set_combo(self.cmb_stt_gpu_model, _get(cfg, "stt.gpu_model", "large-v3-turbo"))
-        self._set_combo(self.cmb_stt_gpu_compute, _get(cfg, "stt.gpu_compute_type", "float16"))
+        self._set_combo(self.cmb_stt_gpu_model, _get(cfg, "stt.gpu_model", "large-v3"))
+        self._set_combo(self.cmb_stt_gpu_compute, _get(cfg, "stt.gpu_compute_type", "int8_float16"))
         self.cb_premiere.setChecked(bool(_get(cfg, "stt.yield_to_premiere", False)))
         self.sp_gpu_busy.setValue(int(_get(cfg, "stt.gpu_busy_pct", 70)))
         self.sp_cpu_busy.setValue(int(_get(cfg, "stt.cpu_busy_pct", 85)))

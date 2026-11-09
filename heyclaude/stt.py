@@ -2,7 +2,7 @@
 
 `stt.device: gpu` picks the device per request from actual load:
 
-- GPU (`stt.gpu_model`, large-v3-turbo) unless it's busy: utilisation
+- GPU (`stt.gpu_model`, large-v3) unless it's busy: utilisation
   >= `stt.gpu_busy_pct` (70) averaged over ~0.5 s, or too little free VRAM to
   load the model. Once on the CPU it goes back only below `gpu_resume_pct`
   (60), so it doesn't flip back and forth.
@@ -74,8 +74,32 @@ def choose(on_gpu: bool, gpu_util, gpu_free_mb, need_mb, cpu_pct,
     return "gpu", ""
 
 
+def add_cuda_dll_dirs():
+    """ctranslate2 needs CUDA 12 cuBLAS (cublas64_12.dll). Besides PATH and
+    the ctranslate2 folder, look in the pip packages that ship it
+    (nvidia-cublas-cu12, and torch/lib)."""
+    import importlib.util
+    import os
+    import sys
+    if sys.platform != "win32":
+        return
+    for pkg, sub in (("nvidia.cublas", "bin"), ("nvidia.cudnn", "bin"), ("torch", "lib")):
+        try:
+            spec = importlib.util.find_spec(pkg)
+        except (ImportError, ValueError):
+            spec = None
+        for base in (spec.submodule_search_locations or []) if spec else []:
+            d = os.path.join(base, sub)
+            if os.path.isdir(d):
+                try:
+                    os.add_dll_directory(d)
+                except OSError:
+                    pass
+
+
 def cuda_available() -> tuple[bool, str]:
     """(ok, reason). Imports ctranslate2 only; doesn't load a model."""
+    add_cuda_dll_dirs()
     try:
         import ctranslate2
         n = ctranslate2.get_cuda_device_count()
@@ -137,8 +161,8 @@ class SpeechToText:
         self.want = normalize_device(device or cfg.get("device", "gpu"))
         self.cpu_model = cfg.get("cpu_model") or "base.en"     # config.load migrates v1's `model`
         self.cpu_compute = cfg.get("cpu_compute_type") or "int8"
-        self.gpu_model = cfg.get("gpu_model") or "large-v3-turbo"
-        self.gpu_compute = cfg.get("gpu_compute_type") or "float16"
+        self.gpu_model = cfg.get("gpu_model") or "large-v3"
+        self.gpu_compute = cfg.get("gpu_compute_type") or "int8_float16"
         self.prompt = ("Hey Claude. Start a task in " + ", ".join(hint_words) + ".") if hint_words else None
         self._loader = loader or self._load
         self._cuda_check = cuda_check or cuda_available

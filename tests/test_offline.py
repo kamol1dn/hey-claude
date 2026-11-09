@@ -272,7 +272,8 @@ class _FakeLoad:
 def _stt(cfg=None, device=None, cuda=(True, ""), premiere=False, gpu_load_error=None, gpu_fail=None,
          load=None, cached=True, gate=None):
     from heyclaude.stt import SpeechToText
-    c = {"device": "gpu", "gpu_model": "large-v3-turbo", "cpu_model": "base.en", "gpu_busy_pct": 70,
+    c = {"device": "gpu", "gpu_model": "large-v3-turbo", "gpu_compute_type": "float16",
+         "cpu_model": "base.en", "gpu_busy_pct": 70,
          "gpu_resume_pct": 60, "cpu_busy_pct": 85, "yield_to_premiere": False}
     c.update(cfg or {})
     state = {"premiere": premiere, "loads": [], "cuda_checks": 0, "load": load or _FakeLoad()}

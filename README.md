@@ -88,7 +88,8 @@ mic ─▶ openWakeWord ─▶ webrtcvad (record until 0.7 s silence) ─▶ fas
    ```
 
    First start downloads the wake-word models (~6 MB) and whisper
-   `large-v3-turbo` for the GPU (~1.6 GB) or `base.en` for the CPU (~140 MB).
+   `large-v3` for the GPU (~3 GB, already there if another app on this PC
+   uses faster-whisper) and `base.en` for the CPU (~140 MB).
    After that, startup takes about 5 s.
 
    To run it all day without a terminal, tick **Start with Windows** in the
@@ -183,7 +184,7 @@ utilisation averaged over about 0.5 s, free VRAM) and psutil (CPU):
 
 | situation | whisper runs on | island / log says |
 |---|---|---|
-| GPU under `stt.gpu_busy_pct` (70%) | GPU (`stt.gpu_model`, `large-v3-turbo`) | `gpu (turbo)` |
+| GPU under `stt.gpu_busy_pct` (70%) | GPU (`stt.gpu_model`, `large-v3` int8_float16, ~0.5 s per request on an RTX 4060) | `gpu (large-v3)` |
 | GPU at 70% or more, or too little free VRAM to load the model | CPU (`stt.cpu_model`, `base.en`) | `cpu (gpu busy 83%)` / `cpu (low vram 0.9 GB)` |
 | GPU busy **and** CPU at `stt.cpu_busy_pct` (85%) or more | GPU anyway | `gpu (cpu busy)` |
 | back on the GPU | once it's under `stt.gpu_resume_pct` (60%), so it doesn't flip back and forth | |
@@ -191,9 +192,11 @@ utilisation averaged over about 0.5 s, free VRAM) and psutil (CPU):
 An idle Premiere is fine; only real load counts (e.g. a Remotion render
 while Premiere sits open). Both models stay loaded once used, so switching
 is instant. The GPU model loads at start-up. If it isn't downloaded yet
-(1.6 GB the first time, about 9 minutes at 3 MB/s), start-up doesn't wait:
-the CPU model answers (`cpu (downloading turbo)`) while it downloads and
-loads in the background. Hard fallbacks to the CPU: CUDA missing or the GPU
+(1.6–3 GB the first time), start-up doesn't wait: the CPU model answers
+(`cpu (downloading large-v3)`) while it downloads and loads in the
+background. `large-v3-turbo` is faster on the GPU; set `stt.gpu_model` to it
+once it's downloaded (a stalled Hugging Face download leaves it on the CPU
+model meanwhile, it doesn't block anything). Hard fallbacks to the CPU: CUDA missing or the GPU
 load failing (`cpu (fallback: no cuda)` / `gpu load failed`, for the
 session), out of memory while loading (retried a minute later), and a CUDA
 error mid-transcription (`cpu (fallback: cuda error)`; that request is
@@ -204,9 +207,14 @@ whisper off the GPU whenever Premiere Pro is running, idle or not.
 `stt: cpu (downloading turbo) [gpu 7%, vram free 6.8 GB, cpu 62%]`, and
 every switch is logged as `[stt] now …`.
 
-GPU needs an NVIDIA driver plus CUDA 12 cuBLAS (`cublas64_12.dll`) on PATH;
-the ctranslate2 wheel already ships cuDNN 9. If cuBLAS 12 is missing (a
-CUDA 13 toolkit alone isn't enough), the load fails and it uses the CPU.
+GPU needs an NVIDIA driver plus CUDA 12 cuBLAS (`cublas64_12.dll` and
+`cublasLt64_12.dll`); the ctranslate2 wheel already ships cuDNN 9. A CUDA 13
+toolkit alone isn't enough. Any of these works: `pip install
+nvidia-cublas-cu12` into the venv (found automatically), a torch install in
+the venv, or copying the two DLLs from another venv's `torch\lib` next to
+`.venv\Lib\site-packages\ctranslate2\ctranslate2.dll` (what this machine
+uses; a reinstall of ctranslate2 removes them). Without cuBLAS 12 the load
+fails and it uses the CPU (`cpu (fallback: gpu load failed)`).
 
 **Logs:** everything the app prints also goes to `state\logs\app.log`
 (timestamped, rotated at 1 MB, 3 old files kept), including uncaught

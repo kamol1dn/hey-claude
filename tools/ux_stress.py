@@ -331,16 +331,26 @@ def wait_gpu(limit=GPU_MAX, patience_s=600):
 
 
 # =============================================================================== state dir
-def link_state(main: Path):
-    """In a worktree: state/models and state/wake_models point at the main checkout's (read only)."""
+def link_state(main: Path) -> list[Path]:
+    """In a worktree: state/models and state/wake_models point at the main checkout's (read
+    only), for the run. Returns the links made (unlink_state removes them afterwards: a
+    linked state/wake_models changes how paths resolve for other tools and tests)."""
     STATE.mkdir(exist_ok=True)
+    made = []
     if main == ROOT:
-        return
+        return made
     for sub in ("models", "wake_models"):
         dst, src = STATE / sub, main / "state" / sub
         if dst.exists() or not src.exists():
             continue
         subprocess.run(["cmd", "/c", "mklink", "/J", str(dst), str(src)], capture_output=True)
+        made.append(dst)
+    return made
+
+
+def unlink_state(links: list[Path]):
+    for p in links:
+        subprocess.run(["cmd", "/c", "rmdir", str(p)], capture_output=True)    # the link only, never its target
 
 
 # =============================================================================== the driver
@@ -912,7 +922,7 @@ def main(argv=None):
         print("[ux] hey-claude is already running (it holds the GPU models and the mic). Quit it first, "
               "or pass --allow-running.")
         return 2
-    link_state(main)
+    links = link_state(main)
     UXDIR.mkdir(parents=True, exist_ok=True)
     scratch = UXDIR / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)
@@ -937,6 +947,8 @@ def main(argv=None):
         app_main(argv, harness=h)
     except SystemExit:
         pass
+    finally:
+        unlink_state(links)
     return 1 if h.audit.violations else 0
 
 

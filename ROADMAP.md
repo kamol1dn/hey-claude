@@ -454,6 +454,50 @@ characters and island themes (M5's Ember & Thread is the first island theme):
 - New feature = add a registry entry with a sensible fallback, bump the
   registry's minor version, and optionally update the built-in packs.
 
+**Idle antics:** when nothing has happened for a while, the character does
+little things on its own, and sometimes its surroundings change. Fishing off
+the island's edge, getting bored and dozing off, reading, juggling, a
+butterfly landing, rain or snow, stars at night. Aim for 10–15 per character,
+with no upper limit.
+- Antics are **pack-defined and open-ended**, not part of the core registry.
+  Each one is declared in `character.json` with:
+  - `id`, `duration` and a `weight`;
+  - a `cooldown`;
+  - `min_idle` (e.g. only after 10 minutes idle);
+  - where it can play (in-pill, desktop companion or both);
+  - optional conditions: time of day, season, day of week, weather if a
+    weather source is on, how long the user has been idle;
+  - `props` for environment items (fishing rod, book, rain cloud).
+- **Scheduler in the app:**
+  - picks a weighted random antic, never the same one twice in a row, and
+    respects cooldowns;
+  - plays one every few minutes of idle at most (Settings: rare / normal /
+    lively / off), each a few seconds to ~20 s;
+  - otherwise the character rests at the idle frame rate;
+  - sleep progresses naturally: drowsy after ~15 min idle, asleep after ~30,
+    and it wakes with a stretch when you come back.
+- **Always interruptible:** a wake word, the hotkey, a task event or the mouse
+  arriving ends any antic within ~150 ms with a short "caught!" exit (drop the
+  rod, blink awake). Antics never delay a real state.
+- **Calm all day:** no antics while the user is typing or in a full-screen app
+  or game, in calm / reduced-motion mode, on battery saver, or while the island
+  is hidden. They play at their own low frame rate and return to 0 fps after.
+- **Settings → Character → Idle antics:** on/off, how often, and a checkbox
+  per antic with a "play now" preview.
+- CI checks every antic for: a declared interrupt exit, the fps budget, a
+  maximum duration, and props that stay inside the character's bounds.
+- Starter ideas for the five built-ins, which the port should flesh out to
+  10–15 each:
+  - **Echo:** hangs upside down, catches a moth, echolocation pings, spooked by
+    its own echo.
+  - **Cinder:** roasts a tiny marshmallow, smoke rings, sputters in the rain.
+  - **Wren:** fishing, preening, folds itself into a boat, a paper-airplane
+    flight.
+  - **Tycho:** a moon eclipse, counts its moons, a comet passes, a telescope
+    peek.
+  - **Hum:** eyes follow a passing fly, whistles, yawns, a blink sequence, the
+    eyes look at the clock.
+
 **A pack** is a folder `characters/<id>/`:
 - `character.json`: id, name, author, licence, `registry` version supported,
   the list of implemented states, size hints (in-pill ~24 px, desktop ~120 px),

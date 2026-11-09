@@ -509,8 +509,11 @@ class Harness:
         t1 = time.perf_counter()
         self.rec.grabbing = False
         self.rec.flush_grabs()
-        restored = None if self.offline else volume_restore(vol0)
         ev = self.rec.since(t0, t1)
+        # put the volume back only if the agent changed it in this scenario (a volume effect):
+        # a change by hand (you turning it down while it talks) is yours and stays
+        touched = any(e["k"] == "effect" and e.get("effect") == "volume" for e in ev) or             any(t.endswith(("set_volume", "set_mute")) for t in self.audit.calls)
+        restored = volume_restore(vol0) if (touched and not self.offline) else None
         ev += [{"t": c["t0"], "k": "user", "label": c["label"], "t0": c["t0"], "t1": c["t1"]}
                for c in self.room.log if t0 <= c["t0"] <= t1]
         ev.sort(key=lambda e: e["t"])
@@ -736,8 +739,6 @@ class Harness:
     # -- end ---------------------------------------------------------------------------
     def finish(self):
         try:
-            if not self.offline:
-                volume_restore(self.volume0)
             write_summary(self.out, self.results, self.audit, self.args)
         except Exception:
             traceback.print_exc()

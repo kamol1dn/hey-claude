@@ -2,7 +2,7 @@
 
     python -m heyclaude                 # mic + island + tray
     pythonw -m heyclaude                # same, no console window (what "Start with Windows" runs)
-    python -m heyclaude --gpu           # whisper on CUDA (leave off while Premiere runs)
+    python -m heyclaude --cpu           # whisper on the CPU (stt.device in config.yaml is gpu by default)
     python -m heyclaude --text          # type instead of talk (no mic, no whisper)
     python -m heyclaude --simulate samples\\question.wav --exit   # feed a wav as the mic
 """
@@ -19,7 +19,9 @@ import threading
 def main():
     ap = argparse.ArgumentParser(prog="heyclaude")
     ap.add_argument("--config", help="config file (default: config.yaml)")
-    ap.add_argument("--gpu", action="store_true", help="run whisper on the GPU (off by default)")
+    dev = ap.add_mutually_exclusive_group()
+    dev.add_argument("--gpu", action="store_true", help="whisper on the GPU (overrides stt.device)")
+    dev.add_argument("--cpu", action="store_true", help="whisper on the CPU (overrides stt.device)")
     ap.add_argument("--text", action="store_true", help="type requests instead of speaking")
     ap.add_argument("--simulate", metavar="WAV", help="use a 16 kHz mono wav as the microphone")
     ap.add_argument("--exit", action="store_true", help="quit after the simulated request and its tasks finish")
@@ -71,7 +73,8 @@ def main():
 
     bridge = Bridge()
     bridge.quit.connect(app.quit)
-    asst = Assistant(cfg, bridge, use_gpu=args.gpu, simulate=args.simulate, text_mode=args.text,
+    asst = Assistant(cfg, bridge, stt_device="gpu" if args.gpu else "cpu" if args.cpu else None,
+                     simulate=args.simulate, text_mode=args.text,
                      exit_when_done=args.exit)
     asst.on_listening = lambda on, until: bridge.listening.emit(on, float(until or 0))
     state = {"restart": False}

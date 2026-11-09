@@ -5,9 +5,6 @@ app:
   listening: true            # wake word on at start; off = mic closed until you turn it on
   hotkey: ctrl+alt+space     # global push-to-talk, e.g. ctrl+shift+h, win+alt+j, f9; "" = none
   start_with_windows: false  # Startup-folder shortcut (pythonw -m heyclaude, no console)
-  # When whisper runs on the GPU (stt.device: cuda or --gpu), drop to the CPU
-  # while Adobe Premiere Pro is running and go back when it closes.
-  premiere_guard: true
 
 wake:
   # Stock openWakeWord model until a custom "hey claude" one is trained
@@ -26,11 +23,20 @@ listen:
   max_seconds: 20
 
 stt:
-  model: base.en          # tiny.en / base.en / small.en / small / medium ...
-  device: cpu             # cpu by default so Premiere keeps the GPU; --gpu flips to cuda
-  compute_type: int8      # int8 on cpu, float16 on cuda
+  # gpu: load gpu_model once into VRAM and keep it there; fall back to the CPU
+  # when CUDA/cuDNN is missing, the load fails or runs out of memory, or a
+  # transcription hits a CUDA error (that utterance is retried on the CPU).
+  # cpu: always cpu_model. --gpu / --cpu on the command line override this.
+  device: gpu
+  gpu_model: large-v3-turbo   # ~1.6 GB download, ~1.6 GB VRAM in float16
+  gpu_compute_type: float16   # int8_float16 uses less VRAM
+  cpu_model: base.en          # tiny.en / base.en / small.en / small: loaded only when needed
+  cpu_compute_type: int8
   cpu_threads: 4
   language: en
+  # While Adobe Premiere Pro is running, never use the GPU: whisper runs on the
+  # CPU and the GPU model is unloaded; it's reloaded when Premiere closes.
+  yield_to_premiere: true
 
 fast:
   # auto  = Anthropic SDK if ANTHROPIC_API_KEY is set, otherwise the claude CLI

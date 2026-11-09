@@ -144,7 +144,7 @@ def test_task_command_flags():
     assert "--permission-prompts" in c
 
 
-# -- M1: config round-trip, hotkey parsing, listening state, Premiere guard ----
+# -- M1: config round-trip, hotkey parsing, listening state ----
 
 def test_config_round_trip(tmp_path):
     from heyclaude import config as C
@@ -165,7 +165,7 @@ def test_config_round_trip(tmp_path):
     changed = C.diff(cfg, back)
     assert set(changed) == {"wake.threshold", "projects", "tasks.allowed_tools"}
     assert C.needs_restart(changed) == []
-    assert C.needs_restart(["stt.model", "app.hotkey", "agent.model", "agent.filler"]) == ["stt.model", "agent.model"]
+    assert C.needs_restart(["stt.gpu_model", "app.hotkey", "agent.model", "agent.filler"]) == ["stt.gpu_model", "agent.model"]
 
 
 def test_config_apply_in_place_keeps_sections(tmp_path):
@@ -243,29 +243,122 @@ def test_listening_toggle_and_pause():
     assert a.ui.state.calls[-1] == ("off", "listening off") and a._abort_rec.is_set()
 
 
-def test_premiere_guard_switches_whisper():
-    a = _assistant({"stt": {"device": "cuda"}})
-    made = []
+# -- speech-to-text device choice (CUDA mocked: nothing here touches a GPU) --
 
-    class FakeStt:
-        def __init__(self, gpu):
-            self.device = "cuda" if gpu else "cpu"
+class _FakeModel:
+    def __init__(self, device, fail=None):
+        self.device, self.fail = device, fail
 
-    a._make_stt = lambda gpu: made.append(gpu) or FakeStt(gpu)
-    running = {"v": True}
-    a._premiere_running = lambda: running["v"]
-    a.stt = FakeStt(True)
-    assert a.guard_check() == "cpu" and a.stt.device == "cpu"
-    assert a.guard_check() is None                  # still running: stay on CPU
-    running["v"] = False
-    assert a.guard_check() == "gpu" and a.stt.device == "cuda"
-    a.cfg["app"]["premiere_guard"] = False
-    running["v"] = True
-    assert a.guard_check() is None and a.stt.device == "cuda"
-    assert made == [False, True]
-    cpu = _assistant()                              # default cpu config: guard never acts
-    cpu.stt, cpu._premiere_running = FakeStt(False), (lambda: True)
-    assert cpu.guard_check() is None
+    def transcribe(self, audio):
+        if self.fail:
+            raise self.fail
+        return f"text from {self.device}"
+
+
+def _stt(cfg=None, device=None, cuda=(True, ""), premiere=False, gpu_load_error=None, gpu_fail=None):
+    from heyclaude.stt import SpeechToText
+    c = {"device": "gpu", "gpu_model": "large-v3-turbo", "cpu_model": "base.en", "yield_to_premiere": True}
+    c.update(cfg or {})
+    state = {"premiere": premiere, "loads": [], "cuda_checks": 0}
+
+    def loader(dev):
+        state["loads"].append(dev)
+        if dev == "cuda" and gpu_load_error:
+            raise gpu_load_error
+        return _FakeModel(dev, gpu_fail if dev == "cuda" else None)
+
+    def cuda_check():
+        state["cuda_checks"] += 1
+        return cuda
+
+    s = SpeechToText(c, device=device, loader=loader, cuda_check=cuda_check,
+                     premiere_running=lambda: state["premiere"])
+    return s, state
+
+
+def test_stt_gpu_loaded_once_and_kept():
+    import numpy as np
+    s, st = _stt()
+    assert s.label == "gpu (turbo)" and s.device == "cuda" and st["loads"] == ["cuda"]
+    for _ in range(3):
+        assert s.transcribe(np.zeros(1600, np.int16)) == "text from cuda"
+    assert st["loads"] == ["cuda"]                  # no per-utterance load, CPU model never loaded
+
+
+def test_stt_falls_back_without_cuda():
+    s, st = _stt(cuda=(False, "no CUDA device"))
+    assert s.label == "cpu (fallback: no cuda)" and st["loads"] == ["cpu"]
+
+
+def test_stt_falls_back_when_gpu_load_fails():
+    s, st = _stt(gpu_load_error=RuntimeError("CUDA failed with error out of memory"))
+    assert s.label == "cpu (fallback: out of memory)" and st["loads"] == ["cuda", "cpu"]
+    s, st = _stt(gpu_load_error=RuntimeError("Library cublas64_12.dll is not found"))
+    assert s.label == "cpu (fallback: gpu load failed)"
+
+
+def test_stt_cuda_error_retries_the_utterance_on_cpu():
+    import numpy as np
+    s, st = _stt(gpu_fail=RuntimeError("CUDA error: an illegal memory access"))
+    assert s.transcribe(np.zeros(1600, np.int16)) == "text from cpu"
+    assert s.label == "cpu (fallback: cuda error)" and s.gpu is None
+    assert s.transcribe(np.zeros(1600, np.int16)) == "text from cpu"
+    assert st["loads"] == ["cuda", "cpu"]
+
+
+def test_stt_other_errors_are_not_swallowed():
+    import numpy as np
+    s, _ = _stt(gpu_fail=ValueError("bad audio"))
+    try:
+        s.transcribe(np.zeros(1600, np.int16))
+    except ValueError:
+        return
+    raise AssertionError("non-CUDA error should propagate")
+
+
+def test_stt_never_touches_gpu_while_premiere_runs():
+    import numpy as np
+    s, st = _stt(premiere=True)
+    assert s.label == "cpu (fallback: premiere)"
+    assert st["loads"] == ["cpu"] and st["cuda_checks"] == 0   # not even a CUDA probe
+    assert s.transcribe(np.zeros(1600, np.int16)) == "text from cpu"
+    st["premiere"] = False                          # Premiere closed: GPU model comes back
+    s.poll(force=True, background=False)
+    assert s.label == "gpu (turbo)" and st["loads"] == ["cpu", "cuda"]
+    st["premiere"] = True                           # Premiere opened again: unload, CPU
+    s.poll(force=True)
+    assert s.label == "cpu (fallback: premiere)" and s.gpu is None
+    assert s.transcribe(np.zeros(1600, np.int16)) == "text from cpu"
+    assert st["loads"] == ["cpu", "cuda"]           # CPU model reused, not reloaded
+
+
+def test_stt_premiere_check_is_rate_limited():
+    s, st = _stt()
+    calls = {"n": 0}
+    s._premiere = lambda: calls.__setitem__("n", calls["n"] + 1) or False
+    for _ in range(20):
+        s.poll()
+    assert calls["n"] <= 1
+
+
+def test_stt_yield_to_premiere_off_and_cpu_device():
+    s, st = _stt(cfg={"yield_to_premiere": False}, premiere=True)
+    assert s.label == "gpu (turbo)"
+    s, st = _stt(device="cpu", premiere=True)
+    assert s.label == "cpu (base.en)" and st["loads"] == ["cpu"] and st["cuda_checks"] == 0
+    s, st = _stt(cfg={"device": "cpu"})
+    assert s.label == "cpu (base.en)" and st["cuda_checks"] == 0
+
+
+def test_config_migrates_v1_stt_keys(tmp_path):
+    from heyclaude import config as C
+    p = tmp_path / "old.yaml"
+    p.write_text("stt:\n  model: small.en\n  device: cuda\n  compute_type: int8\n"
+                 "app:\n  premiere_guard: false\n")
+    cfg = C.load(p)
+    assert cfg["stt"]["cpu_model"] == "small.en" and cfg["stt"]["device"] == "gpu"
+    assert cfg["stt"]["yield_to_premiere"] is False and "model" not in cfg["stt"]
+    assert "premiere_guard" not in cfg["app"]
 
 
 def test_assistant_thread_restarts_once_after_a_crash():

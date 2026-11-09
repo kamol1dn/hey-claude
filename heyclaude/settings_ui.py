@@ -68,6 +68,7 @@ QLabel#warn {{ color: #E5A04A; font-size: 9pt; }}
 
 WAKE_MODELS = ["hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy"]
 STT_MODELS = ["tiny.en", "base.en", "small.en", "small", "medium"]
+STT_GPU_MODELS = ["large-v3-turbo", "large-v3", "distil-large-v3", "medium", "small"]
 CLI_MODELS = ["haiku", "sonnet", "opus"]
 PERMISSION_MODES = ["acceptEdits", "auto", "dontAsk", "plan", "bypassPermissions"]
 
@@ -76,14 +77,19 @@ TIPS = {
     "app.listening": "Wake word on at start. Off = the mic stays closed until you turn listening on.",
     "app.hotkey": "Global push-to-talk, e.g. ctrl+alt+space, ctrl+shift+h, win+alt+j, f9. Empty = no hotkey.",
     "app.start_with_windows": "Adds a Startup-folder shortcut (pythonw -m heyclaude, no console window).",
-    "app.premiere_guard": "When whisper runs on the GPU (stt.device: cuda or --gpu), drop to the CPU while "
-                          "Adobe Premiere Pro is running and go back when it closes.",
     "wake.model": "Stock openWakeWord model (hey_jarvis, alexa, hey_mycroft, hey_rhasspy) until a custom "
                   "\"hey claude\" one is trained (see docs/train-hey-claude.md), or a path to a .onnx file.",
     "wake.threshold": "How sure the wake-word model must be. Higher = fewer false wakes, but it may miss you.",
     "wake.cooldown": "Seconds to ignore the wake word after an interaction ends.",
-    "stt.model": "Whisper model: tiny.en / base.en / small.en / small / medium. Bigger = slower, more accurate.",
-    "stt.device": "CPU by default so Premiere keeps the GPU; --gpu on the command line flips to cuda.",
+    "stt.device": "GPU: the GPU model is loaded once and kept in VRAM; falls back to the CPU when CUDA is "
+                  "missing, the load fails or runs out of memory, or a transcription hits a CUDA error.\n"
+                  "--gpu / --cpu on the command line override this.",
+    "stt.gpu_model": "Whisper model on the GPU. large-v3-turbo: ~1.6 GB download and VRAM in float16.",
+    "stt.gpu_compute_type": "float16, or int8_float16 for less VRAM.",
+    "stt.cpu_model": "Whisper model on the CPU (fallback): tiny.en / base.en / small.en / small. "
+                     "Loaded only when needed.",
+    "stt.yield_to_premiere": "While Adobe Premiere Pro is running, never use the GPU: whisper runs on the CPU and "
+                             "the GPU model is unloaded; it's reloaded when Premiere closes.",
     "fast.backend": "auto = Anthropic SDK if ANTHROPIC_API_KEY is set, otherwise the claude CLI.\n"
                     "cli = always the claude CLI (your subscription login).\nsdk = always the Anthropic SDK.",
     "fast.cli_model": "Model for quick answers through the claude CLI.",
@@ -377,8 +383,6 @@ class SettingsWindow(QWidget):
         self._row(f, "app.listening", "Wake word", self.cb_listening)
         self.cb_autostart = QCheckBox("Start hey-claude with Windows")
         self._row(f, "app.start_with_windows", "Windows", self.cb_autostart)
-        self.cb_premiere = QCheckBox("Move whisper off the GPU while Premiere Pro runs")
-        self._row(f, "app.premiere_guard", "Premiere guard", self.cb_premiere)
         v.addWidget(g)
 
         g = QGroupBox("Push-to-talk")
@@ -417,10 +421,16 @@ class SettingsWindow(QWidget):
 
         g = QGroupBox("Speech recognition (whisper)")
         f = self._form(g)
-        self.cmb_stt_model = self._combo(STT_MODELS, editable=True)
-        self._row(f, "stt.model", "Model", self.cmb_stt_model)
-        self.cmb_stt_device = self._combo([("CPU", "cpu"), ("GPU (keep off while editing in Premiere)", "cuda")])
+        self.cmb_stt_device = self._combo([("GPU, CPU as fallback", "gpu"), ("CPU only", "cpu")])
         self._row(f, "stt.device", "Device", self.cmb_stt_device)
+        self.cmb_stt_gpu_model = self._combo(STT_GPU_MODELS, editable=True)
+        self._row(f, "stt.gpu_model", "GPU model", self.cmb_stt_gpu_model)
+        self.cmb_stt_gpu_compute = self._combo(["float16", "int8_float16"])
+        self._row(f, "stt.gpu_compute_type", "GPU precision", self.cmb_stt_gpu_compute)
+        self.cmb_stt_model = self._combo(STT_MODELS, editable=True)
+        self._row(f, "stt.cpu_model", "CPU model", self.cmb_stt_model)
+        self.cb_premiere = QCheckBox("Keep off the GPU while Premiere Pro runs")
+        self._row(f, "stt.yield_to_premiere", "Premiere", self.cb_premiere)
         v.addWidget(g)
 
         g = QGroupBox("Speech output")
@@ -539,13 +549,16 @@ class SettingsWindow(QWidget):
         self.cb_listening.setChecked(bool(_get(cfg, "app.listening", True)))
         self.ed_hotkey.setText(str(_get(cfg, "app.hotkey") or ""))
         self.cb_autostart.setChecked(bool(_get(cfg, "app.start_with_windows", False)))
-        self.cb_premiere.setChecked(bool(_get(cfg, "app.premiere_guard", True)))
 
         self._set_combo(self.cmb_wake, _get(cfg, "wake.model", "hey_jarvis"))
         self.sp_threshold.setValue(float(_get(cfg, "wake.threshold", 0.5)))
         self.sp_cooldown.setValue(float(_get(cfg, "wake.cooldown", 1.0)))
-        self._set_combo(self.cmb_stt_model, _get(cfg, "stt.model", "base.en"))
-        self._set_combo(self.cmb_stt_device, _get(cfg, "stt.device", "cpu"))
+        self._set_combo(self.cmb_stt_model, _get(cfg, "stt.cpu_model", "base.en"))
+        dev = str(_get(cfg, "stt.device", "gpu")).lower()
+        self._set_combo(self.cmb_stt_device, "gpu" if dev in ("gpu", "cuda") else "cpu")
+        self._set_combo(self.cmb_stt_gpu_model, _get(cfg, "stt.gpu_model", "large-v3-turbo"))
+        self._set_combo(self.cmb_stt_gpu_compute, _get(cfg, "stt.gpu_compute_type", "float16"))
+        self.cb_premiere.setChecked(bool(_get(cfg, "stt.yield_to_premiere", True)))
         self._set_combo(self.cmb_tts_backend, _get(cfg, "tts.backend", "sapi"))
         self.sp_rate.setValue(int(_get(cfg, "tts.rate", 190)))
         self._set_combo(self.cmb_voice, _get(cfg, "tts.voice"))
@@ -597,7 +610,6 @@ class SettingsWindow(QWidget):
                 errors.append(f"Hotkey: {e}")
         _set(new, "app.hotkey", hk)
         _set(new, "app.start_with_windows", self.cb_autostart.isChecked())
-        _set(new, "app.premiere_guard", self.cb_premiere.isChecked())
 
         wake = self._combo_value(self.cmb_wake)
         if not wake:
@@ -606,10 +618,14 @@ class SettingsWindow(QWidget):
         _set(new, "wake.threshold", round(self.sp_threshold.value(), 2))
         _set(new, "wake.cooldown", round(self.sp_cooldown.value(), 2))
         stt_model = self._combo_value(self.cmb_stt_model)
-        if not stt_model:
-            errors.append("Whisper model can't be empty.")
-        _set(new, "stt.model", stt_model)
+        gpu_model = self._combo_value(self.cmb_stt_gpu_model)
+        if not stt_model or not gpu_model:
+            errors.append("Whisper models can't be empty.")
+        _set(new, "stt.cpu_model", stt_model)
+        _set(new, "stt.gpu_model", gpu_model)
+        _set(new, "stt.gpu_compute_type", self._combo_value(self.cmb_stt_gpu_compute))
         _set(new, "stt.device", self._combo_value(self.cmb_stt_device))
+        _set(new, "stt.yield_to_premiere", self.cb_premiere.isChecked())
         _set(new, "tts.backend", self._combo_value(self.cmb_tts_backend))
         _set(new, "tts.rate", self.sp_rate.value())
         _set(new, "tts.voice", self._combo_value(self.cmb_voice) or None)

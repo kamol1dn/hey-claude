@@ -34,6 +34,7 @@ class Bridge(QObject):
     tasks = Signal(list)            # list[dict]
     listening = Signal(bool, float)  # wake word on/off, paused-until epoch (0 = not paused)
     talk = Signal()                 # global hotkey pressed (from the hotkey thread)
+    stt = Signal(str)               # active speech-to-text device, e.g. "gpu (turbo)"
     quit = Signal()
 
 
@@ -68,6 +69,8 @@ class Island(QWidget):
         bridge.state.connect(self.set_state)
         bridge.level.connect(self.push_level)
         bridge.tasks.connect(self.set_tasks)
+        bridge.stt.connect(self.set_stt)
+        self.stt_label = ""
 
         self.anim = QVariantAnimation(self, duration=260, easingCurve=QEasingCurve.OutCubic)
         self.anim.valueChanged.connect(self._apply_geom)
@@ -88,7 +91,8 @@ class Island(QWidget):
         fm = QFontMetrics(self.font_main)
         n_running = sum(1 for t in self.task_rows if t["status"] in ("starting", "running"))
         if self.mode == "idle":
-            w, h = (170 if n_running else 120), 28
+            label = self._idle_label()
+            w, h = max(120, QFontMetrics(self.font_small).horizontalAdvance(label) + 46), 28
         elif self.mode == "off":
             w, h = (170 if n_running or "until" in self.text else 130), 28
         elif self.mode == "listening":
@@ -138,6 +142,19 @@ class Island(QWidget):
         if snap:
             QTimer.singleShot(450, lambda m=mode: self.grab().save(
                 os.path.join(snap, f"{time.strftime('%H%M%S')}-{m}.png")))
+
+    def set_stt(self, label: str):
+        self.stt_label = label
+        self.setToolTip(f"speech-to-text: {label}")
+        self._place()
+        self.update()
+
+    def _stt_short(self) -> str:
+        # "gpu (turbo)" -> "gpu"; "cpu (fallback: premiere)" -> "cpu · premiere"
+        lab = self.stt_label
+        if "fallback:" in lab:
+            return "cpu · " + lab.split("fallback:", 1)[1].strip(" )")
+        return lab.split(" ", 1)[0]
 
     def push_level(self, v: float):
         self.levels = self.levels[1:] + [v]
@@ -197,13 +214,19 @@ class Island(QWidget):
         p.setBrush(c)
         p.drawEllipse(QRectF(x - r, y - r, 2 * r, 2 * r))
 
+    def _idle_label(self) -> str:
+        running = [x for x in self.task_rows if x["status"] in ("starting", "running")]
+        if running:
+            return f"{len(running)} task{'s' if len(running) != 1 else ''} running"
+        return self.wake_label + (f" · {self._stt_short()}" if self.stt_label else "")
+
     def _paint_idle(self, p, head, t):
         cy = head.center().y()
         self._dot(p, 18, cy, 4, ACCENT)
         running = [x for x in self.task_rows if x["status"] in ("starting", "running")]
         p.setFont(self.font_small)
         p.setPen(DIM if not running else FG)
-        label = f"{len(running)} task{'s' if len(running) != 1 else ''} running" if running else self.wake_label
+        label = self._idle_label()
         p.drawText(QRectF(30, 0, head.width() - 38, head.height()), Qt.AlignVCenter | Qt.AlignLeft, label)
 
     def _paint_off(self, p, head, t):
@@ -328,6 +351,8 @@ class Island(QWidget):
         m = QMenu(self)
         m.addAction("Talk now", self.activate.emit)
         m.addAction("Stop speaking", self.stop_speaking.emit)
+        if self.stt_label:
+            m.addAction(f"Speech-to-text: {self.stt_label}").setEnabled(False)
         m.addSeparator()
         m.addAction("Open logs folder", lambda: os.startfile(str(Path(__file__).resolve().parent.parent / "state" / "logs")))
         m.addSeparator()

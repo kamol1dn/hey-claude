@@ -28,6 +28,7 @@ HEADER = ("# hey-claude settings. Written by the Settings window; edit by hand i
 # without a restart. Everything else needs one.
 LIVE = (
     "wake.threshold", "wake.cooldown",
+    "stt.yield_to_premiere",         # read on every Premiere check
     "listen.",                       # read on every utterance (device: next time the mic opens)
     "tasks.",                        # read when each task starts
     "projects",                      # spoken routing; whisper hints + quick-model prompt after restart
@@ -60,12 +61,28 @@ def _norm_projects(p) -> dict:
     return {" ".join(str(k).lower().split()): str(v) for k, v in (p or {}).items() if str(k).strip()}
 
 
+def _migrate(user: dict) -> dict:
+    """Older config.yaml keys -> current ones."""
+    s = user.get("stt")
+    if isinstance(s, dict):
+        if "model" in s:                         # the single (CPU) model of v1
+            s.setdefault("cpu_model", s.pop("model"))
+        if "compute_type" in s:
+            s.setdefault("cpu_compute_type", s.pop("compute_type"))
+        if str(s.get("device", "")).lower().startswith("cuda"):
+            s["device"] = "gpu"
+    a = user.get("app")
+    if isinstance(a, dict) and "premiere_guard" in a:
+        user.setdefault("stt", {}).setdefault("yield_to_premiere", a.pop("premiere_guard"))
+    return user
+
+
 def load(path: str | os.PathLike | None = None) -> dict:
     cfg = defaults()
     user = user_path(path)
     if user.exists():
         with open(user, encoding="utf-8") as f:
-            cfg = _merge(cfg, yaml.safe_load(f) or {})
+            cfg = _merge(cfg, _migrate(yaml.safe_load(f) or {}))
     # Normalise project keys: lowercase, single spaces.
     cfg["projects"] = _norm_projects(cfg.get("projects"))
     STATE_DIR.mkdir(exist_ok=True)

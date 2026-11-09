@@ -10,7 +10,7 @@ from . import config as config_mod
 from .brain import Brain, Projects
 from .config import STATE_DIR
 from .listen import MicSource, WakeWord, WavSource, record_utterance
-from .stt import Transcriber
+from .stt import SpeechToText, normalize_device
 from .tasks import TaskManager
 from .tts import Speaker
 
@@ -21,10 +21,11 @@ def _elapsed(t) -> str:
 
 
 class Assistant:
-    def __init__(self, cfg: dict, bridge, use_gpu=False, simulate: str | None = None, text_mode=False,
-                 exit_when_done=False):
+    def __init__(self, cfg: dict, bridge, stt_device: str | None = None, simulate: str | None = None,
+                 text_mode=False, exit_when_done=False):
         self.cfg, self.ui = cfg, bridge
-        self.use_gpu, self.simulate, self.text_mode = use_gpu, simulate, text_mode
+        self.stt_override = normalize_device(stt_device) if stt_device else None   # --gpu / --cpu
+        self.simulate, self.text_mode = simulate, text_mode
         self.exit_when_done = exit_when_done
         self.mode = "loading"
         self.manual = threading.Event()
@@ -45,8 +46,7 @@ class Assistant:
         self.mic_open = False
         self.stopping = False
         self.on_listening = None                # callback(on: bool, paused_until: float | None)
-        self.stt = None
-        self._stt_lock = threading.Lock()
+        self.stt: SpeechToText | None = None
 
     # -- UI helpers -----------------------------------------------------------
     def set_mode(self, mode, text=""):
@@ -111,49 +111,22 @@ class Assistant:
             wake.threshold = float(self.cfg["wake"]["threshold"])
         return changed
 
-    # -- speech-to-text + Premiere guard ---------------------------------------
-    PREMIERE = "Adobe Premiere Pro.exe"
+    # -- speech-to-text ---------------------------------------------------------
+    def stt_device(self) -> str:
+        """gpu | cpu: --gpu/--cpu flags win over stt.device."""
+        return self.stt_override or normalize_device(self.cfg["stt"].get("device", "gpu"))
 
-    def wants_gpu(self) -> bool:
-        return bool(self.use_gpu or str(self.cfg["stt"].get("device", "cpu")).startswith("cuda"))
+    def _stt_changed(self, label: str):
+        sig = getattr(self.ui, "stt", None)
+        if sig is not None:
+            sig.emit(label)
 
-    def _guard_on(self) -> bool:
-        return self.wants_gpu() and bool(self.cfg.get("app", {}).get("premiere_guard", True))
-
-    def _premiere_running(self) -> bool:
-        from .winsys import process_running
-        return process_running(self.PREMIERE)
-
-    def _make_stt(self, gpu: bool):
-        c = dict(self.cfg["stt"])
-        if not gpu:
-            if c.get("device", "cpu") != "cpu":      # cuda config forced onto the CPU
-                c["compute_type"] = "int8"
-            c["device"] = "cpu"
-        return Transcriber(c, use_gpu=gpu, hint_words=list(self.cfg["projects"]))
-
-    def guard_check(self) -> str | None:
-        """Premiere guard: whisper on the CPU while Premiere runs, back to the
-        GPU after. Returns "cpu"/"gpu" when it switched, else None."""
-        if not self._guard_on() or self.stt is None:
-            return None
-        busy = self._premiere_running()
-        on_gpu = getattr(self.stt, "device", "cpu") == "cuda"
-        if busy == (not on_gpu):
-            return None
-        target_gpu = not busy
-        print(f"[guard] Premiere {'running' if busy else 'closed'}: whisper -> {'gpu' if target_gpu else 'cpu'}")
-        new = self._make_stt(target_gpu)
-        with self._stt_lock:
-            old, self.stt = self.stt, new
-        del old
-        return "gpu" if target_gpu else "cpu"
-
-    def _guard_loop(self):
+    def _stt_poll_loop(self):
+        """Premiere check every 10 s (the per-utterance check covers the rest)."""
         while not self.stopping:
             time.sleep(10)
             try:
-                self.guard_check()
+                self.stt.poll()
             except Exception:
                 traceback.print_exc()
 
@@ -179,17 +152,15 @@ class Assistant:
         if not self.text_mode:
             self.set_mode("loading", "loading wake word…")
             self.wake = WakeWord(c["wake"]["model"], float(c["wake"]["threshold"]))
-            self.set_mode("loading", f"loading whisper {c['stt']['model']}…")
-            gpu = self.wants_gpu()
-            if gpu and self._guard_on() and self._premiere_running():
-                print("[guard] Premiere is running: whisper starts on the CPU")
-                gpu = False
-            self.stt = self._make_stt(gpu)
-            if self._guard_on():
-                threading.Thread(target=self._guard_loop, daemon=True, name="premiere-guard").start()
+            self.set_mode("loading", f"loading whisper ({self.stt_device()})…")
+            self.stt = SpeechToText(c["stt"], device=self.stt_device(), hint_words=list(c["projects"]),
+                                    on_change=self._stt_changed)
+            self._stt_changed(self.stt.label)
+            if self.stt.want == "gpu" and not self.stt.gpu_failed:
+                threading.Thread(target=self._stt_poll_loop, daemon=True, name="stt-premiere").start()
         self.ready.set()
         self.rest()
-        print(f"[ready] fast path: {self.brain.backend}; stt on {getattr(getattr(self, 'stt', None), 'device', '-')}")
+        print(f"[ready] fast path: {self.brain.backend}; stt: {self.stt.label if self.stt else '-'}")
 
     # -- TTS callbacks --------------------------------------------------------
     def _tts_started(self):
@@ -308,9 +279,7 @@ class Assistant:
                 continue
             t_rec = time.perf_counter()
             self.set_mode("thinking", "…")
-            with self._stt_lock:
-                stt = self.stt
-            text = stt.transcribe(audio)
+            text = self.stt.transcribe(audio)
             t_stt = time.perf_counter()
             print(f"[heard] {text!r}")
             cooldown_until = time.perf_counter() + float(self.cfg["wake"]["cooldown"])

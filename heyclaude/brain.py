@@ -215,6 +215,16 @@ def _strip_lead(rest: str, key: str) -> str:
     return tail or rest
 
 
+def widget_prompt(cfg: dict | None) -> str:
+    """The response-widget contract (ui/widgets.schema.json) for either tier;
+    off with island.widgets: false."""
+    if not ((cfg or {}).get("island") or {}).get("widgets", True):
+        return ""
+    from .widgets import prompt_text
+    return ("\n\nIsland cards. " + prompt_text() +
+            "\nThe WIDGET line is the only exception to the plain-spoken-sentences rule, and it must come last.")
+
+
 def system_prompt(projects: Projects, has_agent: bool = True) -> str:
     names = ", ".join(projects.map) or "(none configured)"
     lookup = (
@@ -284,6 +294,7 @@ class _CliChat:
     final_only=True yields only the final answer of each turn (for the agent,
     whose intermediate messages are tool-calling chatter).
     """
+    on_usage = None                         # M5: callback(dict) for Claude Code's rate_limit_event
 
     def __init__(self, exe: str, args: list[str], *, cwd: str, persistent: bool = True,
                  max_turns: int = 20, final_only: bool = False, name: str = "fast", timeout: float = 60):
@@ -297,6 +308,7 @@ class _CliChat:
         self.init_info: dict | None = None
         self.epoch = 0      # bumped on every new process: the Transcript re-sends context then
         self.on_tool = None  # callback(kind, block): "tool_use" / "tool_result" content blocks (M9 effects)
+        self.on_usage = None  # callback(dict): Claude Code's rate_limit_event (M5 plan-usage pill)
         if persistent:
             self._spawn()
 
@@ -379,6 +391,11 @@ class _CliChat:
             t = ev.get("type")
             if t in ("assistant", "user") and self.on_tool is not None:
                 self._tool_blocks(t, ev)
+            if t == "rate_limit_event" and self.on_usage is not None:
+                try:
+                    self.on_usage(usage_info(ev))
+                except Exception as e:
+                    print(f"[usage] {e}")
             if t == "system" and ev.get("subtype") == "init":
                 self.init_info = ev
             elif t == "stream_event" and not self.final_only:
@@ -410,6 +427,19 @@ class _CliChat:
                     self.on_tool(want, block)
                 except Exception as e:          # an effect must never break an answer
                     print(f"[effects] {want} handler failed: {e}")
+
+
+def usage_info(ev: dict) -> dict:
+    """Claude Code's stream-json rate_limit_event -> {"five_hour": 0.06, "seven_day": 0.16,
+    "resets": {...}, "status": "allowed"}. Utilisation is 0..1, as Claude Code reports it."""
+    info = ev.get("rate_limit_info") or {}
+    out: dict = {"status": info.get("status", ""), "resets": {}}
+    for name, w in (info.get("unifiedWindows") or {}).items():
+        if isinstance(w, dict) and isinstance(w.get("utilization"), (int, float)):
+            out[name] = float(w["utilization"])
+            if w.get("resetsAt"):
+                out["resets"][name] = w["resetsAt"]
+    return out
 
 
 def api_key(fast_cfg: dict | None = None) -> str | None:
@@ -548,6 +578,26 @@ def windows_mcp_servers(agent_cfg: dict) -> dict:
     return servers
 
 
+def weather_mcp_servers(cfg: dict) -> dict:
+    """mcpServers entry for the built-in weather tool (Open-Meteo, keyless; M5)."""
+    from .config import ROOT
+    w = cfg.get("weather") or {}
+    if not w.get("enabled", True):
+        return {}
+    return {"weather": {"command": _console_python(), "args": ["-m", "heyclaude.mcp_weather"],
+                        "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
+                                "HEYCLAUDE_WEATHER_LOCATION": str(w.get("location") or ""),
+                                "HEYCLAUDE_WEATHER_UNIT": str(w.get("unit") or "C")}}}
+
+
+WEATHER_TOOL = "mcp__weather__get_weather"
+AGENT_WEATHER_PROMPT = (
+    " For any weather question call mcp__weather__get_weather (empty location = the user's home place); "
+    "the island shows the forecast card from its result by itself, so don't add a WIDGET line for "
+    "weather; just say the gist, e.g. 'Fifteen degrees and clear, rain after midnight.'"
+)
+
+
 def gate_allowed_tools(tools: list[str]) -> tuple[list[str], list[str]]:
     """(kept, dropped). PowerShell / Registry never pass, and of Windows-MCP
     only the read-only tools do: its acting tools (Click, Type, Shortcut, Drag,
@@ -565,6 +615,7 @@ def gate_allowed_tools(tools: list[str]) -> tuple[list[str], list[str]]:
 
 class Agent:
     """Tier (b): one warm Claude Code process with tools, reused for every lookup."""
+    on_tool_use = None                      # M5: callback({"id", "name", "phase", "input"}) for the island's icons
 
     def __init__(self, cfg: dict, exe: str):
         from .config import ROOT
@@ -577,13 +628,19 @@ class Agent:
         self.reported = False
         # M9: tool calls are watched so changes get an island effect and an undo.
         self.on_tool_result = None          # callback(name, input, result, is_error)
+        self.on_tool_use = None             # M5: callback({"id", "name", "phase": "start"|"end", "input"}) for the icons
         self._pending_tools: dict[str, tuple[str, dict]] = {}
         self.chat.on_tool = self._tool_event
 
     def _tool_event(self, kind: str, block: dict):
         if kind == "tool_use":
             self._pending_tools[block.get("id", "")] = (block.get("name", ""), block.get("input") or {})
+            if self.on_tool_use is not None:
+                self.on_tool_use({"id": block.get("id", ""), "name": block.get("name", ""), "phase": "start",
+                                  "input": block.get("input") or {}})
             return
+        if self.on_tool_use is not None:
+            self.on_tool_use({"id": block.get("tool_use_id", ""), "phase": "end"})
         name, args = self._pending_tools.pop(block.get("tool_use_id", ""), ("", {}))
         if not name or self.on_tool_result is None:
             return
@@ -598,14 +655,19 @@ class Agent:
         a = self.cfg["agent"]
         day = self.day = session_name(self.cfg.get("conversation"))
         win = windows_mcp_servers(a)
-        prompt = AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
+        win.update(weather_mcp_servers(self.cfg))
+        prompt = (AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
+                  + (AGENT_WEATHER_PROMPT if "weather" in win else "") + widget_prompt(self.cfg))
         args = ["--model", a["model"], "--output-format", "stream-json", "--verbose",
                 "--permission-mode", a["permission_mode"], "--permission-prompts", "none",
                 "--append-system-prompt", prompt, "--name", day or "hey-claude assistant"]
         if not day:
             args.append("--no-session-persistence")
         if a.get("allowed_tools"):
-            kept, dropped = gate_allowed_tools(list(a["allowed_tools"]))
+            allowed = list(a["allowed_tools"])
+            if "weather" in win and WEATHER_TOOL not in allowed:
+                allowed.append(WEATHER_TOOL)              # read-only and keyless: always allowed when on
+            kept, dropped = gate_allowed_tools(allowed)
             if dropped:
                 print(f"[agent] not allowed without approvals (M7): {', '.join(dropped)}")
             if kept:
@@ -659,7 +721,7 @@ class Brain:
         exe = find_claude(cfg["claude"].get("exe")) if backend == "cli" or cfg["agent"]["enabled"] else None
         self.exe = exe
         self.agent = Agent(cfg, exe) if cfg["agent"]["enabled"] else None
-        sp = system_prompt(self.projects, has_agent=self.agent is not None)
+        sp = system_prompt(self.projects, has_agent=self.agent is not None) + widget_prompt(cfg)
         if backend == "sdk":
             self.chat = _SdkChat(fast["sdk_model"], sp, int(fast["max_tokens"]), key)
         else:

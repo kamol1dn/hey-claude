@@ -294,6 +294,31 @@ tts:
   piper_exe: piper
   piper_model: null
 
+weather:
+  # M5: the built-in weather tool (Open-Meteo: no key, no account). The tool
+  # agent calls it for weather questions, and the island shows the forecast
+  # card from its result. location = your home place for "what's the weather"
+  # (a city, optionally ", country"); empty = it asks you to say a place.
+  # Changes apply after a restart (the agent's tools start with it).
+  enabled: true
+  location: ""
+  unit: C                 # C or F
+
 island:
   screen: primary        # primary, or a screen index
   top_margin: auto        # px, or auto = centred in a bar docked at the top of the screen (else 8)
+  # M5: the island is Qt Quick ("Ember & Thread", docs/island-motion.md). classic = the old QPainter one.
+  engine: qml
+  # Size of the whole island (pill, panel, cards, text, icons): 0.8-2.0, or auto
+  # (1.0; 1.25 on a screen of 27" or more). Vector all the way, so it stays sharp.
+  # Settings > General > Island has a slider that previews it live.
+  scale: auto
+  # Motion: auto (calm when Windows "Animation effects" is off), full, calm (no decoration), off (instant).
+  motion: auto
+  renderer: auto          # auto (GPU: D3D11) or software (no GPU; live states at 30 fps)
+  hide_when_idle: false   # nothing on screen at rest; touch the top-centre edge to peek
+  widgets: true           # answers may carry a card (weather, agenda, timer...): ui/widgets.schema.json
+  icons: true             # the service icon of a tool in use ("Google Calendar · list events")
+  fetch_favicons: false   # fetch a favicon once for services without a bundled icon (state/icons/)
+  service_icons: {}       # per-server override, e.g. {google_calendar: C:/icons/cal.png}
+  usage_pill: true        # plan usage (5 h / week) in the hover list, as Claude Code reports it

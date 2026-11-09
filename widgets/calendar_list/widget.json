@@ -1,0 +1,96 @@
+{
+ "id": "calendar_list",
+ "name": "Calendar agenda",
+ "api": "1.0",
+ "description": "an agenda: events of a day or the next few",
+ "title": "{title}",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": false,
+ "ttl_s": 12,
+ "glyph": "calendar",
+ "example": {
+  "title": "Today",
+  "events": [
+   {
+    "start": "09:00",
+    "end": "09:30",
+    "title": "Standup",
+    "location": "Team room",
+    "color": "#6CCB7A"
+   },
+   {
+    "start": "10:00",
+    "end": "10:45",
+    "title": "Design review",
+    "location": "Room 4",
+    "color": "#D97757"
+   },
+   {
+    "start": "13:00",
+    "end": "14:00",
+    "title": "Lunch with Aziz",
+    "location": "Plov centre",
+    "color": "#8FB6D8"
+   },
+   {
+    "start": "15:00",
+    "end": "15:30",
+    "title": "1:1 with Sam",
+    "location": "Video call",
+    "color": "#C99AE8"
+   }
+  ]
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "events"
+  ],
+  "properties": {
+   "title": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "events": {
+    "type": "array",
+    "maxItems": 6,
+    "items": {
+     "type": "object",
+     "required": [
+      "start",
+      "title"
+     ],
+     "properties": {
+      "start": {
+       "type": "string",
+       "maxLength": 16
+      },
+      "end": {
+       "type": "string",
+       "maxLength": 16
+      },
+      "title": {
+       "type": "string",
+       "maxLength": 80
+      },
+      "location": {
+       "type": "string",
+       "maxLength": 60
+      },
+      "calendar": {
+       "type": "string",
+       "maxLength": 30
+      },
+      "color": {
+       "type": "string",
+       "pattern": "^#[0-9A-Fa-f]{6}$"
+      }
+     }
+    }
+   }
+  }
+ }
+}

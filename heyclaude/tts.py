@@ -478,6 +478,8 @@ class Player:
         self._rate = None
         self._idle_since = time.monotonic()
         self.on_start = None
+        self.on_level = None                     # M5: loudness 0..1 of what's playing, ~30 Hz
+        self._level_t = 0.0
         self._started_chunk = False
         self._closer = threading.Thread(target=self._close_when_idle, daemon=True, name="tts-player-idle")
         self._closer.start()
@@ -548,6 +550,15 @@ class Player:
                 self._idle_since = time.monotonic()
         if fire and self.on_start:
             self.on_start()
+        if self.on_level is not None and filled:
+            now = time.monotonic()
+            if now - self._level_t >= 0.03:
+                self._level_t = now
+                rms = float(np.sqrt(np.mean(out[:filled, 0] ** 2)))
+                try:
+                    self.on_level(min(1.0, rms / 0.12))
+                except Exception:
+                    pass
 
     def wait(self, gen_check=None, timeout=120, more=None):
         end = time.monotonic() + timeout

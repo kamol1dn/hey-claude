@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kamol1dn/hey-claude/ui/widgets.schema.json",
+  "title": "hey-claude response widget",
+  "description": "The widget contract (ROADMAP M5). An answer may end with one line `WIDGET {json}` matching this envelope (it is never read aloud), or a tool result can produce a widget by itself (a manifest's `triggers`). Widgets are plug-ins: each is a folder widgets/<id>/ with widget.json (see x-manifest) and Widget.qml. heyclaude/widgets.py loads them, validates `data` against the widget's own schema, and builds the prompt both answering tiers get. An unknown widget, or data that doesn't validate, falls back to `text` (or nothing).",
+  "x-version": "1.0",
+  "type": "object",
+  "required": ["widget", "data"],
+  "properties": {
+    "widget": {"type": "string", "description": "a widget id: a folder under widgets/"},
+    "data": {"type": "object", "description": "validated against widgets/<id>/widget.json schema"},
+    "text": {"type": "string", "maxLength": 200, "description": "fallback line if the widget can't be shown"},
+    "ttl_s": {"type": "number", "minimum": 3, "maximum": 3600, "description": "how long it stays after the answer (default: the widget's ttl_s, else 12)"}
+  },
+  "x-manifest": {
+    "description": "widgets/<id>/widget.json",
+    "type": "object",
+    "required": ["id", "name", "api", "description", "schema", "example"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "the folder name"},
+      "name": {"type": "string"},
+      "api": {"type": "string", "description": "widget API major.minor this widget was written for (1.0)"},
+      "description": {"type": "string", "description": "one line for the model: when to use it"},
+      "title": {"type": "string", "description": "the card header; {field} placeholders read data fields"},
+      "glyph": {"type": "string", "description": "a Glyph.qml name for the header (sun, calendar, timer...)"},
+      "icon": {"type": "string", "description": "or a service icon slug (ui/icons/services/<slug>.svg)"},
+      "size": {"type": "object", "properties": {"width": {"type": "number"}, "max_height": {"type": "number"}},
+               "description": "the panel size it wants; the island grows to it (at most 460 x 280)"},
+      "private": {"type": "boolean", "description": "personal content (messages): fades 4 s after the island rests"},
+      "ttl_s": {"type": "number"},
+      "triggers": {"type": "object", "description": "a tool whose result is this widget's data, shown without the model writing it",
+                   "properties": {"tools": {"type": "array", "items": {"type": "string"}}, "data": {"type": "string", "enum": ["result"]}}},
+      "schema": {"type": "object", "description": "JSON Schema of `data` (the subset widgets.validate understands)"},
+      "example": {"type": "object", "description": "sample data: the prompt shows it, and tests render it"}
+    }
+  },
+  "x-qml": "Widget.qml gets `data_` (the data) and `wid`; it has `implicitHeight`, `minWidth`, `holds` (keep the card while true) and `signal action(string name, var payload)`. It may import \"../../ui/island\" for Glyph, Pill, ServiceIcon, Tick. Draw with Qt Quick items, Shapes or ShaderEffect (GPU), not Canvas."
+}

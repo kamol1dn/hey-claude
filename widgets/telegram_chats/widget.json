@@ -1,0 +1,88 @@
+{
+ "id": "telegram_chats",
+ "name": "Telegram chats",
+ "api": "1.0",
+ "description": "Telegram chats that need attention",
+ "title": "Telegram · chats",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": true,
+ "ttl_s": 12,
+ "icon": "telegram",
+ "example": {
+  "chats": [
+   {
+    "name": "Aziz",
+    "unread": 2,
+    "last": "are we still on for 7?",
+    "time": "18:42",
+    "link": "tg://resolve?domain=aziz"
+   },
+   {
+    "name": "Design crew",
+    "unread": 14,
+    "last": "Lin: new mocks are up",
+    "time": "17:10"
+   },
+   {
+    "name": "Mom",
+    "unread": 1,
+    "last": "call me when you can",
+    "time": "16:05"
+   },
+   {
+    "name": "Sam",
+    "unread": 0,
+    "last": "sounds good",
+    "time": "15:47"
+   }
+  ]
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "chats"
+  ],
+  "properties": {
+   "chats": {
+    "type": "array",
+    "maxItems": 6,
+    "items": {
+     "type": "object",
+     "required": [
+      "name"
+     ],
+     "properties": {
+      "name": {
+       "type": "string",
+       "maxLength": 50
+      },
+      "unread": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "last": {
+       "type": "string",
+       "maxLength": 120
+      },
+      "time": {
+       "type": "string",
+       "maxLength": 16
+      },
+      "avatar": {
+       "type": "string",
+       "maxLength": 300
+      },
+      "link": {
+       "type": "string",
+       "maxLength": 200,
+       "pattern": "^tg://"
+      }
+     }
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,36 @@
+{
+ "id": "image",
+ "name": "Image",
+ "api": "1.0",
+ "description": "an image from a local file or an https URL",
+ "title": "{caption}",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": false,
+ "ttl_s": 12,
+ "glyph": "image",
+ "example": {
+  "url": "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg",
+  "caption": "Example"
+ },
+ "schema": {
+  "type": "object",
+  "properties": {
+   "url": {
+    "type": "string",
+    "maxLength": 500,
+    "pattern": "^https://"
+   },
+   "path": {
+    "type": "string",
+    "maxLength": 300
+   },
+   "caption": {
+    "type": "string",
+    "maxLength": 100
+   }
+  }
+ }
+}

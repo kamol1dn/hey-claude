@@ -572,8 +572,9 @@ switching, the default output device and locking are opt-in (`--radios`,
 Measured here (2026-11-09, a laptop, panel brightness via WMI): 18 checks ok,
 lock skipped.
 
-**Effects** (`heyclaude/island_effects.py` paints them, from the data in
-`ui/effects.json`): a volume slider that glides to the new level, a speaker
+**Effects** (`ui/island/EffectRow.qml` draws them since M5, from the data in
+`ui/effects.json`; `heyclaude/island_effects.py` is the classic island's
+QPainter version): a volume slider that glides to the new level, a speaker
 with its slash drawn in for mute, a sun whose ring of dots grows or shrinks
 for brightness, a sun ↔ moon flip with a light wash for dark/light mode, a
 media card with the album art (read by hey-claude itself, never sent to the
@@ -581,8 +582,77 @@ model) and the title sliding on skip, a shutter flash for screenshots, a
 Confirm row for power actions, and a generic "icon + old → new" for
 everything else. An undo plays the same effect backwards. They are short
 (~0.6 s) and calm. After the entry only a countdown hairline redraws, at 4 fps,
-and nothing runs once the row has gone. M5 will port them to QML with the same
-data contract.
+and nothing runs once the row has gone.
+
+## The island (M5: "Ember & Thread")
+
+The island is Qt Quick: one fixed, transparent window at the top centre that
+never takes focus (except while the talk-or-type field is open) and lets
+clicks through everywhere outside the pill. The pill morphs inside it on
+springs. It is drawn on the GPU through Qt's D3D11 backend by one shader
+(`ui/island/island.frag`), with a software fallback (`island.renderer:
+software`, or automatic when the shader can't load). The motion follows
+[docs/island-motion.md](docs/island-motion.md): an **ember** (Claude's
+presence; its warmth and breath tell the state) and a **thread** (the voice
+line: white is you, terracotta is Claude).
+
+![The island's states, effects and cards](docs/img/island-states.png)
+
+- Every state has its own gesture: ready breathes, off has a slash, paused
+  has a pilot light and a resume arc, listening's wave flows in, holding is
+  bracketed (Ctrl+Shift mutes it), followup drains a warm wash, thinking
+  writes loops, speaking's wave flows out, an error underlines, and a finished
+  task leaves a check.
+- **Mic and stop buttons** while it thinks or talks; **not me** after a wake.
+- **Tools in use** show their service and icon ("Google Calendar · list
+  events"). Parallel calls stack, and Telegram shuffles chat bubbles while it
+  reads. Icons: your override (`island.service_icons`), an icon the MCP server
+  declares, a bundled Simple Icons logo (CC0), a cached favicon
+  (`island.fetch_favicons`, off by default), or a plug with initials.
+- **Response widgets:** the pill springs into a panel (up to ~460 × 280) for a
+  card: weather, calendar agenda, timer (+1 min / Pause / Cancel; it says when
+  it ends), task card, link or file, code snippet with Copy, image, and
+  Telegram chats / message / draft. The draft has Send, Edit and Cancel; Send
+  stays disabled until M7's approvals exist. An answer may end with
+  `WIDGET {...}` (never read aloud), or a tool's result becomes the card by
+  itself. The design is [docs/widgets-preview.html](docs/widgets-preview.html).
+- **Widgets are plug-ins:** each is a folder `widgets/<id>/` with
+  `widget.json` (its data schema, an example, size, title, which tools
+  trigger it) and `Widget.qml`. Add one by PR without touching the island.
+  [ui/widgets.schema.json](ui/widgets.schema.json) is the envelope and the
+  manifest contract; both answering tiers are prompted from the registry. An
+  unknown or invalid widget falls back to its text. Cards draw on the GPU
+  (Qt Quick items, Shapes, shaders; no CPU-painted canvases).
+- **Weather** comes from a built-in, keyless tool (Open-Meteo, cached 10 min):
+  the agent calls `get_weather`, and the card (now, the next 6 hours, 3 days,
+  an animated sky drawn by a shader) comes straight from the result.
+  `weather.location` in the config is your home place.
+- **Drop a file** on the island to ask about it: the talk-or-type field opens
+  with the file attached, and the tool agent gets its path.
+- **Hide when idle** (`island.hide_when_idle`): nothing on screen at rest. It
+  peeks out when the pointer touches the top-centre edge.
+- **Plan usage** (`island.usage_pill`): the 5-hour and weekly limits, as Claude
+  Code reports them in its own stream (`rate_limit_event`), in the hover list.
+- **Motion** (`island.motion`): `auto` is calm when Windows' "Animation
+  effects" is off. `calm` keeps information and drops decoration. `off` is
+  instant.
+- **Size** (`island.scale`, Settings → General → Island): 80–200 %, previewed
+  live while you drag. Everything is vector or scene graph (text, shapes,
+  shaders, SVG icons rasterised at the final size), so it stays sharp at any
+  size. At exactly 100 % text is drawn natively (hinted, the sharpest on a
+  96 DPI screen); scaled, it switches to distance-field text.
+- `island.engine: classic` brings back the QPainter island. The QML one also
+  falls back to it if Qt Quick can't start.
+
+States come from the versioned registry [ui/states.json](ui/states.json),
+shared with M6's character packs. A state a theme doesn't implement walks its
+fallback chain, so new states never break old themes. Ember & Thread is the
+first theme (`ui/themes/ember-thread`).
+
+`tools/island_lab.py` is the motion lab: the real island driven by fake
+events, with an fps readout. `--shots DIR` saves a png of every state and
+widget, and `--measure` runs the acceptance measurements. Neither touches a
+running hey-claude.
 
 ## Conversations and sessions
 
@@ -880,8 +950,12 @@ heyclaude/
   tasks.py        headless claude runs, stream-json parsing, logs, session ids
   tts.py          Kokoro (GPU → CPU → SAPI chain, per-reply device choice), SAPI (direct COM), Piper;
                   sentence streaming, the output stream that feeds the echo canceller
-  island.py       the pill, task list, log window
-  island_effects.py  M9: paints the tool effects (volume slider, sun/moon, media card...) on the island
+  island.py       the Bridge (signals into the island), make_island(), the classic QPainter island, log window
+  island_qml.py   M5: the Qt Quick island (window, mask, focus, mode routing, effects, widgets, icons, approvals)
+  states.py       M5/M6: the versioned state registry (ui/states.json): validate, resolve fallbacks
+  widgets.py      M5: response widgets: the schema, the WIDGET line filter, the prompt, safe link opening
+  service_icons.py M5: tool name -> service name and icon (override > declared > bundled > favicon > initials)
+  island_effects.py  M9: paints the tool effects on the classic island
   effects.py      M9: tool call -> effect event (the data contract; ui/effects.json maps tools to effects)
   undo.py         M9: "undo that" and the island's Undo button (inverse calls, run locally)
   mcp_windows/    M9: the Windows settings MCP server (audio, display, radios, power, media, apps,
@@ -891,10 +965,14 @@ tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
                   wake_eval.py (wake word hit rate, false wakes per hour, threshold),
                   stage_wake_release.py (stage the shared model as a release asset; publishes nothing),
                   stt_eval.py (record your voice; whisper models' speed and word error rate),
-                  check_windows_settings.py (M9: every settings tool, live, values restored)
-tests/            offline tests (python tests	est_offline.py, tests	est_wake.py, tests	est_conversation.py,
+                  check_windows_settings.py (M9: every settings tool, live, values restored),
+                  island_lab.py + island_measure.py (M5: the motion lab, screenshots, acceptance measurements),
+                  build_shaders.py (M5: ui/island/*.frag -> .qsb)
+tests/            offline tests (python tests	est_island.py, tests	est_offline.py, tests	est_wake.py, tests	est_conversation.py,
                   tests	est_input.py, tests	est_voice.py, tests	est_windows.py, tests	est_wake_train.py)
-ui/               effects.json: which island effect each tool gets (M9)
+ui/               effects.json: which island effect each tool gets (M9); island/: the QML island and
+                  its shader (M5); states.json: the state registry; widgets.schema.json: response
+                  widgets; services.json + icons/services/: service names and icons; themes/
 models/           hey_claude.onnx (downloaded on first start, git-ignored) and its LICENSE
 docs/             the wake word: shared model, tune-up, Colab
 ```

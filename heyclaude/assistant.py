@@ -103,6 +103,20 @@ class Assistant:
         if sig is not None:
             sig.emit(label)
 
+    def announce(self, text: str):
+        """Say something that isn't an answer (a timer ended), from any thread."""
+        self._speaking_text = text
+        self.speaker.announce(text)
+
+    def _ui_emit(self, name: str, *args):
+        """Emit an optional Bridge signal (newer islands have more of them)."""
+        sig = getattr(self.ui, name, None)
+        if sig is not None:
+            try:
+                sig.emit(*args)
+            except Exception as e:
+                print(f"[ui] {name}: {e}")
+
     def set_mode(self, mode, text=""):
         self.mode = mode
         self.ui.state.emit(mode, text)
@@ -310,6 +324,9 @@ class Assistant:
                                monitor=self.monitor, far_tap=self.far.push if self.aec else None,
                                on_label=self._voice_changed)
         self._voice_changed(self.speaker.label)
+        player = getattr(self.speaker, "player", None)
+        if player is not None and hasattr(player, "on_level"):
+            player.on_level = lambda v: self._ui_emit("tts_level", v)     # M5: the island's outward wave
         self.tasks = TaskManager(c, on_change=self.push_tasks, on_finish=self._task_finished)
         self.push_tasks()
         self.set_mode("loading", "loading brain…")
@@ -321,6 +338,10 @@ class Assistant:
             print(f"[undo] off: {e}")
         if self.brain.agent is not None:
             self.brain.agent.on_tool_result = self._on_tool_result
+            self.brain.agent.on_tool_use = lambda ev: self._ui_emit("tool", ev)       # M5: service icons
+        for chat in (self.brain.chat, getattr(self.brain.agent, "chat", None)):
+            if chat is not None and hasattr(chat, "on_usage"):
+                chat.on_usage = lambda info: self._ui_emit("usage", info)            # M5: plan-usage pill
         if not self.text_mode:
             self.set_mode("loading", "loading wake word…")
             try:
@@ -379,6 +400,14 @@ class Assistant:
         """The agent ran a tool (its process's thread): show the effect, remember the undo."""
         if is_error:
             return
+        try:                                    # M5: a widget straight from the tool result (weather)
+            from .widgets import from_tool
+            spec = from_tool(name, args, result)
+            if spec is not None:
+                print(f"[widget] {spec['widget']} from {name}")
+                self._ui_emit("widget", spec)
+        except Exception as e:
+            print(f"[widget] {name}: {e}")
         from . import effects
         undoable = self.undo_stack is not None and self.undo_stack.can_undo(name, args, result)
         try:
@@ -758,6 +787,8 @@ class Assistant:
         self.speaker.begin()
         self.brain.timing = {}
         said = self._reply = []
+        from .widgets import WidgetFilter
+        wf = self._wf = WidgetFilter()          # M5: a `WIDGET {...}` line is shown, never spoken
         tier, task_id, answered = "", None, False
         t_llm0 = time.perf_counter()
         try:
@@ -769,6 +800,9 @@ class Assistant:
                     answered = True
                 if kind == "say":
                     tier = tier or "fast"
+                    ev = ("say", wf.feed(ev[1]))
+                    if not ev[1]:
+                        continue
                     said.append(ev[1])
                     self._speaking_text = "".join(said).strip()
                     if self.mode == "speaking":
@@ -816,6 +850,14 @@ class Assistant:
                 self._say("The Claude command line isn't signed in. Run claude auth login once in a terminal.")
             else:
                 self._say("Sorry, that didn't work. " + msg[:80])
+        rest = wf.finish()
+        if rest.strip() and gen == self.gen:
+            said.append(rest)
+            self.speaker.feed(rest)
+        if wf.spec is not None and gen == self.gen:
+            print(f"[widget] {wf.spec.get('widget')}")
+            self._ui_emit("widget", wf.spec)
+        self._wf = None
         self.speaker.flush()
         if answered and gen == self.gen:
             if tier != "fresh" and self.brain.convo is not None:
@@ -845,6 +887,11 @@ class Assistant:
             if gen != self.gen:
                 break
             timing.setdefault("answer", time.perf_counter())
+            wf = getattr(self, "_wf", None)
+            if wf is not None:
+                chunk = wf.feed(chunk)
+                if not chunk:
+                    continue
             self._reply.append(chunk)
             self._speaking_text = "".join(self._reply).strip()
             self.speaker.feed(chunk)

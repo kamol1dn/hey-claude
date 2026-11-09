@@ -127,6 +127,21 @@ class Island(QWidget):
         s = screens[int(sel)] if str(sel).isdigit() and int(sel) < len(screens) else QGuiApplication.primaryScreen()
         return s.geometry()
 
+    def _top_band(self) -> int:
+        """Height of a taskbar docked at the top of the island's screen (0 if none)."""
+        screens = QGuiApplication.screens()
+        sel = self.cfg.get("screen", "primary")
+        s = screens[int(sel)] if str(sel).isdigit() and int(sel) < len(screens) else QGuiApplication.primaryScreen()
+        return max(0, s.availableGeometry().y() - s.geometry().y())
+
+    def _top_offset(self, h: int) -> int:
+        """`island.top_margin`: a number of px, or "auto" (default): centred in a top taskbar, else 8 px."""
+        m = self.cfg.get("top_margin", "auto")
+        if str(m).strip().lstrip("-").isdigit():
+            return int(m)
+        band = self._top_band()
+        return max(0, (band - h) // 2) if band >= 20 else 8
+
     # -- hotkey input field ------------------------------------------------------
     def attach_input(self, open_mic, cancel_mic, submit, closed=None):
         """Enable the hotkey's talk-or-type field. Callbacks go to the assistant."""
@@ -246,7 +261,7 @@ class Island(QWidget):
     def _place(self, immediate=False):
         w, h = self._target_size()
         sr = self._screen_rect()
-        target = QRectF(sr.x() + (sr.width() - w) / 2, sr.y() + int(self.cfg.get("top_margin", 8)), w, h)
+        target = QRectF(sr.x() + (sr.width() - w) / 2, sr.y() + self._top_offset(h), w, h)
         if immediate:
             self._apply_geom(target)
             return

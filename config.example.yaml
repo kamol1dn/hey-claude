@@ -182,4 +182,4 @@ tts:
 
 island:
   screen: primary        # primary, or a screen index
-  top_margin: 8
+  top_margin: auto        # px, or auto = centred in a bar docked at the top of the screen (else 8)

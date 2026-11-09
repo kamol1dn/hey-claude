@@ -628,10 +628,11 @@ def test_agent_tool_events_reach_the_callback():
     agent = B.Agent.__new__(B.Agent)
     agent._pending_tools = {}
     got = []
-    agent.on_tool_result = lambda *a: got.append(a)
+    agent.on_tool_result = lambda *a, **k: got.append(a + (k.get("raw"),))
     chat.on_tool = agent._tool_event
     assert "".join(chat._read_turn()) == "Volume 30."
-    assert got == [("mcp__windows__set_volume", {"level": 30}, {"old": 45, "new": 30}, False)]
+    assert got == [("mcp__windows__set_volume", {"level": 30}, {"old": 45, "new": 30}, False,
+                    '{"old": 45, "new": 30}')]
 
 
 def test_assistant_effect_and_undo_flow():

@@ -11,6 +11,12 @@
  "private": true,
  "ttl_s": 12,
  "icon": "telegram",
+ "triggers": {
+  "tools": [
+   "telegram_list_dialogs"
+  ],
+  "data": "telegram_dialogs"
+ },
  "example": {
   "chats": [
    {

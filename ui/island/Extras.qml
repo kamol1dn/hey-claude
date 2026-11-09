@@ -14,6 +14,7 @@ Item {
     // the head, in step with the voice). Card, question and answer go together.
     property string question: ""
     property string answer: ""
+    property real maxHeight: 100000          // what the window has under the head (Island.qml)
     readonly property bool showAnswer: answer !== "" && engineState !== "speaking" && engineState !== "thinking"
     readonly property real contentHeight: (effect.ev ? effect.height : 0) + approvals.height + (widget.spec ? widget.height : 0)
         + qrow.height + (showAnswer ? arow.height : 0)
@@ -22,7 +23,7 @@ Item {
     function clearTurn() { linger.stop(); question = ""; answer = "" }
     // At rest: a card keeps the turn up until it goes (then all of it collapses at
     // once); without a card the turn lingers a few seconds.
-    Timer { id: linger; interval: 4000; onTriggered: ex.clearTurn() }
+    Timer { id: linger; interval: Math.max(4000, arow.readMs); onTriggered: ex.clearTurn() }
     onRestingChanged: {
         if (!resting) { linger.stop(); return }
         if (question === "" && answer === "") return
@@ -76,9 +77,12 @@ Item {
                 model.widgetAction(wid, name, payload === undefined ? null : payload)
                 if (name === "dismiss" || name === "cancel") clear()
             }
-            onExpired: { clear(); if (ex.resting) ex.clearTurn() }
+            // a long answer still being read stays a little longer than its (private) card
+            onExpired: { clear(); if (ex.resting) { if (arow.readMs > 0) linger.restart(); else ex.clearTurn() } }
         }
-        TurnRow { id: arow; width: ex.width; text: ex.showAnswer ? ex.answer : ""; answer: true; lines: 3 }
+        // the answer in full: what the rest leaves of maxHeight, then it scrolls
+        TurnRow { id: arow; width: ex.width; text: ex.showAnswer ? ex.answer : ""; answer: true; lines: 0
+            maxH: ex.maxHeight - ((effect.ev ? effect.height : 0) + approvals.height + (widget.spec ? widget.height : 0) + qrow.height) }
     }
 
     function removeApproval(id) {

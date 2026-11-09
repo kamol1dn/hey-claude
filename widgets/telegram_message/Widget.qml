@@ -41,6 +41,7 @@ Item {
                 model: w.msgs
                 Item {
                     id: mi
+                    objectName: "messageRow"
                     readonly property bool me: w.mine(modelData)
                     readonly property real ind: modelData.reply && !me ? 22 : 0
                     readonly property real maxW: Math.round((w.width - ind) * (me ? 0.84 : 0.84))
@@ -69,6 +70,7 @@ Item {
                         color: mi.me ? Qt.rgba(217 / 255, 119 / 255, 87 / 255, 0.18) : Qt.rgba(1, 1, 1, 0.07)
                         Text {
                             id: meta
+                            objectName: "messageMeta"
                             x: 10; y: 7; width: Math.min(implicitWidth, mi.maxW - 20)
                             text: [modelData.sender || "", modelData.time || ""].filter(function (s) { return s }).join(" · ")
                             visible: text !== ""
@@ -78,6 +80,7 @@ Item {
                         }
                         Text {
                             id: body
+                            objectName: "messageText"
                             x: 10; y: meta.visible ? meta.y + meta.implicitHeight + 1 : 7
                             width: Math.min(implicitWidth, mi.maxW - 20)
                             text: modelData.text || ""

@@ -1,0 +1,9 @@
+{
+ "note": "a model-written text card without a title: no header at all, never 'Text'",
+ "answer": "Here are your recent messages.\nWIDGET {\"widget\": \"text\", \"data\": {\"text\": \"Nova Test: are we still on for seven?\"}, \"text\": \"Nova Test: are we still on for seven?\"}",
+ "expect": {
+  "widget": "text",
+  "title": "",
+  "icon": false
+ }
+}

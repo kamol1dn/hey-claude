@@ -188,7 +188,9 @@ def test_every_first_pack_widget_is_a_valid_plugin():
         assert str(man["api"]).startswith("1.")
         assert man["size"]["width"] <= 460 and man["size"]["max_height"] <= 280, wid
         w = W.for_qml({"widget": wid, "data": man["example"]})
-        assert w["qml"].endswith(f"widgets/{wid}/Widget.qml") and w["title"], wid
+        assert w["qml"].endswith(f"widgets/{wid}/Widget.qml"), wid
+        assert w["title"] or wid == "text", wid             # a text card without a title has no header
+        assert w["title"] not in ("Text", wid), wid
 
 
 def test_a_broken_plugin_is_skipped_not_fatal():
@@ -861,6 +863,225 @@ def test_the_filler_is_only_for_longer_requests():
         said = "".join(a.speaker.fed)
         assert ("Let me check" in said) == want, (question, said)
         assert "Let me check" not in "".join(a._reply)                     # never part of the answer
+
+
+# ------------------------------------------------------------------ real tool results, rendered live
+FIXTURES = ROOT / "tests" / "fixtures" / "tool_results"
+# what must never be on a card: a type name or a debug value
+_BAD_TEXT = {"Text", "text", "undefined", "null", "NaN", "[object Object]"}
+
+
+def _items(item):
+    """Every QQuickItem under `item` (visual children, Loader items and delegates too)."""
+    out = [item]
+    for c in item.childItems():
+        out += _items(c)
+    return out
+
+
+def _shown(item, root) -> bool:
+    """Visible and not faded out, up the chain to `root`."""
+    it = item
+    while it is not None:
+        if not it.isVisible() or it.opacity() < 0.05:
+            return False
+        if it is root:
+            return True
+        it = it.parentItem()
+    return True
+
+
+def _named(root, name):
+    return [i for i in _items(root) if i.objectName() == name and _shown(i, root)]
+
+
+def _texts(root):
+    return [str(i.property("text")) for i in _items(root)
+            if i.metaObject().className().startswith("QQuickText") and _shown(i, root) and i.property("text")]
+
+
+def _fixture_spec(fx):
+    """A fixture through the same path a live turn takes (the agent's tool_result, or the answer's WIDGET line)."""
+    from heyclaude.effects import parse_result, result_text
+    if "answer" in fx:
+        return W.strip_widget_lines(fx["answer"])[1]
+    content = fx["content"]
+    return W.from_tool(fx["tool"], fx["args"], parse_result(content), result_text(content))
+
+
+def _preview_layout():
+    """The reference: docs/widgets-preview.html's Telegram cards (title word, parts, rows, badges)."""
+    import re
+    html = (ROOT / "docs" / "widgets-preview.html").read_text(encoding="utf-8")
+    chats = html[html.index("tgchats(){"): html.index("tgmsg(){")]
+    msg = html[html.index("tgmsg(){"): html.index("tgdraft(){")]
+    unread = [int(n) for n in re.findall(r"\['[^']*','[^']*','[^']*',(\d+),'#", chats)]
+
+    def classes(block):
+        return {c for attr in re.findall(r'class="([^"]+)"', block) for c in attr.split()}
+    return {
+        "telegram_chats": {"title": re.search(r"title:'(\w+)", chats).group(1), "rows": len(unread),
+                           "badges": sum(1 for n in unread if n), "parts": {"chat", "av", "n", "m", "r", "ub"} & classes(chats)},
+        "telegram_message": {"title": re.search(r"title:'(\w+)", msg).group(1), "rows": msg.count('class="msg'),
+                             "parts": {"msg", "me", "reply"} & classes(msg) | ({"meta"} if "<small>" in msg else set())},
+    }
+
+
+# the live QML part for each part of the preview's markup
+_LIVE_PART = {"chat": "chatRow", "av": "chatAvatar", "r": "chatTime", "ub": "unreadBadge",
+              "msg": "messageRow", "meta": "messageMeta"}
+
+
+def _card_check(isl, spec, expect, label):
+    """Render `spec` on the live island (offscreen) and compare it with what the preview draws."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtQuick import QQuickItem
+    isl.clear_widget()
+    _spin(300)
+    isl.bridge_.widget.emit(spec)
+    _spin(1400)                                          # rows rise in 45 ms apart, badges pop after them
+    info = _v(isl.call("extrasInfo"))
+    assert info["widget"] == expect["widget"] and info["widgetReady"], (label, info)
+    card = isl.root.findChild(QQuickItem, "widgetCard")
+    assert card is not None and card.isVisible(), label
+    heads = _named(card, "cardHeader")
+    titles = [str(t.property("text")) for t in _named(card, "cardTitle")]
+    if expect["title"]:
+        assert heads and titles == [expect["title"]], (label, titles)
+    else:
+        assert not heads and not titles, (label, "a card without a title has no header", titles)
+    ids = set(W.registry())
+    for t in _texts(card):
+        assert t.strip() not in _BAD_TEXT and t.strip() not in ids, (label, "debug or type label on the card", t)
+        assert "{" not in t and "undefined" not in t, (label, t)
+    assert bool(_named(card, "cardIcon")) == expect.get("icon", False), (label, "service icon")
+    if "rows" in expect:
+        row = "chatRow" if expect["widget"] == "telegram_chats" else "messageRow"
+        assert len(_named(card, row)) == expect["rows"], (label, row, len(_named(card, row)))
+    if "badges" in expect:
+        assert len(_named(card, "unreadBadge")) == expect["badges"], (label, "badges")
+    # the panel fits the window and the grab shows a drawn card (not an empty or cut panel)
+    assert info["pillH"] <= 400 - 8, (label, info["pillH"])
+    img = isl.view.grabWindow()
+    assert not img.isNull(), label
+    r = card.mapRectToScene(QRectF(0, 0, card.width(), card.height()))
+    sx, sy = img.width() / isl.view.width(), img.height() / isl.view.height()
+    colours = set()
+    for gx in range(12):
+        for gy in range(8):
+            x = int((r.x() + r.width() * (gx + 0.5) / 12) * sx)
+            y = int((r.y() + r.height() * (gy + 0.5) / 8) * sy)
+            if 0 <= x < img.width() and 0 <= y < img.height():
+                colours.add(img.pixel(x, y))
+    assert len(colours) >= 3, (label, "the grab of the card is blank")
+    if os.environ.get("HC_CARD_SHOTS"):                   # tools: look at what CI rendered
+        img.save(str(Path(os.environ["HC_CARD_SHOTS"]) / f"{label}.png"))
+    return card
+
+
+def test_tool_results_map_to_their_widgets_in_both_formats():
+    """Recorded-shape tool results (JSON and the server's markdown) -> the right widget and data."""
+    for f in sorted(FIXTURES.glob("*.json")):
+        fx = json.loads(f.read_text(encoding="utf-8"))
+        spec = _fixture_spec(fx)
+        w = W.for_qml(spec)
+        assert w is not None and w["widget"] == fx["expect"]["widget"], (f.name, spec)
+        assert w["title"] == fx["expect"]["title"], (f.name, w["title"])
+        d = w["data"]
+        if w["widget"] == "telegram_chats":
+            assert len(d["chats"]) == fx["expect"]["rows"] <= 6
+            assert all(c["name"] and "**" not in c["name"] for c in d["chats"])
+            assert d["chats"][0]["unread"] == 2 and d["chats"][0]["link"] == "tg://resolve?domain=nova_test"
+            assert "\n" not in d["chats"][1]["last"]
+        if w["widget"] == "telegram_message":
+            assert len(d["messages"]) == fx["expect"]["rows"] <= 5
+            assert all("**" not in m["text"] and m["text"] for m in d["messages"])
+    # never a card from a tool that writes (send, edit, delete...), whatever it returns
+    for tool in ("telegram_send_message", "telegram_edit_message", "telegram_delete_messages", "telegram_forward_messages"):
+        assert W.from_tool("mcp__telegram__" + tool, {}, {"messages": [{"text": "x"}]}, "") is None, tool
+    # an odd result is no card, not an error
+    assert W.from_tool("mcp__telegram__telegram_list_dialogs", {}, None, "# Conversations (0)\n") is None
+    assert W.from_tool("mcp__telegram__telegram_get_messages", {}, {"messages": "?"}, "") is None
+
+
+def test_live_cards_from_real_tool_results_match_the_preview():
+    """Every recorded tool result renders on the live QML island (offscreen) with the
+    preview's structure: header title and icon, one row per chat or message, an unread
+    badge per unread chat, and no "Text" or debug labels anywhere on the card."""
+    isl = _island()
+    b = isl.bridge_
+    b.state.emit("speaking", "Here you go.")
+    _spin(300)
+    for f in sorted(FIXTURES.glob("*.json")):
+        fx = json.loads(f.read_text(encoding="utf-8"))
+        _card_check(isl, _fixture_spec(fx), fx["expect"], f.stem)
+    # the manifests' examples against the preview's own markup
+    ref = _preview_layout()
+    for wid, want in ref.items():
+        assert want["parts"] >= ({"chat", "av", "n", "m", "r", "ub"} if wid == "telegram_chats" else {"msg", "meta", "me"}), (wid, want)
+        man = W.registry()[wid]
+        spec = {"widget": wid, "data": man["example"], "text": ""}
+        expect = {"widget": wid, "title": W.title_for(man, man["example"]), "icon": True}
+        assert expect["title"].split(" ")[0] == want["title"], (wid, expect["title"], want["title"])
+        if wid == "telegram_chats":
+            expect.update(rows=want["rows"], badges=want["badges"])
+        card = _card_check(isl, spec, expect, wid + "_example")
+        for part in want["parts"]:
+            if part in _LIVE_PART and not (part == "ub" and not want["badges"]):
+                assert _named(card, _LIVE_PART[part]), (wid, "the preview has", part, "the live card doesn't")
+    isl.clear_widget()
+    _spin(300)
+
+
+def test_a_long_answer_is_never_cut_and_the_followup_is_quiet_over_a_card():
+    """With a card open: the whole answer is on the panel (it scrolls, no ellipsis), and
+    the followup cue is a hairline at the bottom edge, not the thread and "go on"."""
+    from PySide6.QtQuick import QQuickItem
+    isl = _island()
+    b = isl.bridge_
+    fx = json.loads((FIXTURES / "telegram_list_dialogs_markdown.json").read_text(encoding="utf-8"))
+    long_answer = " ".join(f"Sentence number {i} of a long answer that goes on for a while." for i in range(1, 15))
+    isl.start_turn({"question": "show me the recent messages"})
+    b.state.emit("thinking", "")
+    _spin(300)
+    b.widget.emit(_fixture_spec(fx))
+    b.state.emit("speaking", long_answer)
+    _spin(800)
+    b.state.emit("followup", "4")
+    _spin(900)
+    p = _v(isl.call("probe"))
+    assert p["state"] == "followup", p
+    assert p["thrA"] < 0.05 and p["washA"] == 0 and p["dotsA"] == 0 and "go on" not in p["labels"], p
+    assert p["drainA"] > 0.5 and 0 < p["drainU"] < 1, p
+    drain = isl.root.findChild(QQuickItem, "followupDrain")
+    assert drain is not None and drain.isVisible() and drain.height() <= 2 and drain.width() > 40
+    u0 = p["drainU"]
+    _spin(1200)
+    assert _v(isl.call("probe"))["drainU"] < u0 - 0.15                    # it drains with the window
+    b.state.emit("idle", "")
+    _spin(1200)
+    info = _v(isl.call("extrasInfo"))
+    assert info["widget"] == "telegram_chats" and info["answer"] == long_answer, info
+    texts = [i for i in _items(isl.root) if i.objectName() == "answerText"]
+    assert texts and texts[0].isVisible()
+    t = texts[0]
+    assert t.property("text") == long_answer and not t.property("truncated"), "the answer is elided"
+    view = isl.root.findChild(QQuickItem, "answerView")
+    assert view.height() < t.height(), "this answer is longer than the room left: it scrolls"
+    assert info["pillH"] <= 400 - 8, info
+    _spin(3200)                                                            # after a look, it drifts to the rest
+    assert view.property("contentY") > 5
+    # without a panel the followup is the usual one ("go on", the wave)
+    isl.clear_widget()
+    isl.model.questionShown.emit("")                                       # a new turn: the panel empties
+    _spin(600)
+    assert _v(isl.call("extrasInfo"))["height"] == 0
+    b.state.emit("followup", "3")
+    _spin(700)
+    p = _v(isl.call("probe"))
+    assert "go on" in p["labels"] and p["drainA"] == 0, p
+    b.state.emit("idle", "")
+    _spin(600)
 
 
 def test_qsb_is_built_from_the_current_shader():

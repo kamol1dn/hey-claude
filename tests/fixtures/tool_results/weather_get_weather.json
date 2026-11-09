@@ -1,0 +1,18 @@
+{
+ "note": "the bundled weather server's result (a fixed forecast)",
+ "tool": "mcp__weather__get_weather",
+ "args": {
+  "location": "Sampletown"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"location\": \"Sampletown, Exampleland\", \"temp\": 15, \"unit\": \"C\", \"condition\": \"Mainly clear\", \"icon\": \"night\", \"source\": \"Open-Meteo\", \"feels\": 14, \"wind\": 12, \"high\": 20, \"low\": 14, \"hourly\": [{\"time\": \"22:00\", \"temp\": 11, \"icon\": \"night\"}, {\"time\": \"23:00\", \"temp\": 12, \"icon\": \"night\"}, {\"time\": \"00:00\", \"temp\": 13, \"icon\": \"night\"}, {\"time\": \"01:00\", \"temp\": 14, \"icon\": \"rain\"}, {\"time\": \"02:00\", \"temp\": 15, \"icon\": \"night\"}, {\"time\": \"03:00\", \"temp\": 16, \"icon\": \"night\"}], \"days\": [{\"day\": \"Today\", \"low\": 14, \"high\": 20, \"icon\": \"rain\"}, {\"day\": \"Tue\", \"low\": 9, \"high\": 16, \"icon\": \"sun\"}, {\"day\": \"Wed\", \"low\": 9, \"high\": 18, \"icon\": \"cloud\"}]}"
+  }
+ ],
+ "expect": {
+  "widget": "weather",
+  "title": "Weather · Sampletown, Exampleland",
+  "icon": true
+ }
+}

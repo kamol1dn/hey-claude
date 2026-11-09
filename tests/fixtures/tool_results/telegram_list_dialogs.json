@@ -1,0 +1,21 @@
+{
+ "note": "telegram-mcp-server, response_format json (synthetic people)",
+ "tool": "mcp__telegram__telegram_list_dialogs",
+ "args": {
+  "limit": 7,
+  "response_format": "json"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"count\": 7,\n  \"dialogs\": [\n    {\n      \"id\": \"1001\",\n      \"kind\": \"user\",\n      \"name\": \"Nova Test\",\n      \"username\": \"nova_test\",\n      \"unreadCount\": 2,\n      \"pinned\": true,\n      \"lastMessage\": {\n        \"id\": 51,\n        \"chatId\": \"1001\",\n        \"date\": \"2026-11-09T13:42:10.000Z\",\n        \"text\": \"are we still on for seven?\",\n        \"outgoing\": false,\n        \"senderId\": \"2002\",\n        \"senderName\": \"Nova Test\"\n      }\n    },\n    {\n      \"id\": \"-1002003\",\n      \"kind\": \"group\",\n      \"name\": \"Island crew\",\n      \"unreadCount\": 14,\n      \"pinned\": false,\n      \"lastMessage\": {\n        \"id\": 900,\n        \"chatId\": \"-1002003\",\n        \"date\": \"2026-11-09T12:10:00.000Z\",\n        \"text\": \"new mocks are up\\nsee the doc\",\n        \"outgoing\": false,\n        \"senderId\": \"2002\",\n        \"senderName\": \"Lin Sample\"\n      }\n    },\n    {\n      \"id\": \"1003\",\n      \"kind\": \"user\",\n      \"name\": \"Sample Parent\",\n      \"unreadCount\": 1,\n      \"pinned\": false,\n      \"lastMessage\": {\n        \"id\": 12,\n        \"chatId\": \"1003\",\n        \"date\": \"2026-11-09T11:05:00.000Z\",\n        \"text\": \"call me when you can\",\n        \"outgoing\": false,\n        \"senderId\": \"2002\",\n        \"senderName\": \"Sample Parent\"\n      }\n    },\n    {\n      \"id\": \"1004\",\n      \"kind\": \"user\",\n      \"name\": \"Sam Example\",\n      \"username\": \"sam_example\",\n      \"unreadCount\": 0,\n      \"pinned\": false,\n      \"lastMessage\": {\n        \"id\": 77,\n        \"chatId\": \"1004\",\n        \"date\": \"2026-11-09T10:47:00.000Z\",\n        \"text\": \"sounds good\",\n        \"outgoing\": true\n      }\n    },\n    {\n      \"id\": \"-1005\",\n      \"kind\": \"channel\",\n      \"name\": \"Release notes (demo)\",\n      \"unreadCount\": 3,\n      \"pinned\": false,\n      \"lastMessage\": {\n        \"id\": 3,\n        \"chatId\": \"-1005\",\n        \"date\": \"2026-11-08T18:00:00.000Z\",\n        \"text\": \"v0.5 is out\",\n        \"outgoing\": false,\n        \"senderId\": \"2002\",\n        \"senderName\": \"Release notes (demo)\"\n      }\n    },\n    {\n      \"id\": \"1006\",\n      \"kind\": \"user\",\n      \"name\": \"Quiet Contact\",\n      \"unreadCount\": 0,\n      \"pinned\": false\n    },\n    {\n      \"id\": \"1007\",\n      \"kind\": \"user\",\n      \"name\": \"Seventh Chat\",\n      \"unreadCount\": 5,\n      \"pinned\": false,\n      \"lastMessage\": {\n        \"id\": 5,\n        \"chatId\": \"1007\",\n        \"date\": \"2026-11-07T09:00:00.000Z\",\n        \"text\": \"beyond the six the card shows\",\n        \"outgoing\": false,\n        \"senderId\": \"2002\",\n        \"senderName\": \"Seventh Chat\"\n      }\n    }\n  ]\n}"
+  }
+ ],
+ "expect": {
+  "widget": "telegram_chats",
+  "title": "Telegram · chats",
+  "rows": 6,
+  "badges": 4,
+  "icon": true
+ }
+}

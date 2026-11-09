@@ -156,7 +156,7 @@ function makeModel() {
     HOV = new F(0, 0.06); HM = new F(0, 0.05); HS = new F(0, 0.05); HN = new F(0, 0.05);
     HIDE = new F(1, 0.12);              // 1 = shown; hide-when-idle fades the pill to 0
     O = { slash: 0, pilotOn: 0, arcA: 0, field: 0, fieldX: 6, trim: 0, bracket: 0, bracketA: 0, bracketOff: 0,
-        check: 0, checkW: 1.5, wash: 0, washReveal: 0, ghost: 0, ghostX: 0, words: 1, ul: 0, ulStart: 0, satVis: 1, progress: 0,
+        check: 0, checkW: 1.5, wash: 0, washReveal: 0, drain: 0, ghost: 0, ghostX: 0, words: 1, ul: 0, ulStart: 0, satVis: 1, progress: 0,
         ctl: 0, pressM: 0, pressS: 0, notme: 0, drop: 0, muted: 0 };
     K = { r: 0, rt: 0, g: 0, gt: 0 };
     OV = {};
@@ -382,7 +382,7 @@ function enter(st, o) {
     if (prev === 'holding' && st !== 'holding') { T(O, 'bracketOff', 6, 200, outQuad); T(O, 'bracketA', 0, 200, outQuad); TAPER.to(0.8, 0.07); T(O, 'muted', 0, 160, outQuad); }
     if (prev === 'input' && st !== 'input') T(O, 'field', 0, 120, inQuad);
     if (prev === 'speaking' && st !== 'speaking') T(O, 'words', 0, 160, inQuad);
-    if (prev === 'followup' && st !== 'followup') T(O, 'wash', 0, 200, outQuad);
+    if (prev === 'followup' && st !== 'followup') { T(O, 'wash', 0, 200, outQuad); T(O, 'drain', 0, 200, outQuad); }
     if (prev === 'error' && st !== 'error') { ov('error'); GC.to(C.live, 0.2); }
     if (prev === 'mismatch' && st !== 'mismatch') { ov('mm'); ov('wake'); }
     if (st !== 'woke') { ov('wake'); S.wokeGlow = false; }
@@ -495,7 +495,16 @@ var ENTER = {
         RIMC.to(C.live, 0.1); RIMA.to(0.40, 0.1); GC.to(C.live, 0.2); T(O, 'satVis', 0, 150, outQuad);
     },
     followup: function (prev, o) {
-        S.fuT0 = NOW; S.fuEnded = false; S.fuDur = Math.max(1000, (o.seconds || 5) * 1000);
+        S.fuT0 = NOW; S.fuEnded = false; S.fuDur = Math.max(1000, (o.seconds || 5) * 1000); S.fuHeard = false;
+        // A card or the turn's panel is open under the head: a quiet cue. No thread
+        // over the card, no wash, no "go on": only a hairline along the panel's bottom
+        // edge that drains as the followup window runs out ("listening" when it hears you).
+        S.fuQuiet = S.extraH > 0;
+        if (S.fuQuiet) {
+            setGen('rest'); TA.to(0, 0.1); LB.set(null); O.wash = 0; T(O, 'drain', 1, 220, outCubic);
+            RIMC.to(C.live, 0.1); RIMA.to(0.12, 0.1); T(O, 'satVis', 0, 150, outQuad);
+            return;
+        }
         TX0.to(40); TX1.to(208); setGen('wave'); TC.to(C.user, 0.07); TA.to(1, 0.06); TW.to(1.75); TAPER.to(0.8); AMPK.to(0.7, 0.15);
         if (O.wash < 0.01) { O.washReveal = 0; O.wash = 1; } else T(O, 'wash', 1, 120, outCubic);
         T(O, 'washReveal', 1, 260, outCubic);
@@ -744,6 +753,7 @@ function logic(dt) {
             base = uF < 0.4 ? mixc(C.banked, C.live, uF / 0.4) : C.live;
             rAdd = calm ? 0.6 * L : 0.7 * 2.5 * L; ga = 0.06 + 0.14 * uF + (calm ? 0 : 0.1 * L); gr = 10 + 40 * uF; gtau = 0.1; core = 0.4;
             if (remF <= 0 && !S.fuEnded) { S.fuEnded = true; if (MOTION === 'full') kickR(0.6); }
+            if (S.fuQuiet && !S.fuHeard && L > 0.15) { S.fuHeard = true; LB.set({ text: 'listening', x: 216, color: C.dim }); }
             break;
         }
         case 'thinking': {
@@ -834,6 +844,13 @@ function render() {
         } else u = S.lastU || 0;
         var full = 20 + (w - 26) * u;
         out.washX = ex + (full - ex) * O.washReveal; out.washA = (0.10 + 0.08 * u) * O.wash;
+    }
+    // quiet followup (a panel is open): the hairline along its bottom edge, draining
+    out.drainA = 0; out.drainU = 0;
+    if (O.drain > 0.01) {
+        var uD = S.state === 'followup' ? clamp((S.fuDur - (NOW - S.fuT0)) / S.fuDur) : (S.lastU || 0);
+        if (S.state === 'followup') S.lastU = uD;
+        out.drainA = O.drain; out.drainU = uD;
     }
     out.progress = S.state === 'loading' ? O.progress : 0;
     // rings (heat ring on woke, ripples on speech onsets), at most 3

@@ -52,6 +52,8 @@
     "wikipedia": {"name": "Wikipedia", "icon": "wikipedia", "domain": "wikipedia.org"},
     "windows": {"name": "Windows", "glyph": "window"},
     "windows_mcp": {"name": "Windows", "glyph": "window"},
+    "weather": {"name": "Weather", "glyph": "sun"},
+    "weather_mcp": {"name": "Weather", "glyph": "sun"},
     "spotify_mcp": {"name": "Spotify", "icon": "spotify"}
   },
   "builtin": {

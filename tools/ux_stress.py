@@ -230,6 +230,7 @@ SAFE_TOOL = re.compile(
     r"mcp__claude_ai_Google_Drive__(search_files|list_recent_files|get_file_metadata)|"
     r"mcp__telegram__telegram_(get_me|list_dialogs|get_messages|get_context|get_chat|search_messages|search_contacts)|"
     r"mcp__weather__get_weather|"
+    r"mcp__weather-mcp__(get_weather_summary|get_forecast|get_current_conditions|get_alerts|get_air_quality|search_location)|"
     r"mcp__windows__(get_volume|set_volume|list_audio_devices|get_brightness|get_theme|battery_status|get_power_mode|"
     r"now_playing|list_apps|list_windows|get_radios|get_night_light)|"
     r"mcp__windows-mcp__Snapshot)$")

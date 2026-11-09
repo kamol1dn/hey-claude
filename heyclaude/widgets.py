@@ -321,7 +321,14 @@ def _telegram_messages(args: dict, result, raw: str) -> dict | None:
     return data
 
 
-ADAPTERS = {"telegram_dialogs": _telegram_dialogs, "telegram_messages": _telegram_messages}
+def _weather(args: dict, result, raw: str) -> dict | None:
+    """The built-in weather tool's JSON (already the card's data), or a weather-mcp
+    answer (markdown: summary, current conditions, forecast) read into the same card."""
+    from .weather_mcp import widget_from_tool
+    return widget_from_tool(args, result, raw)
+
+
+ADAPTERS = {"telegram_dialogs": _telegram_dialogs, "telegram_messages": _telegram_messages, "weather": _weather}
 
 
 def title_for(man: dict, data: dict) -> str:

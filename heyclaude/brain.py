@@ -15,6 +15,7 @@ Every utterance goes through `Brain.handle(text)`, which yields events:
     ("undo",)                   "undo that": revert the last Windows settings change locally
     ("instant", match)          M10: "volume 30", "next song", "timer 5 minutes": run locally, no model
                                 (heyclaude/intents; match is an intents.Match)
+    ("weather", query)          a plain weather question: answered locally from weather-mcp (weather_mcp/)
 
 `ref` is how the user named a task ("inha app", "last", "readme", "#<id>");
 tasks.find_task turns it into a task.
@@ -581,15 +582,18 @@ def windows_mcp_servers(agent_cfg: dict) -> dict:
 
 
 def weather_mcp_servers(cfg: dict) -> dict:
-    """mcpServers entry for the built-in weather tool (Open-Meteo, keyless; M5)."""
+    """mcpServers entries: the built-in weather tool (Open-Meteo, keyless; M5), plus
+    weather-mcp ("weather-mcp", M5b) when weather.mcp.agent is on and npx is there."""
     from .config import ROOT
+    from .weather_mcp import agent_servers
     w = cfg.get("weather") or {}
     if not w.get("enabled", True):
         return {}
     return {"weather": {"command": _console_python(), "args": ["-m", "heyclaude.mcp_weather"],
                         "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
                                 "HEYCLAUDE_WEATHER_LOCATION": str(w.get("location") or ""),
-                                "HEYCLAUDE_WEATHER_UNIT": str(w.get("unit") or "C")}}}
+                                "HEYCLAUDE_WEATHER_UNIT": str(w.get("unit") or "C")}},
+            **agent_servers(cfg)}
 
 
 WEATHER_TOOL = "mcp__weather__get_weather"
@@ -597,6 +601,10 @@ AGENT_WEATHER_PROMPT = (
     " For any weather question call mcp__weather__get_weather (empty location = the user's home place); "
     "the island shows the forecast card from its result by itself, so don't add a WIDGET line for "
     "weather; just say the gist, e.g. 'Fifteen degrees and clear, rain after midnight.'"
+)
+AGENT_WEATHER_MCP_PROMPT = (
+    " For official weather warnings, air quality, UV, pollen, a rain nowcast, the moon or a forecast beyond "
+    "three days, use the mcp__weather-mcp tools (get_weather_summary first; city_name for a place)."
 )
 
 
@@ -661,7 +669,8 @@ class Agent:
         win = windows_mcp_servers(a)
         win.update(weather_mcp_servers(self.cfg))
         prompt = (AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
-                  + (AGENT_WEATHER_PROMPT if "weather" in win else "") + widget_prompt(self.cfg))
+                  + (AGENT_WEATHER_PROMPT if "weather" in win else "")
+                  + (AGENT_WEATHER_MCP_PROMPT if "weather-mcp" in win else "") + widget_prompt(self.cfg))
         args = ["--model", a["model"], "--output-format", "stream-json", "--verbose",
                 "--permission-mode", a["permission_mode"], "--permission-prompts", "none",
                 "--append-system-prompt", prompt, "--name", day or "hey-claude assistant"]
@@ -671,6 +680,9 @@ class Agent:
             allowed = list(a["allowed_tools"])
             if "weather" in win and WEATHER_TOOL not in allowed:
                 allowed.append(WEATHER_TOOL)              # read-only and keyless: always allowed when on
+            if "weather-mcp" in win:                      # M5b: exactly weather.mcp.tools (read-only, keyless)
+                from .weather_mcp import agent_tools
+                allowed += [t for t in agent_tools(self.cfg) if t not in allowed]
             kept, dropped = gate_allowed_tools(allowed)
             if dropped:
                 print(f"[agent] not allowed without approvals (M7): {', '.join(dropped)}")
@@ -745,12 +757,21 @@ class Brain:
                   f"({len(self.intents.clf.texts)} example phrasings)")
         except Exception as e:
             print(f"[instant] intent engine off: {e}")
+        self.wx = None                      # M5b: the local weather route (weather_mcp.WeatherService)
+        if (cfg.get("weather") or {}).get("enabled", True):
+            from .weather_mcp import WeatherService
+            self.wx = WeatherService(cfg)   # weather-mcp starts with the warm-up, in its own thread
         self.warm = threading.Event()
         threading.Thread(target=self._warm_up, daemon=True).start()
 
     def _warm_up(self):
         """One throwaway turn per warm process, so the user's first question
         doesn't pay the first-turn cost (~1.5 s measured)."""
+        if getattr(self, "wx", None) is not None:
+            try:
+                self.wx.start()             # non-blocking: weather-mcp connects in the background
+            except Exception as e:
+                print(f"[warm] weather-mcp: {e}")
         jobs = []
         if isinstance(self.chat, _CliChat) and self.chat.persistent:
             jobs.append(("fast", lambda: self.chat.stream("Reply with just: ok")))
@@ -772,6 +793,16 @@ class Brain:
         self.chat.close()
         if self.agent:
             self.agent.close()
+        if getattr(self, "wx", None) is not None:
+            self.wx.close()
+
+    def weather_query(self, text: str):
+        """M5b: a plain weather question -> its query for the local weather route, else None."""
+        wx = getattr(self, "wx", None)
+        if wx is None:
+            return None
+        turns = self.convo.turns if self.convo is not None else []
+        return wx.query(text, prev_turn_was_weather=bool(turns and turns[-1].tier == "weather"))
 
     # -- shared conversation -----------------------------------------------------
     def with_context(self, consumer: str, chat, text: str) -> str:
@@ -854,6 +885,10 @@ class Brain:
             inst = self.instant(text)
             if inst is not None:
                 routed = ("instant", inst)
+        if routed is None or routed[0] in ("control", "lookup"):      # weather-mcp
+            wq = self.weather_query(text)
+            if wq is not None:
+                routed = ("weather", wq)
         if routed and not (routed[0] in ("lookup", "control") and not self.agent):
             self.timing["route"] = "local-" + routed[0]
             yield routed

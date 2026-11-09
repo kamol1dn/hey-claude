@@ -40,6 +40,7 @@ LIVE = (
     "island.",
     "instant.",                      # M10: read on every request (the classifier's threshold too)
     "app.",                          # hotkey re-registered, autostart toggled, guard re-read
+    "weather.local_route", "weather.mcp.timeout_s", "weather.mcp.fallback", "weather.mcp.cache_s",  # per question
 )
 
 

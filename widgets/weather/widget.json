@@ -2,20 +2,23 @@
  "id": "weather",
  "name": "Weather",
  "api": "1.0",
- "description": "current weather and a short forecast",
+ "description": "current weather, a short forecast, and any alert, air quality, rain nowcast, sun and moon",
  "title": "Weather · {location}",
  "size": {
   "width": 440,
-  "max_height": 236
+  "max_height": 280
  },
  "private": false,
  "ttl_s": 12,
  "glyph": "sun",
  "triggers": {
   "tools": [
-   "mcp__weather__get_weather"
+   "mcp__weather__get_weather",
+   "mcp__weather-mcp__get_weather_summary",
+   "mcp__weather-mcp__get_current_conditions",
+   "mcp__weather-mcp__get_forecast"
   ],
-  "data": "result"
+  "data": "weather"
  },
  "example": {
   "location": "Tashkent, Uzbekistan",
@@ -79,7 +82,45 @@
     "icon": "rain"
    }
   ],
-  "source": "Open-Meteo"
+  "source": "weather-mcp",
+  "alert": {
+   "title": "Yellow wind warning",
+   "severity": "moderate",
+   "level": "yellow",
+   "source": "National Weather Service",
+   "until": "Tue 18:00"
+  },
+  "air": {
+   "aqi": 42,
+   "scale": "US",
+   "label": "Good",
+   "color": "green",
+   "uv": 3.1,
+   "pollen": "low · grass"
+  },
+  "nowcast": {
+   "text": "Rain in 45 min",
+   "steps": [
+    0,
+    0,
+    0,
+    1,
+    2,
+    3,
+    2,
+    1
+   ],
+   "start": "15:00"
+  },
+  "sun": {
+   "rise": "06:58",
+   "set": "16:52"
+  },
+  "moon": {
+   "phase": "Waxing Crescent",
+   "illum": 18,
+   "waxing": true
+  }
  },
  "schema": {
   "type": "object",
@@ -205,6 +246,152 @@
         "night"
        ]
       }
+     }
+    }
+   },
+   "alert": {
+    "type": "object",
+    "required": [
+     "title",
+     "severity"
+    ],
+    "properties": {
+     "title": {
+      "type": "string",
+      "maxLength": 60
+     },
+     "severity": {
+      "type": "string",
+      "enum": [
+       "minor",
+       "moderate",
+       "severe",
+       "extreme",
+       "unknown"
+      ]
+     },
+     "level": {
+      "type": "string",
+      "enum": [
+       "green",
+       "yellow",
+       "orange",
+       "red"
+      ]
+     },
+     "source": {
+      "type": "string",
+      "maxLength": 40
+     },
+     "until": {
+      "type": "string",
+      "maxLength": 12
+     },
+     "more": {
+      "type": "integer",
+      "minimum": 0
+     }
+    }
+   },
+   "air": {
+    "type": "object",
+    "properties": {
+     "aqi": {
+      "type": "number",
+      "minimum": 0
+     },
+     "scale": {
+      "type": "string",
+      "enum": [
+       "EU",
+       "US"
+      ]
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 24
+     },
+     "color": {
+      "type": "string",
+      "enum": [
+       "green",
+       "yellow",
+       "orange",
+       "red",
+       "purple",
+       "maroon"
+      ]
+     },
+     "uv": {
+      "type": "number",
+      "minimum": 0
+     },
+     "pollen": {
+      "type": "string",
+      "maxLength": 24
+     }
+    }
+   },
+   "nowcast": {
+    "type": "object",
+    "required": [
+     "text",
+     "steps"
+    ],
+    "properties": {
+     "text": {
+      "type": "string",
+      "maxLength": 40
+     },
+     "steps": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 4
+      }
+     },
+     "start": {
+      "type": "string",
+      "maxLength": 8
+     }
+    }
+   },
+   "sun": {
+    "type": "object",
+    "required": [
+     "rise",
+     "set"
+    ],
+    "properties": {
+     "rise": {
+      "type": "string",
+      "maxLength": 8
+     },
+     "set": {
+      "type": "string",
+      "maxLength": 8
+     }
+    }
+   },
+   "moon": {
+    "type": "object",
+    "required": [
+     "phase"
+    ],
+    "properties": {
+     "phase": {
+      "type": "string",
+      "maxLength": 24
+     },
+     "illum": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+     },
+     "waxing": {
+      "type": "boolean"
      }
     }
    }

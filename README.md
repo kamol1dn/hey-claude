@@ -682,10 +682,31 @@ line: white is you, terracotta is Claude).
   manifest contract; both answering tiers are prompted from the registry. An
   unknown or invalid widget falls back to its text. Cards draw on the GPU
   (Qt Quick items, Shapes, shaders; no CPU-painted canvases).
-- **Weather** comes from a built-in, keyless tool (Open-Meteo, cached 10 min):
-  the agent calls `get_weather`, and the card (now, the next 6 hours, 3 days,
-  an animated sky drawn by a shader) comes straight from the result.
-  `weather.location` in the config is your home place.
+- **Weather** is answered locally, with no model: a plain weather question
+  ("will it rain tomorrow?", "weather in Paris on Friday", "when's sunset",
+  "what's the air quality", "any weather warnings?", then "and tomorrow?")
+  takes the local weather route. hey-claude asks
+  [weather-mcp](https://github.com/weather-mcp/weather-mcp) (MIT, keyless:
+  Open-Meteo, NOAA, MeteoAlarm, MET Norway) directly as an MCP client over a
+  warm stdio connection, shows the card at once and speaks a one- or
+  two-sentence summary built from the same data right behind it. The card
+  (now, the next hours, the days, an animated sky drawn by a shader) gains an
+  official-warning banner in its severity's colour with the issuing service
+  credited, a "rain in N minutes" nowcast, AQI/UV/pollen, sunrise/sunset and
+  the moon's phase, each only when there's data for it.
+  - weather-mcp is pinned (`@dangahagan/weather-mcp@1.35.8`, npm provenance
+    checked: built by GitHub Actions from the project's tagged source) and runs
+    through `npx`, so it needs Node.js 18+. It takes ~10-40 s to start; until
+    then, without Node, or when it doesn't answer within
+    `weather.mcp.timeout_s` (2 s), the built-in keyless Open-Meteo tool answers
+    and the card still shows.
+  - Anything that isn't plainly about the weather ("I'm under the weather",
+    "whether or not", "weather next week") goes to the quick model or the tool
+    agent as before. The agent keeps the built-in `get_weather` tool (its card
+    comes straight from the result) and gets weather-mcp's six tools too with
+    `weather.mcp.agent: true`.
+  - `weather.location` in the config is your home place. `weather.local_route:
+    false` sends weather questions to the agent again.
 - **Drop a file** on the island to ask about it: the talk-or-type field opens
   with the file attached, and the tool agent gets its path.
 - **Hide when idle** (`island.hide_when_idle`): nothing on screen at rest. It
@@ -939,8 +960,9 @@ Where the rest of the time goes, and the knobs:
   Germany?" works. It's recycled every `fast.max_turns` turns.
 - Speech is split into sentences as text streams in, so the first sentence
   plays while the rest is still being written.
-- Obvious tool questions (Telegram, email, calendar, weather…) are matched
-  locally too and go straight to the warm agent, skipping the haiku hop. The
+- Obvious tool questions (Telegram, email, calendar…) are matched
+  locally too and go straight to the warm agent, skipping the haiku hop. Plain
+  weather questions skip the agent as well (the local weather route above). The
   agent says "Let me check." (`agent.filler`) immediately. With hundreds of
   connector tools loaded, it searches for the right tool first, which is why
   lookups take about 10 s.

@@ -1,0 +1,21 @@
+{
+ "note": "a real answer, recorded once from the pinned server (public places only)",
+ "server": "@dangahagan/weather-mcp@1.35.8",
+ "recorded": "2026-11-09 (London/Berlin/Almaty evening)",
+ "tool": "get_forecast",
+ "args": {
+  "latitude": 43.24,
+  "longitude": 76.95,
+  "granularity": "minutely"
+ },
+ "env": {
+  "WEATHER_UNITS": "metric",
+  "WEATHER_TIME_FORMAT": "24h"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "# 15-Minute Precipitation Nowcast\n\nNo 15-minute precipitation model covers this location. Native 15-minute data is available only in the contiguous US and nearby Canada and Mexico (HRRR) and in Central Europe (ICON-D2). This is not a forecast of dry weather. Use granularity \"hourly\" for an hour-by-hour forecast here.\n\n---\n*Data source: Open-Meteo*\n"
+  }
+ ]
+}

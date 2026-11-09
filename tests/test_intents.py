@@ -263,6 +263,31 @@ def test_routing_order():
     assert list(brain(intents=False).handle("volume 30")) == [("control", "volume 30")]
 
 
+def test_routing_order_with_the_weather_route():
+    """The agreed order with both local routes on: exact commands -> instant (M10) ->
+    local weather (weather-mcp) -> quick -> agent. Neither claims the other's requests."""
+    from heyclaude.weather_mcp.query import parse
+
+    class Wx:
+        def query(self, text, prev_turn_was_weather=False):
+            return parse(text)
+
+    b = brain()
+    b.wx = Wx()
+    assert list(b.handle("Undo that.")) == [("undo",)]
+    for q in ("Set the volume to thirty.", "mute", "dark mode", "next song", "what time is it",
+              "set a timer for five minutes"):
+        ev = list(b.handle(q))
+        assert ev[0][0] == "instant" and b.timing["route"] == "local-instant", (q, ev)
+    for q in ("What's the weather?", "Is it going to rain tomorrow?", "Do I need an umbrella?",
+              "What's the weather in London this week?", "What's the UV index?", "When is sunset?"):
+        ev = list(b.handle(q))
+        assert ev[0][0] == "weather" and b.timing["route"] == "local-weather", (q, ev)
+    for q in ("I'm feeling under the weather", "whether or not it works", "what's the volume of a sphere"):
+        assert list(b.handle(q))[0][0] not in ("instant", "weather"), q
+    assert list(b.handle("how many legs does a spider have")) == [("say", "Eight.")]
+
+
 # == executors over M9's tool code, Windows mocked =====================================================
 class FakeEndpoint:
     def __init__(self, level=0.45, muted=False):

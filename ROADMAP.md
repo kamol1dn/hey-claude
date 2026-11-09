@@ -524,7 +524,7 @@ timer, task card, link/file, code, image, and the Telegram set.
 
 Next packs, each with its own small animation:
 - **Weather, upgraded with [weather-mcp](https://github.com/weather-mcp/weather-mcp)**
-  (MIT, `@dangahagan/weather-mcp` on npm, 17 tools, no API keys: NOAA, Open-Meteo,
+  ✅ built (2026-11-10), except the model-agreement chip (MIT, `@dangahagan/weather-mcp` on npm, 17 tools, no API keys: NOAA, Open-Meteo,
   MET Norway). Keep M5's small built-in Open-Meteo tool as the fast default and
   the fallback; weather-mcp adds depth.
   - **Tools used:**
@@ -555,6 +555,62 @@ Next packs, each with its own small animation:
     - a "how sure is this?" model-agreement chip when asked.
   - Respect its fair-use limits: cache, never poll in the background more than
     every ~30 min for the idle weather glance.
+  - **Built (2026-11-10):**
+    - Pinned `@dangahagan/weather-mcp@1.35.8` (published 2026-11-09). npm
+      provenance checked 2026-11-10: a SLSA v1 attestation, built by GitHub
+      Actions (github-hosted runner) from `weather-mcp/weather-mcp` tag v1.35.8
+      (commit c3bbaf3), workflow `.github/workflows/publish.yml`; the attested
+      sha512 matches the tarball, and `npm audit signatures` verified all 162
+      packages' signatures. Started with `npx --prefer-offline -y <pin>`,
+      `ENABLED_TOOLS` = exactly the six tools above, metric/imperial from
+      `weather.unit`, its analytics off. A pin that isn't `@dangahagan/...@x.y.z`
+      is refused. Its answers are markdown (no structured content), read by
+      `heyclaude/weather_mcp/parse.py`.
+    - **Local weather route** (`heyclaude/weather_mcp/`): `query.py` claims only
+      plain weather questions (a place or home; now, today, tonight, tomorrow, a
+      weekday, the weekend, this week; general, rain, umbrella, snow,
+      temperature, wind, alerts, air quality, UV, pollen, sunrise/sunset, moon),
+      plus short follow-ups after a weather answer ("and tomorrow?", "what about
+      Paris?"). Everything else falls through ("whether or not", "weather the
+      storm", "I'm under the weather", "what's the CPU temperature", "weather
+      next week"). `Brain.handle` yields `("weather", query)` after the local
+      commands and M10's instant intents; the assistant shows the card at once
+      and speaks a summary built locally from the same data (`card.py`), and the
+      turn joins the conversation as tier `weather` (`latency.csv` gains
+      `speech_end_to_card`).
+    - **Warm client** (`client.py`): the `mcp` SDK as a stdio client on its own
+      asyncio loop, started at warm-up, kept open, reopened in the background
+      on failure (2 s ... 60 s). A question resolves the place once
+      (`search_location`, remembered), then asks current conditions, the daily
+      forecast with the astronomy almanac, the hourly forecast, alerts, air
+      quality and the 15-minute nowcast in parallel. Within
+      `weather.mcp.timeout_s` (2 s) whatever is back makes the card; otherwise
+      (or before it's up, or without Node) the built-in Open-Meteo tool answers
+      and the late answers still land in the cache (300 s; weather-mcp caches
+      upstream too). Home is fetched once at start-up; no background polling
+      unless `weather.mcp.refresh_min` (min 30).
+    - **Widget states** (widgets/weather): an alert banner (severity colour,
+      issuing service, until when; only alerts that name the place, or any when
+      asked about alerts), a "rain in N minutes" line with eight 15-minute bars,
+      and a strip with an AQI dot, UV and pollen on the left and
+      sunrise/sunset and the moon's lit share (drawn as the real phase) on the
+      right. Each hides without data; days give up rows to stay within 280 px.
+      The built-in fallback fills sun, UV and the moon (computed locally). In
+      `docs/widgets-preview.html` under "Weather+".
+    - **Agent side:** `weather.mcp.agent: true` registers weather-mcp for the
+      tool agent (`mcp__weather-mcp__*`, only the six tools allowed) next to the
+      built-in `weather` tool; off by default (its tool list is ~4k tokens on
+      every agent turn, plus a second node process). Both tools' results make
+      the same card.
+    - **Latency** (text level, London, 2026-11-10). Before, through the warm
+      tool agent (haiku, 669 tools loaded): speech text -> card median 2.4 s,
+      -> the spoken summary's text median 6.0 s (the stress test measured ~10 s
+      to first audio). After, local route, weather-mcp warm: card and summary
+      together in 35 ms median through weather-mcp's cache, ~1 ms from ours; a
+      place asked for the first time takes up to the 2 s deadline (the
+      built-in tool or weather-mcp's partial answer). weather-mcp itself is up
+      ~9 s after start (npx + initialize), home is prefetched ~4 s later.
+    - Not done: the "how sure is this?" model-agreement chip.
 - **Now playing:** album art, progress, controls (M9's media tools).
 - **System:** battery, CPU/GPU load and VRAM, with hey-claude's own devices
   shown ("stt: gpu (turbo)").

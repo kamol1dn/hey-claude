@@ -34,6 +34,36 @@ def com_init() -> None:
     _local.com = True
 
 
+_com_pool = None
+_com_pool_lock = threading.Lock()
+
+
+def com_call(fn, *args, **kwargs):
+    """Run `fn` on hey-claude's one COM thread and return its result (or raise its error).
+
+    Inside hey-claude's own process (M10's instant commands, "undo that", album art)
+    the tools must not run on the short-lived threads that call them: each turn has
+    its own thread, and a comtypes object whose apartment thread has exited gets
+    Released later by the garbage collector on whatever thread runs it (an audio
+    callback, Qt's render thread). That crashed the live UX run twice (access
+    violation / illegal instruction in no known module). One persistent thread,
+    CoInitialized once and never ending, owns every COM object instead. The MCP
+    server process doesn't need this; its tools stay on its own thread.
+    """
+    global _com_pool
+    if getattr(_local, "com_worker", False):
+        return fn(*args, **kwargs)                  # already on it (a tool calling a tool)
+    with _com_pool_lock:
+        if _com_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def init():
+                _local.com_worker = True
+                com_init()
+            _com_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="com", initializer=init)
+    return _com_pool.submit(fn, *args, **kwargs).result()
+
+
 def run_async(coro, timeout: float = 6.0):
     """Run a WinRT coroutine to completion from sync code.
 

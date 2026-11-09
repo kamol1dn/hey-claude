@@ -506,9 +506,8 @@ class Assistant:
         def go():
             try:
                 from .mcp_windows import media
-                from .mcp_windows._util import com_init
-                com_init()
-                art = media.album_art()
+                from .mcp_windows._util import com_call
+                art = com_call(media.album_art)
             except Exception as e:
                 print(f"[effects] no album art: {e}")
                 return
@@ -578,16 +577,15 @@ class Assistant:
             def apps():                         # the Start menu's apps, for "open <app>" (a COM call: off the start-up path)
                 try:
                     from .mcp_windows import apps as A
-                    from .mcp_windows._util import com_init
-                    com_init()
-                    names = [a["name"] for a in A._os_start_apps()]
+                    from .mcp_windows._util import com_call
+                    names = [a["name"] for a in com_call(A._os_start_apps)]
                     eng.set_apps(names)
                     print(f"[instant] {len(names)} apps can be opened by name")
                 except Exception as e:
                     print(f"[instant] no app list ({e}); common app names only")
                 try:                            # pay pycaw's first-call cost (~0.2 s) now, with a read
                     from .mcp_windows import registry
-                    registry.call("get_volume", {})
+                    com_call(registry.call, "get_volume", {})
                 except Exception:
                     pass
             threading.Thread(target=apps, daemon=True, name="instant-apps").start()

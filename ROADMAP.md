@@ -98,6 +98,60 @@ training (the user runs Colab) and the ≥95% / <1 per 3 h measurement with
 **Done when:** ≥95% hit rate on the user's samples and fewer than 1 false
 wake per 3 hours of background audio.
 
+## M2b: Train the wake word inside Settings, locally
+
+**Goal:** anyone setting hey-claude up trains their own wake word from
+Settings in about 15 minutes, with no Colab, terminal or WSL. The M2 Colab
+route stays in the docs as the "advanced, best quality" option.
+
+Settings → **Wake word** wizard:
+1. **Phrase:** "hey claude" by default. Any short phrase works, so another user
+   can pick their own; the wizard warns about phrases that are too short or
+   too common.
+2. **Record:** the M2 recorder becomes a Qt dialog. About 25 guided clips
+   (normal, quiet, loud, fast, far away), with a live level meter, a
+   too-quiet / clipped check and a redo button.
+3. **Room sound (optional, 1 min):** talk normally or leave the room noise
+   running, as negatives from the user's own environment.
+4. **Train:** one button with a progress bar and an honest time estimate. It
+   runs on the GPU when `sysload.py` says it's free (< ~70% busy), otherwise on
+   the CPU.
+5. **Test and apply:** say it a few times to see live hits. It picks the
+   threshold from held-out clips and negatives, and you switch to the new model
+   with one click (the old one is kept for undo).
+
+Local pipeline, no WSL (lighter than the full openWakeWord recipe):
+- **Positives:**
+  - the user's clips;
+  - synthetic clips of the phrase spoken by many local TTS voices: Kokoro
+    from M4 (many voices, speeds and pitches), plus Piper voices if they install
+    cleanly on Windows;
+  - the M2 phonetic spellings;
+  - augmentation: noise, room reverb, speed and gain.
+- **Negatives:**
+  - look-alike phrases synthesised the same way ("hey cloud", "hey clyde"…);
+  - the room recording;
+  - a one-time download of openWakeWord's precomputed negative features.
+    Pick the smallest set that meets the target and measure it, since the
+    network here is slow (~0.5–1 MB/s). Show the size and resume support.
+- **Model:** openWakeWord's frozen melspectrogram and embedding models (already
+  installed), plus a small classifier head trained on the embeddings with
+  torch or plain numpy. That takes minutes, not hours. Export to ONNX in
+  openWakeWord's format, so `listen.py` loads it unchanged.
+- **Improve over time (optional):** after a false wake, a "that wasn't me"
+  click on the island saves those ~2 s as a negative. Retraining from Settings
+  folds them in.
+
+**Touches:** new `wake_train/` (synth, augment, features, train, export),
+`settings_ui.py` (wizard), `wake_samples.py` (Qt recorder), `tools/wake_eval.py`
+(reused for the threshold), first-run downloads.
+**Done when:**
+- a fresh user goes from Settings → Wake word to a working model in ≤ 20
+  minutes on this PC (downloads excluded), without a terminal;
+- `wake_eval.py` shows ≥ 95% hits on held-out clips;
+- ≤ 1 false wake per 2 h of lecture audio. This is allowed to be a bit worse
+  than the Colab model's < 1 per 3 h; state the measured gap in the README.
+
 ## M3: Conversation, follow-ups and memory ✅ built (2026-11-09)
 
 **Status:** built and verified with simulated clips; see README

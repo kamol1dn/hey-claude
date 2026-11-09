@@ -357,6 +357,8 @@ def main():
         pass
     if tray:
         tray.hide()
+    if island is not None and hasattr(island, "view"):      # the QML island: stop its timers, close the window
+        island.close()
     if instance:
         instance.release()
     if state["restart"]:

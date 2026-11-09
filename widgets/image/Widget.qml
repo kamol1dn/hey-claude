@@ -15,6 +15,9 @@ Item {
     signal action(string name, var payload)
     readonly property real minWidth: 440
     property bool holds: false
+    // the rounded frame pours an off-screen texture into a Shape: GPU only; the
+    // software renderer shows the picture directly (square corners)
+    readonly property bool gpu: GraphicsInfo.api !== GraphicsInfo.Software
 
     readonly property var d: data_ || ({})
     readonly property string src: {
@@ -78,7 +81,8 @@ Item {
         Item {
             id: pic
             width: w.width; height: w.boxH
-            visible: false
+            visible: !w.gpu
+            clip: !w.gpu
             Image {                                               // backdrop for a picture shown whole
                 // always loaded (a small copy) and gated by opacity: a late load or a
                 // visibility flip inside the hidden source tree never reaches the texture
@@ -116,11 +120,12 @@ Item {
             }
         }
         NumberAnimation { id: settle; target: img; property: "scale"; from: 1.06; to: 1; duration: 1400; easing.type: Easing.OutCubic }
-        ShaderEffectSource { id: picTex; sourceItem: pic; hideSource: true; visible: false; width: pic.width; height: pic.height }
+        ShaderEffectSource { id: picTex; sourceItem: w.gpu ? pic : null; hideSource: w.gpu; live: w.gpu; visible: false
+            width: pic.width; height: pic.height }
         Shape {
             id: frame
             anchors.fill: parent
-            visible: w.ready
+            visible: w.gpu && w.ready
             opacity: w.ready ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: w.reduced ? 160 : 260; easing.type: Easing.OutCubic } }
             preferredRendererType: Shape.CurveRenderer

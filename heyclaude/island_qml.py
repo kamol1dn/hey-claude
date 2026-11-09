@@ -508,8 +508,7 @@ class QmlIsland(QObject):
         QQuickWindow.setTextRenderType(text_render_type(self.scale))
         self._ready = False
         self._reloading = True
-        self.view.setSource(QUrl())
-        self.view.engine().clearComponentCache()
+        self.view.setSource(QUrl())          # drop the old tree (no clearComponentCache: types stay valid)
         self.view.setSource(QUrl.fromLocalFile(str(QML_DIR / "Island.qml")))
         self.root = self.view.rootObject()
 

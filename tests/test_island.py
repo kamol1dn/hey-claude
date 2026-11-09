@@ -7,6 +7,7 @@ rest invariant.
 
     .venv\\Scripts\\python tests\\test_island.py
 """
+import faulthandler
 import json
 import os
 import random
@@ -17,6 +18,8 @@ from pathlib import Path
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+faulthandler.enable()                       # a native crash prints where it happened (CI)
+sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -740,4 +743,14 @@ if __name__ == "__main__":
     print(n, "passed")
     if _ISL is not None:
         _ISL.close()
+        _spin(300)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # End without DLL teardown: Qt's loader / render threads are still alive here,
+    # and a hard exit through DLL_PROCESS_DETACH sometimes faults (exit 0xC0000005
+    # in CI after every test had passed).
+    if sys.platform == "win32":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.TerminateProcess(k32.GetCurrentProcess(), 0)
     os._exit(0)

@@ -14,6 +14,7 @@ Item {
     property bool reduced: false
     signal action(string name, var payload)
     readonly property real minWidth: 440
+    readonly property bool gpu: GraphicsInfo.api !== GraphicsInfo.Software     // round avatars: GPU only
     property bool holds: false
 
     readonly property var chats: ((data_ && data_.chats) || []).slice(0, 6)
@@ -90,7 +91,7 @@ Item {
                 }
                 Image {
                     id: avImg
-                    visible: false                                  // a texture for the round shape below
+                    visible: !w.gpu && row.hasAv && status === Image.Ready   // GPU: a texture for the round shape below
                     width: w.av; height: w.av
                     source: modelData.avatar_src || ""
                     fillMode: Image.PreserveAspectCrop
@@ -99,7 +100,7 @@ Item {
                 }
                 Shape {
                     id: avShape
-                    visible: row.hasAv && avImg.status === Image.Ready
+                    visible: w.gpu && row.hasAv && avImg.status === Image.Ready
                     anchors.fill: parent
                     preferredRendererType: Shape.CurveRenderer
                     ShapePath {

@@ -112,8 +112,8 @@ draining ring. "Save this conversation" (off by default) writes
 task control covers "what did the X task change?" (forked headless `--resume`,
 read-only tools), "stop the task" and "resume the last task in a terminal".
 `Assistant.request()` is the one entry point for spoken and typed requests.
-25 new offline tests (`tests/test_conversation.py`) pass, and so do the 64
-existing ones. Live check: `--simulate` with six clips. Turn 1 (quick)
+25 new offline tests (`tests/test_conversation.py`) pass, and so do the 75
+existing ones (including the typed-input tests from #3, whose `submit_text()` now goes through `request()`). Live check: `--simulate` with six clips. Turn 1 (quick)
 answered "Canberra". Turn 2 ("what's the weather there?", agent) searched for
 Canberra. Turn 3 ("what is that in Fahrenheit?", quick) answered from the
 agent's reply. Turn 4 ("start a task in sandbox: … for a day in that city")

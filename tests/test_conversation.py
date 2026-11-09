@@ -419,6 +419,15 @@ def test_typed_request_joins_the_conversation_without_a_followup(tmp_path):
     a = _assistant(tmp_path, fast=[["Lima."]])
     a.request("capital of Peru?", source="typed", wait=True)
     assert a.brain.convo.turns[-1].user == "capital of Peru?" and a.followup.state == "idle"
+    a.brain.chat.replies.append(["About 10 million."])
+    a.followup.arm()                                   # a typed request also closes a pending window
+    a.submit_text("and its population?")               # the hotkey input field's path
+    for _ in range(100):
+        if len(a.brain.convo.turns) == 2 and not a.conv_lock.locked():
+            break
+        time.sleep(0.02)
+    assert a.brain.convo.turns[-1].user == "and its population?" and a.followup.state == "idle"
+    assert "Lima." not in a.brain.chat.sent[-1]        # the quick model remembers its own turn
 
 
 def test_start_fresh_forgets(tmp_path):

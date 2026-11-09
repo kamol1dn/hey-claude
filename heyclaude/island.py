@@ -35,11 +35,41 @@ class Bridge(QObject):
     listening = Signal(bool, float)  # wake word on/off, paused-until epoch (0 = not paused)
     talk = Signal()                 # global hotkey pressed (from the hotkey thread)
     stt = Signal(str)               # active speech-to-text device, e.g. "gpu (turbo)"
+    heard = Signal(str)             # the hotkey session's spoken request was transcribed ("" = nothing)
     quit = Signal()
 
 
 ROW_H = 30
 PILL_H = 40
+INPUT_W, INPUT_H, INPUT_LINE = 560, 46, 18
+
+
+class _Entry(QPlainTextEdit):
+    """The hotkey's text field: Enter sends, Shift+Enter is a new line, Esc cancels."""
+
+    def __init__(self, island):
+        super().__init__(island)
+        self.island = island
+        self.setPlaceholderText("Speak, or type and press Enter  ·  Esc to cancel")
+        self.setFrameStyle(0)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setStyleSheet("QPlainTextEdit { background: transparent; color: #F2F2F2; border: none; "
+                           "font-family: 'Segoe UI Variable Text'; font-size: 11pt; "
+                           "selection-background-color: #D97757; }")
+        self.hide()
+
+    def keyPressEvent(self, e):
+        s = self.island.session
+        if s is not None:
+            if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+                if s.key_enter(self.toPlainText(), bool(e.modifiers() & Qt.ShiftModifier)):
+                    return
+            elif e.key() == Qt.Key_Escape:
+                print("[input] Esc")
+                s.key_escape()
+                return
+        super().keyPressEvent(e)
 
 
 class Island(QWidget):
@@ -70,7 +100,17 @@ class Island(QWidget):
         bridge.level.connect(self.push_level)
         bridge.tasks.connect(self.set_tasks)
         bridge.stt.connect(self.set_stt)
+        bridge.heard.connect(self._heard)
         self.stt_label = ""
+
+        # Hotkey "talk or type" field (see inputbox.py); attach_input() turns it on.
+        self.session = None
+        self.input_open = False
+        self._prev_fg = 0
+        self._restore_focus = True
+        self._setting_text = False
+        self.entry = _Entry(self)
+        self.entry.textChanged.connect(self._entry_changed)
 
         self.anim = QVariantAnimation(self, duration=260, easingCurve=QEasingCurve.OutCubic)
         self.anim.valueChanged.connect(self._apply_geom)
@@ -87,7 +127,95 @@ class Island(QWidget):
         s = screens[int(sel)] if str(sel).isdigit() and int(sel) < len(screens) else QGuiApplication.primaryScreen()
         return s.geometry()
 
+    # -- hotkey input field ------------------------------------------------------
+    def attach_input(self, open_mic, cancel_mic, submit, closed=None):
+        """Enable the hotkey's talk-or-type field. Callbacks go to the assistant."""
+        from .inputbox import InputSession
+        self._on_closed = closed
+        self.session = InputSession(open_mic, cancel_mic, submit, show=self._show_input, close=self._hide_input)
+
+    def toggle_input(self):
+        if self.session is not None:
+            if self.session.is_open:
+                print("[input] hotkey pressed again: closing the field")
+            self.session.hotkey()
+
+    def _show_input(self):
+        from .winsys import force_foreground, foreground_window
+        self._prev_fg = foreground_window()
+        self._restore_focus = True
+        self._away_since = 0.0
+        self._opened_at = time.monotonic()
+        self.input_open = True
+        self._setting_text = True
+        self.entry.clear()
+        self._setting_text = False
+        self.setAttribute(Qt.WA_ShowWithoutActivating, False)
+        self._place(immediate=True)
+        self.entry.show()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        ok = force_foreground(int(self.winId()))
+        self.entry.setFocus(Qt.ShortcutFocusReason)
+        print(f"[input] open (focus {'ok' if ok else 'NOT taken'})")
+        self.update()
+
+    def _hide_input(self, submitted: bool):
+        from .winsys import restore_foreground
+        self.input_open = False
+        self.entry.hide()
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        if getattr(self, "_on_closed", None):
+            self._on_closed()
+        if self._restore_focus and self._prev_fg:
+            restore_foreground(self._prev_fg)
+        self._prev_fg = 0
+        print(f"[input] {'sent' if submitted else 'cancelled'}")
+        self._place()
+        self.update()
+
+    def _entry_changed(self):
+        if self._setting_text or self.session is None:
+            return
+        self.session.edited(self.entry.toPlainText())
+        self._place(immediate=True)
+        self.update()
+
+    def _heard(self, text: str):
+        if self.session is None or not self.input_open:
+            return
+        if text.strip():
+            self._setting_text = True
+            self.entry.setPlainText(text)           # what was heard, for a moment
+            self._setting_text = False
+        self.session.heard(text)
+        self.update()
+
+    def _check_focus(self):
+        """Clicking somewhere else closes the field without pulling focus back.
+        Uses Windows' foreground window: Qt's isActiveWindow() can lag behind
+        a SetForegroundWindow done outside Qt."""
+        from .winsys import foreground_is_ours, foreground_window, window_title
+        if foreground_is_ours():                 # the island, or another hey-claude window
+            self._away_since = 0.0
+            return
+        now = time.monotonic()
+        if not self._away_since:
+            self._away_since = now
+        elif now - self._away_since > 0.3 and self.session is not None:
+            self._away_since = 0.0
+            print(f"[input] focus moved to {window_title(foreground_window())!r}: closing the field")
+            self._restore_focus = False
+            self.session.cancel()
+
+    def _input_size(self) -> tuple[int, int]:
+        lines = max(1, min(4, self.entry.document().blockCount()))
+        return INPUT_W, INPUT_H + (lines - 1) * INPUT_LINE
+
     def _target_size(self) -> tuple[int, int]:
+        if self.input_open:
+            return self._input_size()
         fm = QFontMetrics(self.font_main)
         n_running = sum(1 for t in self.task_rows if t["status"] in ("starting", "running"))
         if self.mode == "idle":
@@ -173,7 +301,9 @@ class Island(QWidget):
         self.update()
 
     def _tick(self):
-        busy = self.mode not in ("idle", "off") or any(t["status"] in ("starting", "running") for t in self.task_rows)
+        if self.input_open and time.monotonic() - self._opened_at > 0.5:
+            self._check_focus()
+        busy = self.input_open or self.mode not in ("idle", "off") or any(t["status"] in ("starting", "running") for t in self.task_rows)
         was = getattr(self, "_was_visible", False)
         vis = self._tasks_visible()
         if vis != was:
@@ -183,9 +313,31 @@ class Island(QWidget):
             self.update()
 
     # -- painting -------------------------------------------------------------
+    def _paint_input(self, p, t):
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(r, 20, 20)
+        p.fillPath(path, QColor(8, 8, 8, 248))
+        p.setPen(QPen(QColor(217, 119, 87, 120), 1))
+        p.drawPath(path)
+        cy = INPUT_H / 2
+        if self.session is not None and self.session.mic_on:     # mic open: pulsing dot + level
+            lvl = max(self.levels[-3:]) if self.levels else 0.0
+            self._dot(p, 22, cy, 4 + 1.5 * math.sin(t * 6) + 4 * lvl, ACCENT)
+        else:                                                    # typing: mic off
+            self._dot(p, 22, cy, 4, QColor(110, 110, 110))
+            p.setPen(QPen(QColor(8, 8, 8), 2.2))
+            p.drawLine(17, int(cy + 5), 27, int(cy - 5))
+            p.setPen(QPen(DIM, 1.3))
+            p.drawLine(17, int(cy + 5), 27, int(cy - 5))
+        self.entry.setGeometry(44, 11, self.width() - 60, self.height() - 16)
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        if self.input_open:
+            self._paint_input(p, time.perf_counter() - self.t0)
+            return
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         rad = min(20.0, r.height() / 2) if not self._tasks_visible() else 18.0
         path = QPainterPath()

@@ -100,6 +100,8 @@ class Tray(QObject):
         self.icon = QSystemTrayIcon(self._icons[True], self)
         self.icon.setContextMenu(self.menu)
         self.icon.activated.connect(self._activated)
+        self.icon.messageClicked.connect(self._balloon_clicked)
+        self._balloon_click = None
         self.set_hotkey_label(hotkey_label)
         self.set_listening(True)
         self.icon.show()
@@ -125,7 +127,18 @@ class Tray(QObject):
         text = _pretty_hotkey((text or "").strip())
         self.act_talk.setText(f"Talk now\t{text}" if text else "Talk now")
 
+    def notify_action(self, title: str, msg: str, on_click):
+        """A balloon that runs on_click when it's clicked (e.g. open Settings)."""
+        self.notify(title, msg)
+        self._balloon_click = on_click
+
+    def _balloon_clicked(self):
+        cb, self._balloon_click = getattr(self, "_balloon_click", None), None
+        if cb:
+            cb()
+
     def notify(self, title: str, msg: str):
+        self._balloon_click = None
         self.icon.showMessage(title, msg, QSystemTrayIcon.Information, 5000)
 
     def hide(self):

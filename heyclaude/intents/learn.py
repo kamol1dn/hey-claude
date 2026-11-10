@@ -109,6 +109,38 @@ def load_taught(state_dir) -> list[dict]:
     return [x for x in data if isinstance(x, dict) and x.get("text") and x.get("intent")]
 
 
+def taught_mtime(state_dir) -> float | None:
+    """When state/intents_taught.yaml last changed (None: no file)."""
+    d = _dir(state_dir)
+    try:
+        return (d / TAUGHT).stat().st_mtime_ns if d is not None else None
+    except OSError:
+        return None
+
+
+def _write_taught(d: Path, items: list[dict]):
+    import yaml
+    d.mkdir(parents=True, exist_ok=True)
+    (d / TAUGHT).write_text("# Phrasings taught by voice (\"teach it\"). Edit or delete freely.\n" +
+                            yaml.safe_dump(items, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+def remove_taught(state_dir, text: str) -> bool:
+    """Forget a taught phrasing (Settings > Instant). True when one was removed.
+    A running engine picks the change up on its next request."""
+    from .normalize import normalize
+    d = _dir(state_dir)
+    if d is None:
+        return False
+    items = load_taught(state_dir)
+    want = normalize(text)
+    keep = [x for x in items if normalize(x["text"]) != want]
+    if len(keep) == len(items):
+        return False
+    _write_taught(d, keep)
+    return True
+
+
 def teach_last(state_dir, max_age_s: float = 3600) -> dict | None:
     """Add the newest missed phrasing not taught yet. Returns it, or None."""
     from .normalize import normalize
@@ -126,13 +158,10 @@ def teach_last(state_dir, max_age_s: float = 3600) -> dict | None:
             return None
         if normalize(row["text"]) in taught:
             continue
-        import yaml
         items = load_taught(state_dir)
         # a step taught by voice keeps its direction, not the exact amount Claude chose
         items.append({"text": row["text"], "intent": row["intent"], "slots": row.get("slots") or {},
                       "taught": time.strftime("%Y-%m-%d %H:%M:%S")})
-        d.mkdir(parents=True, exist_ok=True)
-        (d / TAUGHT).write_text("# Phrasings taught by voice (\"teach it\"). Edit or delete freely.\n" +
-                                yaml.safe_dump(items, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        _write_taught(d, items)
         return row
     return None

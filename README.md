@@ -618,16 +618,36 @@ model and the agent.
 change ("give the boombox some juice" → volume +20), the wording is noted in
 `state/intents_misses.jsonl`. Say **"teach it"** right after, and that
 wording is instant from then on (`state/intents_taught.yaml`, yours to edit).
-Both files stay on your PC (`state/` is never committed).
+Both files stay on your PC (`state/` is never committed). Settings > Instant
+lists the taught wordings and removes one (it applies at once).
 
-**Measured** (tests/test_intents.py, CI): 369 phrasings, 99.2% routed right
-(345 by the grammar, 21 by the classifier); 156 near-misses, 0 acted on.
+**Russian and Uzbek.** The core commands also understand Russian ("громкость
+30", "сделай потише", "тёмная тема", "следующая песня", "таймер на пять
+минут", "который час", "открой спотифай", "заблокируй компьютер") and Uzbek,
+in Latin or Cyrillic ("ovozni o'ttizga qo'y", "ovozni pasaytir", "qorong'i
+rejim", "keyingi qo'shiq", "besh daqiqaga taymer qo'y", "soat necha"),
+with spoken numbers, durations, ё/е and every Uzbek apostrophe (' ʻ ‘ ’ or
+none) folded, and common Whisper slips ("ko'shik", "minut"). Follow-ups too
+("ещё", "наоборот", "yana", "teskari"). `intents/grammar_ru.py` and
+`grammar_uz.py`; the classifier stays English-only and never decides a
+Russian or Uzbek sentence. The acks stay English (Kokoro has no Russian or
+Uzbek voice). **Whisper must write them**: with the default `stt.language: en`
+it turns Russian and Uzbek speech into English, so set `stt.language` to empty
+(auto-detect) or `ru` / `uz`, and keep in mind that the CPU fallback
+(`base.en`) is English-only and that Whisper's Uzbek is much weaker than its
+Russian.
+
+**Measured** (tests/test_intents.py, CI): English 369 phrasings, 99.2% routed
+right (345 by the grammar, 21 by the classifier), 156 near-misses, 0 acted on;
+Russian 101 phrasings, 100%, 44 near-misses, 0 acted on; Uzbek 85 phrasings,
+100%, 34 near-misses, 0 acted on (the RU/UZ sets were written with the
+grammar, not from recorded speech).
 Text → match → executor with Windows mocked: median 0.11 ms, p95 0.22 ms.
 `tools\bench_instant.py` adds live read-only timings. Each turn is logged with
 `route=local-instant` and `speech_end_to_effect` in `state/latency.csv`, and
 the UX harness reports it per scenario (`tools/ux_scenarios/19-25`). Settings
 are under `instant:` in `config.example.yaml` (`ack: silent` for the effect
-only).
+only), and on the Settings window's Instant tab.
 
 ## The island (M5: "Ember & Thread")
 
@@ -1103,8 +1123,8 @@ heyclaude/
   undo.py         M9: "undo that" and the island's Undo button (inverse calls, run locally)
   mcp_windows/    M9: the Windows settings MCP server (audio, display, radios, power, media, apps,
                   clipboard, screen, Settings pages) and its tool registry (allow-list, undo)
-  intents/        M10: instant commands without a model: grammar, slots, classifier (numpy),
-                  executors over mcp_windows, local timers, "teach it"
+  intents/        M10: instant commands without a model: grammar (English, Russian, Uzbek), slots,
+                  classifier (numpy), executors over mcp_windows, local timers, "teach it"
   claude_cli.py   finds claude.exe, launch flags
 tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
                   wake_eval.py (wake word hit rate, false wakes per hour, threshold),

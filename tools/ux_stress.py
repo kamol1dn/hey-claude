@@ -1011,6 +1011,8 @@ def main(argv=None):
     r.add_argument("--out", default=None, help="output folder (default state/ux/runs/<stamp>)")
     r.add_argument("--show", action="store_true", help="--offline: show the island on the desktop (default offscreen)")
     r.add_argument("--allow-running", action="store_true", help="don't refuse when another hey-claude is running")
+    r.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   help="override a setting for this run only, e.g. --set instant.ack=effect (YAML value)")
     w = sub.add_parser("wakecheck", help="does the wake model fire on your clips and on Kokoro?")
     w.add_argument("--noise", type=float, default=-58.0)
     sub.add_parser("list", help="list the scenarios")
@@ -1050,6 +1052,14 @@ def main(argv=None):
     from heyclaude import config as C
     user = C.load(str(main / "config.yaml")) if (main / "config.yaml").exists() and not args.offline else C.load(os.devnull + ".none")
     hc = harness_config(user, scratch)
+    for kv in getattr(args, "set", None) or []:            # --set a.b=value: this run only
+        key, _, val = kv.partition("=")
+        node = hc
+        *path, last = key.strip().split(".")
+        for part in path:
+            node = node.setdefault(part, {})
+        node[last] = yaml.safe_load(val)
+        print(f"[ux] setting {key.strip()} = {node[last]!r} for this run")
     cfg_path = UXDIR / "config.harness.yaml"
     cfg_path.write_text(yaml.safe_dump(hc, sort_keys=False, allow_unicode=True), encoding="utf-8")
     h = Harness(args, scenarios, out)

@@ -13,6 +13,12 @@ CPU temperature" and "can I take a rain check" all fall through.
 After a weather answer, short follow-ups ("and tomorrow?", "what about
 London?", "and the air quality?") take the rest from the previous query
 (`prev`); "there" means the previous place.
+
+"How sure is that?", "how confident are you about tomorrow", "do the models
+agree", "will it really rain on Friday?" set `sure` (the card's model-agreement
+chip). Without a previous weather answer they're claimed only when they say
+what about ("how sure is the forecast for tomorrow", "will it really rain"):
+"how sure are you" on its own is the conversation's business.
 """
 from __future__ import annotations
 
@@ -33,6 +39,7 @@ class WeatherQuery:
     part: str = ""               # morning | afternoon | evening | night (of `day`)
     focus: str = "general"       # general | rain | umbrella | snow | temp | wind | alerts | air | uv | pollen | sun | moon
     sub: str = ""                # sun: rise | set
+    sure: bool = False           # "how sure is that?": compare the forecast models (the agreement chip)
 
     @property
     def home(self) -> bool:
@@ -128,6 +135,9 @@ _FOCUS = [
     ("wind", r"\b(?:wind|windy|breezy|gusty)\b"),
 ]
 _FOCUS = [(n, re.compile(p)) for n, p in _FOCUS]
+# words that may start a "how sure is that?" (see _sure)
+_SURE_HINT = re.compile(r"\b(?:sure|confident|certain|reliable|accurate|trustworthy|solid|trust|agree|agreeing|"
+                        r"agreement|agreed|really|actually|definitely|correct|right|for real)\b")
 # "and tomorrow?", "what about Paris", "how about the weekend" (only right after a weather answer)
 _FOLLOW = re.compile(r"^(?:and|what about|how about|and what about|and how about|what is it like|and in|and for|"
                      r"same for|what about in|how about in)\b\s*")
@@ -225,10 +235,64 @@ def _title(place: str, original: str) -> str:
     return " ".join(w if any(c.isupper() for c in w) else w.capitalize() for w in raw.split()).strip(" ,")
 
 
+# "how sure is that?" (ROADMAP M5b's model-agreement chip): the question's head, then what it's about
+_SURE_HEAD = re.compile(
+    r"^(?:but |so |and |ok |okay )?(?:"
+    r"how (?:sure|confident|certain|reliable|accurate|trustworthy|solid) (?:is|are|was|were|should i be|can i be|would you say)|"
+    r"how much (?:can|should|do) (?:i|we) trust|(?:can|should) (?:i|we) (?:really )?trust|"
+    r"are you (?:sure|certain|confident)(?: about| of)?|"
+    r"(?:do|does|will) (?:all )?(?:the )?(?:(?P<w1>weather|forecast) )?(?P<m1>models?) (?:all )?agree|"
+    r"are (?:all )?(?:the )?(?:(?P<w2>weather|forecast) )?(?P<m2>models?) (?:all )?(?:agreeing|in agreement|agreed)|"
+    r"(?:what is|what about|how about|show me|check|and) (?:the )?(?:(?P<w3>weather|forecast) )?(?P<m3>model) agreement|"
+    r"(?:the )?(?:(?P<w4>weather|forecast) )?(?P<m4>model) agreement|"
+    r"is (?:that|this|it|the forecast) (?:certain|sure|reliable|accurate|right|correct|for sure|for real)"
+    r")(?=\s|$)\s*")
+_SURE_OBJ = re.compile(
+    r"^(?:(?:(?:of|about|in|with|on) )?(?P<o>those numbers|the numbers|the (?:weather )?forecast|that forecast|"
+    r"this forecast|the weather|the prediction|the (?:weather )?models|that|this|it|you|they|them|those)(?=\s|$))?\s*")
+_REALLY = re.compile(r"\b(?:really|actually|definitely|for sure|for certain)\b")
+
+
+def _sure(text: str, s: str, prev, today_wd: int) -> WeatherQuery | None:
+    """"how sure is that?" and friends -> the query with `sure` set, or None."""
+    m = _SURE_HEAD.match(s)
+    if m is None:
+        # "will it really rain tomorrow", "is it actually going to snow": the question, sure
+        if not _REALLY.search(s) or not re.match(r"^(?:will|is|are|does|do|so|and|but)\b", s):
+            return None
+        q = parse(_REALLY.sub(" ", s), prev=prev, today_wd=today_wd)
+        return replace(q, text=text, sure=True) if q is not None else None
+    about_weather = any(m.group(g) for g in ("w1", "w2", "w3", "w4"))
+    models = any(m.group(g) for g in ("m1", "m2", "m3", "m4"))
+    rest = s[m.end():]
+    o = _SURE_OBJ.match(rest)
+    obj = o.group("o") or ""
+    rest = rest[o.end():].strip()
+    about_weather = about_weather or "forecast" in obj or "weather" in obj or "models" in obj
+    rest = re.sub(r"^(?:about|regarding|on|of|that|if)\s+", "", rest).strip()
+    if not rest:
+        if prev is not None:
+            return replace(prev, text=text, sure=True)
+        if about_weather:
+            return WeatherQuery(text=text, sure=True)
+        return None                                  # "how sure are you", "do the models agree": not ours
+    q = parse("what about " + rest, prev=prev, today_wd=today_wd) if prev is not None else None
+    if q is None and (about_weather or models or prev is not None or _STRONG.search(rest)):
+        q = parse(rest if _STRONG.search(rest) else "weather " + rest, prev=None, today_wd=today_wd)
+    if q is None:
+        return None
+    if not (about_weather or prev is not None or _STRONG.search(rest)):
+        return None                                  # "how sure are you about tomorrow": no weather in it
+    return replace(q, text=text, sure=True)
+
+
 def parse(text: str, prev: WeatherQuery | None = None, today_wd: int | None = None) -> WeatherQuery | None:
     if today_wd is None:
         from datetime import date
         today_wd = date.today().weekday()
+    q = _sure(text, _norm(text), prev, today_wd) if _SURE_HINT.search(_norm(text)) else None
+    if q is not None:
+        return q
     s = _norm(text)
     if not s or len(s) > 140 or _NOT.search(s):
         return None
@@ -274,7 +338,8 @@ def parse(text: str, prev: WeatherQuery | None = None, today_wd: int | None = No
             place = prev.place
         return replace(prev, text=text, place=_title(place, text) if place not in (HOME, THERE) and place != prev.place else place,
                        when=f_when or prev.when, day=f_day if f_when else prev.day, part=f_part if f_when else prev.part,
-                       focus=f_focus if f_focus != "general" else prev.focus, sub=f_sub if f_focus != "general" else prev.sub)
+                       focus=f_focus if f_focus != "general" else prev.focus, sub=f_sub if f_focus != "general" else prev.sub,
+                       sure=False)
     if left:
         return None
     if follow is not None:                           # "and the air quality?": the same place and time

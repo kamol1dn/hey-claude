@@ -1,0 +1,106 @@
+{
+ "id": "news",
+ "name": "Headlines",
+ "api": "1.0",
+ "description": "news or sports headlines from a web search (title, source, date, link)",
+ "title": "{title}",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": false,
+ "ttl_s": 20,
+ "glyph": "news",
+ "triggers": {
+  "tools": [
+   "WebSearch"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "title": "Sports · Premier League",
+  "kind": "sports",
+  "query": "Premier League results this weekend",
+  "headlines": [
+   {
+    "title": "English Premier League results & fixtures (Matchday 10)",
+    "source": "english.ahram.org.eg",
+    "link": "https://english.ahram.org.eg/News/581763.aspx"
+   },
+   {
+    "title": "Premier League Results",
+    "source": "tntsports.co.uk",
+    "link": "https://www.tntsports.co.uk/football/premier-league-results_sto7006970/story.shtml"
+   },
+   {
+    "title": "All 380 fixtures for 2026/27 Premier League season",
+    "source": "premierleague.com",
+    "link": "https://www.premierleague.com/en/news/4675097/all-380-fixtures-for-202627-premier-league-season"
+   },
+   {
+    "title": "Premier League Matchday 11 Review",
+    "source": "sofascore.com",
+    "link": "https://www.sofascore.com/news/?p=82013"
+   },
+   {
+    "title": "The Premier League: Match weekend eleven results & standings",
+    "source": "mancitysquare.com",
+    "link": "https://mancitysquare.com/the-premier-league-match-weekend-eleven-results-standings-01k9q40k5wxk",
+    "time": "Nov 8"
+   }
+  ]
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "title",
+   "headlines"
+  ],
+  "properties": {
+   "title": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "kind": {
+    "type": "string",
+    "enum": [
+     "news",
+     "sports"
+    ]
+   },
+   "query": {
+    "type": "string",
+    "maxLength": 120
+   },
+   "headlines": {
+    "type": "array",
+    "maxItems": 5,
+    "items": {
+     "type": "object",
+     "required": [
+      "title"
+     ],
+     "properties": {
+      "title": {
+       "type": "string",
+       "maxLength": 140
+      },
+      "source": {
+       "type": "string",
+       "maxLength": 40
+      },
+      "time": {
+       "type": "string",
+       "maxLength": 16
+      },
+      "link": {
+       "type": "string",
+       "maxLength": 300,
+       "pattern": "^https?://"
+      }
+     }
+    }
+   }
+  }
+ }
+}

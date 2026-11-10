@@ -38,10 +38,30 @@ def _os_set(text: str) -> None:
         cb.CloseClipboard()
 
 
+def _os_holds() -> str:
+    """What a clipboard without text holds: "image", "files", "empty" or "other"."""
+    cb = _open()
+    try:
+        if cb.IsClipboardFormatAvailable(15):                       # CF_HDROP
+            return "files"
+        if any(cb.IsClipboardFormatAvailable(f) for f in (2, 8, 17)):   # CF_BITMAP, CF_DIB, CF_DIBV5
+            return "image"
+        return "other" if cb.CountClipboardFormats() else "empty"
+    finally:
+        cb.CloseClipboard()
+
+
 def get_clipboard() -> dict:
-    """The text on the clipboard (None if it holds something else, like an image)."""
+    """The text on the clipboard (None if it holds something else, like an image;
+    then `holds` says what: image, files, empty or other)."""
     t = _os_get()
-    return {"text": t, "chars": len(t) if t is not None else 0}
+    if t is None:
+        try:
+            holds = _os_holds()
+        except Exception:
+            holds = "other"
+        return {"text": None, "chars": 0, "holds": holds}
+    return {"text": t, "chars": len(t)}
 
 
 def set_clipboard(text: str) -> dict:

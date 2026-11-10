@@ -353,11 +353,12 @@ def test_the_agent_gets_weather_mcp_only_behind_its_switch(tmp_path=None):
         a.cfg = cfg
         with mock.patch.object(config, "STATE_DIR", tmp_path):
             args = a._args()
-        assert args[args.index("--allowedTools") + 1] == "Read,mcp__weather__get_weather"     # off by default
+        mine = [t for t in args[args.index("--allowedTools") + 1].split(",") if not t.startswith("mcp__info__")]
+        assert mine == ["Read", "mcp__weather__get_weather"]                                  # off by default
         cfg["weather"]["mcp"]["agent"] = True
         with mock.patch.object(config, "STATE_DIR", tmp_path):
             args = a._args()
-    allowed = args[args.index("--allowedTools") + 1].split(",")
+    allowed = [t for t in args[args.index("--allowedTools") + 1].split(",") if not t.startswith("mcp__info__")]
     assert allowed[:2] == ["Read", "mcp__weather__get_weather"]
     assert allowed[2:] == [f"mcp__weather-mcp__{t}" for t in WM.TOOLS]
     data = json.load(open(args[args.index("--mcp-config") + 1:][-1], encoding="utf-8"))

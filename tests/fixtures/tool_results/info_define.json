@@ -1,0 +1,18 @@
+{
+ "note": "the info server's define: dictionaryapi.dev (Wiktionary, CC BY-SA; recorded 2026-11-10)",
+ "tool": "mcp__info__define",
+ "args": {
+  "word": "glimmer"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"word\": \"glimmer\",\n  \"lang\": \"en\",\n  \"phonetic\": \"/ˈɡlɪmə(ɹ)/\",\n  \"meanings\": [\n    {\n      \"pos\": \"noun\",\n      \"senses\": [\n        {\n          \"definition\": \"A faint light; a dim glow.\",\n          \"example\": \"The glimmer of the fireflies was pleasant to watch.\"\n        },\n        {\n          \"definition\": \"A flash of light.\"\n        },\n        {\n          \"definition\": \"A faint or remote possibility.\",\n          \"example\": \"A glimmer of hope.\"\n        }\n      ]\n    },\n    {\n      \"pos\": \"verb\",\n      \"senses\": [\n        {\n          \"definition\": \"To shine with a faint, unsteady light.\",\n          \"example\": \"The fireflies glimmered in the dark.\"\n        }\n      ]\n    }\n  ],\n  \"source\": \"Wiktionary via dictionaryapi.dev\",\n  \"url\": \"https://en.wiktionary.org/wiki/glimmer\",\n  \"language\": \"English\"\n}"
+  }
+ ],
+ "expect": {
+  "widget": "define",
+  "title": "Dictionary · English",
+  "icon": true
+ }
+}

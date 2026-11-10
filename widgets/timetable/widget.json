@@ -1,0 +1,76 @@
+{
+ "id": "timetable",
+ "name": "Timetable",
+ "api": "1.0",
+ "description": "the user's classes: the next class, its room and the time left, and the rest of the day",
+ "title": "Timetable · {label}",
+ "glyph": "cap",
+ "size": {
+  "width": 440,
+  "max_height": 262
+ },
+ "private": true,
+ "ttl_s": 14,
+ "triggers": {
+  "tools": ["mcp__info__next_class", "mcp__info__timetable_today"],
+  "data": "adapter"
+ },
+ "example": {
+  "label": "Today",
+  "day": "Tue",
+  "date": "2026-11-10",
+  "now": "13:52",
+  "now_min": 832.3,
+  "classes": [
+   {"start": "09:00", "end": "10:30", "title": "Linear Algebra", "code": "LIN", "room": "A108", "state": "done"},
+   {"start": "10:45", "end": "12:15", "title": "Applied Optics", "code": "OPT", "room": "B204", "state": "done"},
+   {"start": "14:00", "end": "15:30", "title": "Data Structures II", "code": "DSA2", "room": "C312 Lab", "state": "next"},
+   {"start": "15:45", "end": "17:15", "title": "Academic English 3", "code": "ENG3", "room": "A215", "state": "later"}
+  ],
+  "focus": 2,
+  "focus_state": "next",
+  "focus_in_s": 460
+ },
+ "schema": {
+  "type": "object",
+  "required": ["label", "classes", "focus", "focus_state"],
+  "properties": {
+   "label": {"type": "string", "maxLength": 24},
+   "day": {"type": "string", "maxLength": 3},
+   "date": {"type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\d$"},
+   "now": {"type": "string", "pattern": "^\\d\\d:\\d\\d$"},
+   "now_min": {"type": "number", "minimum": 0, "maximum": 1440},
+   "classes": {
+    "type": "array",
+    "maxItems": 8,
+    "items": {
+     "type": "object",
+     "required": ["start", "end", "title", "state"],
+     "properties": {
+      "start": {"type": "string", "pattern": "^\\d\\d:\\d\\d$"},
+      "end": {"type": "string", "pattern": "^\\d\\d:\\d\\d$"},
+      "title": {"type": "string", "maxLength": 60},
+      "code": {"type": "string", "maxLength": 24},
+      "room": {"type": "string", "maxLength": 24},
+      "teacher": {"type": "string", "maxLength": 40},
+      "state": {"type": "string", "enum": ["done", "now", "next", "later"]}
+     }
+    }
+   },
+   "focus": {"type": "integer", "minimum": -1, "maximum": 7},
+   "focus_state": {"type": "string", "enum": ["now", "next", "none"]},
+   "focus_in_s": {"type": "number", "minimum": 0, "maximum": 1209600},
+   "after": {
+    "type": "object",
+    "required": ["label", "start", "title"],
+    "properties": {
+     "label": {"type": "string", "maxLength": 24},
+     "start": {"type": "string", "pattern": "^\\d\\d:\\d\\d$"},
+     "title": {"type": "string", "maxLength": 60},
+     "room": {"type": "string", "maxLength": 24},
+     "in_s": {"type": "number", "minimum": 0, "maximum": 1209600}
+    }
+   }
+  }
+ }
+}

@@ -123,6 +123,11 @@ def media_control(action: str) -> dict:
     return change(_track(before), _track(after), action=action)
 
 
-def album_art() -> bytes | None:
-    """Not a tool (the island fetches the art itself, so no image goes to the model)."""
-    return _os_now_playing(art=True).get("art")
+def album_art(title: str | None = None) -> bytes | None:
+    """Not a tool (the island fetches the art itself, so no image goes to the model).
+    With `title`: only while that track is the current one (M5b's now-playing card
+    never shows another track's cover)."""
+    d = _os_now_playing(art=True)
+    if title is not None and (d.get("title") or "") != title:
+        return None
+    return d.get("art")

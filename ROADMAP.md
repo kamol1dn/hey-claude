@@ -513,7 +513,7 @@ transitions measured; no focus stealing.
   pill-to-panel morph, and the first packs: weather (keyless Open-Meteo tool `heyclaude/mcp_weather`, card from
   the tool result, animated sky shader), calendar agenda, timer, task card, link/file, code, image, Telegram set.
 
-## M5b: Widget packs
+## M5b: Widget packs ✅ built (2026-11-10)
 
 **Goal:** more answers show as a small live card instead of only speech. Each
 widget is a plug-in (`widgets/<id>/`: `widget.json` with its data schema and
@@ -524,7 +524,7 @@ timer, task card, link/file, code, image, and the Telegram set.
 
 Next packs, each with its own small animation:
 - **Weather, upgraded with [weather-mcp](https://github.com/weather-mcp/weather-mcp)**
-  ✅ built (2026-11-10), except the model-agreement chip (MIT, `@dangahagan/weather-mcp` on npm, 17 tools, no API keys: NOAA, Open-Meteo,
+  ✅ built (2026-11-10) (MIT, `@dangahagan/weather-mcp` on npm, 17 tools, no API keys: NOAA, Open-Meteo,
   MET Norway). Keep M5's small built-in Open-Meteo tool as the fast default and
   the fallback; weather-mcp adds depth.
   - **Tools used:**
@@ -610,7 +610,12 @@ Next packs, each with its own small animation:
       place asked for the first time takes up to the 2 s deadline (the
       built-in tool or weather-mcp's partial answer). weather-mcp itself is up
       ~9 s after start (npx + initialize), home is prefetched ~4 s later.
-    - Not done: the "how sure is this?" model-agreement chip.
+    - **Model agreement** (2026-11-10): "how sure is that?", "will it really rain tomorrow?", "do the models
+      agree?" compare seven models from Open-Meteo's keyless multi-model API (ECMWF, GFS, ICON, GEM,
+      Météo-France, UKMO, JMA; one call, cached 10 min). Highs within 2° / lows within 3° and rain chances on
+      the same side agree; one outlier is named ("GEM runs cold"). The card's chip (green / amber / red) has
+      one dot per model on a high and a low lane with the spread band; the route speaks its summary, and the
+      agent's `get_weather` takes `agreement` and `day`.
 - **Now playing:** album art, progress, controls (M9's media tools).
 - **System:** battery, CPU/GPU load and VRAM, with hey-claude's own devices
   shown ("stt: gpu (turbo)").
@@ -636,6 +641,31 @@ Next packs, each with its own small animation:
 
 **Done when:** each pack renders from a recorded real tool result, has a
 schema test, and passes the M5 frame-budget check.
+
+**Built (2026-11-10):**
+- Infrastructure: hey-claude's own read-only MCP server `info` (`heyclaude/mcp_info/`, every module with
+  `TOOLS` is served; registered for the tool agent with its tools allowed), widget adapter plug-ins
+  (`widgets/<id>/adapter.py`, `triggers.data: "adapter"`), `widgets.APP_STATE` (the island's stt / voice
+  labels for cards), `tools/widget_shot.py` (render a card on the real island offscreen, png or gif), and
+  `tests/test_widget_packs.py`: every pack's example on the live island, then at rest it may add at most the
+  idle budget on top of the island's own repaint rate (this caught M5's timer gliding its ring at 60 fps on
+  every 1 s tick; fixed).
+- **now_playing** (`mcp__windows__now_playing`; cover art off the UI thread, controls through
+  `media_control`; now_playing no longer shows the M9 effect row too), **clipboard** (text / code / link /
+  screenshot thumbnail; the screenshot tool also returns a small preview path), **system**
+  (`mcp__info__system_status`: psutil, NVML, GetSystemPowerStatus, plus APP_STATE devices), **reminders**
+  (M10 instant intent `timer.list`, the card from the executor's snapshot), **timetable** and **deadlines**
+  (private; `info.timetable` reads the timetable project's data as data, `info.deadlines` a notes file),
+  **convert** (safe ast calculator with real steps, units with formulas, currency from open.er-api.com /
+  frankfurter, cached), **define** and **translate** (dictionaryapi.dev, Wiktionary for ru/uz, MyMemory),
+  **directions** (Nominatim + OSRM, OSM tiles composed into a darkened map, cached), **news** (the agent's
+  WebSearch result, only for news / sports queries), **email** (the Gmail connector's `search_threads`,
+  private, no snippets on the card), and the weather agreement chip.
+- Every pack: a recorded tool result in `tests/fixtures/tool_results/` (rendered on the live island by
+  test_island), a schema / adapter test file (`tests/test_widgets_*.py`), its own entry animation (≤ ~1.4 s,
+  nothing loops) and the frame-budget check. Personal packs' fixtures are synthetic.
+- Not done: Settings controls for the `info:` keys (config.yaml only), and the preview page
+  (`docs/widgets-preview.html`) has no M5b section; the cards were reviewed as renders of the real island.
 
 ## M6: Characters as plug-ins (pick one in Settings, add new ones by PR) ✅ built (2026-11-10)
 

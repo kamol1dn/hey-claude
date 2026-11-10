@@ -1,0 +1,118 @@
+{
+ "id": "email",
+ "name": "Email digest",
+ "api": "1.0",
+ "description": "an inbox digest from the Gmail connector: unread count and the top senders",
+ "title": "Gmail · {title}",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": true,
+ "ttl_s": 15,
+ "icon": "gmail",
+ "triggers": {
+  "tools": [
+   "mcp__claude_ai_Gmail__search_threads"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "title": "Inbox",
+  "unread": 7,
+  "approx": false,
+  "threads": 7,
+  "senders": [
+   {
+    "name": "Priya Raman",
+    "count": 2,
+    "unread": 2,
+    "subject": "Re: lab report draft",
+    "time": "11:12"
+   },
+   {
+    "name": "Northwind Bank",
+    "count": 1,
+    "unread": 1,
+    "subject": "Your statement is ready",
+    "time": "09:55"
+   },
+   {
+    "name": "Course Portal",
+    "count": 1,
+    "unread": 1,
+    "subject": "New grade posted: Algorithms quiz 4",
+    "time": "Mon"
+   },
+   {
+    "name": "Sam Lee",
+    "count": 1,
+    "unread": 0,
+    "subject": "Photos from Saturday",
+    "time": "Sun"
+   }
+  ]
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "title",
+   "unread",
+   "senders"
+  ],
+  "properties": {
+   "title": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "unread": {
+    "type": "integer",
+    "minimum": 0
+   },
+   "approx": {
+    "type": "boolean"
+   },
+   "threads": {
+    "type": "integer",
+    "minimum": 0
+   },
+   "senders": {
+    "type": "array",
+    "maxItems": 4,
+    "items": {
+     "type": "object",
+     "required": [
+      "name"
+     ],
+     "properties": {
+      "name": {
+       "type": "string",
+       "maxLength": 40
+      },
+      "count": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "unread": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "subject": {
+       "type": "string",
+       "maxLength": 90
+      },
+      "time": {
+       "type": "string",
+       "maxLength": 16
+      },
+      "link": {
+       "type": "string",
+       "maxLength": 300,
+       "pattern": "^https://mail\\.google\\.com/"
+      }
+     }
+    }
+   }
+  }
+ }
+}

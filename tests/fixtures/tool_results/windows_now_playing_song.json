@@ -1,0 +1,16 @@
+{
+ "note": "the live now_playing recording above with only its titles edited to a made-up song (title, artist, album); the player, state and position are as recorded",
+ "tool": "mcp__windows__now_playing",
+ "args": {},
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"title\": \"Paper Lanterns\", \"artist\": \"The Quiet Ferns\", \"album\": \"Low Tide Radio\", \"app\": \"Chrome\", \"status\": \"paused\", \"position_s\": 3.5, \"duration_s\": 8.3}"
+  }
+ ],
+ "expect": {
+  "widget": "now_playing",
+  "title": "Now playing · Chrome",
+  "icon": true
+ }
+}

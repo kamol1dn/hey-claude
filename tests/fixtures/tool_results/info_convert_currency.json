@@ -1,0 +1,20 @@
+{
+ "note": "the info server's convert_currency: a real open.er-api.com rate (public, keyless; recorded 2026-11-10)",
+ "tool": "mcp__info__convert_currency",
+ "args": {
+  "amount": 100,
+  "from_currency": "USD",
+  "to_currency": "UZS"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"kind\": \"currency\",\n  \"amount\": 100,\n  \"from\": \"USD\",\n  \"to\": \"UZS\",\n  \"rate\": 11952.28,\n  \"result\": 1195228.0,\n  \"result_text\": \"1,195,228\",\n  \"steps\": [\n    \"100 USD × 11,952.28 UZS/USD\",\n    \"= 1,195,228 UZS\"\n  ],\n  \"note\": \"1 USD = 11,952.28 UZS\",\n  \"date\": \"2026-11-10\",\n  \"source\": \"ExchangeRate-API (open.er-api.com)\",\n  \"from_name\": \"US dollar\",\n  \"to_name\": \"Uzbek sum\"\n}"
+  }
+ ],
+ "expect": {
+  "widget": "convert",
+  "title": "Currency · USD → UZS",
+  "icon": true
+ }
+}

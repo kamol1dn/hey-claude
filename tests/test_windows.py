@@ -472,7 +472,7 @@ def test_effects_json_matches_the_tools():
         else:
             assert registry.get(name) is not None, f"effects.json names an unknown tool {name}"
     for t in registry.TOOLS.values():
-        if t.kind == "read" and t.name not in ("screenshot", "now_playing"):
+        if t.kind == "read" and t.name != "screenshot":     # now_playing: its card (M5b) instead of an effect row
             assert t.full_name in m["silent"], f"{t.name} should be silent"
         else:
             assert t.full_name in m["tools"], f"{t.name} has no effect"
@@ -603,6 +603,10 @@ def test_agent_args_have_windows_server_and_gated_tools(tmp_path):
     with mock.patch.object(config, "STATE_DIR", tmp_path):
         args = a._args()
     allowed = args[args.index("--allowedTools") + 1]
+    from heyclaude import mcp_info
+    own = [t for t in allowed.split(",") if t.startswith("mcp__info__")]
+    assert sorted(own) == sorted(mcp_info.tool_names())               # M5b: hey-claude's own read-only tools
+    allowed = ",".join(t for t in allowed.split(",") if not t.startswith("mcp__info__"))
     assert allowed == "Read,mcp__windows__set_volume,mcp__weather__get_weather"   # M5: the keyless weather tool
     mcp_files = args[args.index("--mcp-config") + 1:]
     data = json.load(open(mcp_files[-1], encoding="utf-8"))

@@ -1,0 +1,18 @@
+{
+ "note": "a real place() result (Nominatim + OSM tiles, 2026-11-10): a public Berlin landmark; the map path made relative",
+ "tool": "mcp__info__place",
+ "args": {
+  "query": "Brandenburg Gate, Berlin"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"name\": \"Brandenburg Gate\", \"address\": \"Brandenburg Gate, 1, Pariser Platz, Friedrich-Wilhelm-Stadt, Mitte, Berlin, 10117, Germany\", \"kind\": \"gate\", \"lat\": 52.51627, \"lon\": 13.377703, \"source\": \"Nominatim · OpenStreetMap\", \"attribution\": \"© OpenStreetMap\", \"map\": \"state/maps/map-920ebdbaa330.png\", \"pins\": [[0.5, 0.5]]}"
+  }
+ ],
+ "expect": {
+  "widget": "directions",
+  "title": "Place · Brandenburg Gate",
+  "icon": true
+ }
+}

@@ -108,6 +108,27 @@ Item {
             o.stroke = rrect(-8, -6, 16, 14, 2.5) + " M-8 -2 L8 -2 M-4 -8 L-4 -4 M4 -8 L4 -4"
         } else if (n === "timer") {
             o.stroke = circle(0, 1.5, 6.5) + " M0 1.5 L0 -2 M-2.5 -7.5 L2.5 -7.5"
+        } else if (n === "cap") {                                   // M5b timetable: a mortarboard and its tassel
+            o.stroke = "M-10 -2.5 L0 -6.5 L10 -2.5 L0 1.5 Z M-5.5 -0.4 L-5.5 4 A5.5 2.6 0 0 0 5.5 4 L5.5 -0.4 M10 -2.5 L10 3.5"
+        } else if (n === "hourglass") {                             // M5b deadlines: an hourglass with sand below
+            o.stroke = "M-6 -8 L6 -8 M-6 8 L6 8 M-4.5 -8 C-4.5 -3 4.5 -2 4.5 8 M4.5 -8 C4.5 -3 -4.5 -2 -4.5 8"
+            o.fill = "M-2.8 6.6 L2.8 6.6 L0 3.6 Z"
+        } else if (n === "chip") {                                  // M5b system: a processor with its pins
+            o.stroke = rrect(-5.5, -5.5, 11, 11, 2) + " M-2.5 -5.5 L-2.5 -8.5 M2.5 -5.5 L2.5 -8.5 M-2.5 5.5 L-2.5 8.5" +
+                       " M2.5 5.5 L2.5 8.5 M-5.5 -2.5 L-8.5 -2.5 M-5.5 2.5 L-8.5 2.5 M5.5 -2.5 L8.5 -2.5 M5.5 2.5 L8.5 2.5"
+            o.fill = rrect(-2, -2, 4, 4, 1)
+        } else if (n === "bell") {                                  // M5b reminders
+            o.stroke = "M-6 4 L-6 -1 A6 6 0 0 1 6 -1 L6 4 L7.5 5.5 L-7.5 5.5 Z M-2 8 A2 2 0 0 0 2 8"
+            o.fill = circle(0, -7.6, 1)
+        } else if (n === "pin") {                                   // M5b directions: a map pin
+            o.stroke = "M0 9 C-1.5 4.5 -6.5 1.5 -6.5 -3 A6.5 6.5 0 1 1 6.5 -3 C6.5 1.5 1.5 4.5 0 9 Z"
+            o.fill = circle(0, -3, 2.2)
+        } else if (n === "news") {                                  // M5b news: a folded paper with lines
+            o.stroke = "M-6 -7 L8 -7 L8 6 A2 2 0 0 1 6 8 L-7 8 A2 2 0 0 1 -9 6 L-9 -2 L-6 -2 M-6 -7 L-6 6 A2 2 0 0 1 -8 8" +
+                       " M-2.5 -0.5 L4.5 -0.5 M-2.5 3 L4.5 3"
+            o.fill = rrect(-2.5, -4.6, 7, 2.6, 0.6)
+        } else if (n === "mail") {                                  // M5b email: an envelope
+            o.stroke = rrect(-9, -6.5, 18, 13, 2.5) + " M-8 -5 L0 1.5 L8 -5"
         } else if (n === "link") {
             o.stroke = rrect(-8, -3, 9, 6, 3) + " " + rrect(-1, -3, 9, 6, 3)
         } else if (n === "code") {
@@ -116,6 +137,16 @@ Item {
             o.stroke = "M-8 -1 L8 -7 L3 8 L0 2 Z M0 2 L8 -7"
         } else if (n === "check") {
             o.stroke = "M-6 0 L-2 4 L6 -5"
+        } else if (n === "calc") {                              // M5b convert: a calculator, its display and keys
+            o.stroke = rrect(-7, -9, 14, 18, 2.5) + " M-4 -5 L4 -5"
+            o.fill = circle(-3.5, 0, 1.1) + " " + circle(0, 0, 1.1) + " " + circle(3.5, 0, 1.1) + " " +
+                     circle(-3.5, 4.5, 1.1) + " " + circle(0, 4.5, 1.1) + " " + circle(3.5, 4.5, 1.1)
+        } else if (n === "book") {                              // M5b define: an open book
+            o.stroke = "M0 -5 Q-4 -8 -9 -6.5 L-9 6.5 Q-4 5 0 7.5 Q4 5 9 6.5 L9 -6.5 Q4 -8 0 -5 Z M0 -5 L0 7.5"
+        } else if (n === "translate") {                         // M5b translate: two speech bubbles
+            o.stroke = rrect(-9, -8, 11, 8, 2.5) + " M-6 0 L-7 3 L-3 0"
+            o.fill2 = ""
+            o.stroke += " " + rrect(-1, -2, 10, 8, 2.5) + " M5 6 L6 9 L2 6"
         } else if (n === "cloud" || n === "rain" || n === "storm" || n === "snow" || n === "fog") {
             o.stroke = cloudPath(0, -1)
             if (n === "rain") o.stroke += " M-3.5 7 L-4.5 9.5 M0 7 L-1 9.5 M3.5 7 L2.5 9.5"

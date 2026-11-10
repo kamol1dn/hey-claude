@@ -60,7 +60,13 @@ def build():
                     r = registry.call("screenshot", {"monitor": monitor})
                 except ToolError as e:
                     raise SdkToolError(str(e)) from None
-                return Image(data=r["image_jpeg"], format="jpeg")
+                # M5b: plus a text block (the size, and a small copy for the island's card:
+                # hey-claude only sees a tool's text, never its images)
+                import json
+                from . import screen
+                meta = {"width": r["width"], "height": r["height"], "monitor": monitor,
+                        "preview": screen.save_preview(r["image_jpeg"])}
+                return [Image(data=r["image_jpeg"], format="jpeg"), json.dumps(meta)]
             server.tool(name="screenshot", description=doc)(shot)
             continue
         server.tool(name=t.name, description=doc)(_wrap(t.func, SdkToolError))

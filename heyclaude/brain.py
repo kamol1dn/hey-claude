@@ -603,19 +603,26 @@ def info_mcp_servers(cfg: dict) -> dict:
     """mcpServers entry for hey-claude's own read-only data tools (heyclaude/mcp_info; M5b widget packs)."""
     import json
     from .config import ROOT
-    i = cfg.get("info") or {}
+    i = dict(cfg.get("info") or {})
     if not i.get("enabled", True):
         return {}
+    # "from here" (directions) falls back to the weather's home place
+    i.setdefault("weather_location", (cfg.get("weather") or {}).get("location", "") or "")
     return {"info": {"command": _console_python(), "args": ["-m", "heyclaude.mcp_info"],
                      "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
                              "HEYCLAUDE_INFO_CONFIG": json.dumps(i, default=str)}}}
 
 
+AGENT_NEWS_PROMPT = (" For news or sports headlines use WebSearch; the island shows the headlines card from its "
+                     "result by itself, so just say the gist.")
 WEATHER_TOOL = "mcp__weather__get_weather"
 AGENT_WEATHER_PROMPT = (
     " For any weather question call mcp__weather__get_weather (empty location = the user's home place); "
     "the island shows the forecast card from its result by itself, so don't add a WIDGET line for "
     "weather; just say the gist, e.g. 'Fifteen degrees and clear, rain after midnight.'"
+    " When the user asks how sure a forecast is ('how sure is that?', 'will it really rain tomorrow?', 'do the "
+    "models agree?'), call it with agreement=true and day (0 today, 1 tomorrow ... 6); the card shows the "
+    "model-agreement chip, and you say its agreement.summary."
 )
 AGENT_WEATHER_MCP_PROMPT = (
     " For official weather warnings, air quality, UV, pollen, a rain nowcast, the moon or a forecast beyond "
@@ -688,7 +695,8 @@ class Agent:
         prompt = (AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
                   + (AGENT_WEATHER_PROMPT if "weather" in win else "")
                   + (AGENT_WEATHER_MCP_PROMPT if "weather-mcp" in win else "")
-                  + (mcp_info.prompt() if "info" in win else "") + widget_prompt(self.cfg))
+                  + (mcp_info.prompt() if "info" in win else "")
+                  + (AGENT_NEWS_PROMPT if "info" in win else "") + widget_prompt(self.cfg))
         args = ["--model", a["model"], "--output-format", "stream-json", "--verbose",
                 "--permission-mode", a["permission_mode"], "--permission-prompts", "none",
                 "--append-system-prompt", prompt, "--name", day or "hey-claude assistant"]

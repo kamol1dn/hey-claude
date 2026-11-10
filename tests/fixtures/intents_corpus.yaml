@@ -306,6 +306,19 @@ corpus:
   - ["How long is left on the timer?", timer.status, {}]
   - ["How much time is left on my timer?", timer.status, {}]
   - ["Check the timer.", timer.status, {}]
+  - ["How long left on the tea timer?", timer.status, {label: tea}]
+  - ["How much time is left on the pasta timer?", timer.status, {label: pasta}]
+  # M5b: the reminders card (timer.list)
+  - ["What timers do I have?", timer.list, {}]
+  - ["List my timers.", timer.list, {}]
+  - ["Show me my timers.", timer.list, {}]
+  - ["What timers are running?", timer.list, {}]
+  - ["What timers are running right now?", timer.list, {}]
+  - ["Do I have any timers running?", timer.list, {}]
+  - ["How many timers do I have?", timer.list, {}]
+  - ["Are there any timers running?", timer.list, {}]
+  - ["Read me my timers.", timer.list, {}]
+  - ["Hey Claude, list all my timers.", timer.list, {}]
   # -- apps, Settings, lock -------------------------------------------------------------------
   - ["Open Spotify.", app.open, {app: Spotify}]
   - ["Open spotify please.", app.open, {app: Spotify}]
@@ -488,6 +501,13 @@ near_miss:
   - "Set a timer in my code to run every 5 minutes."
   - "What's a good timer app?"
   - "The timer on my oven is broken."
+  # M5b: reminders and alarms are Claude's while no timer runs; questions about timers in general
+  - "List my reminders."
+  - "What alarms do I have?"
+  - "Show me my reminders for tomorrow."
+  - "What timers are available in Python?"
+  - "How many timers can a 555 chip run?"
+  - "What reminders do I have in my calendar?"
   - "Remind me in 10 minutes to call mom."
   - "Wake me up in 20 minutes."
   - "How long is five minutes in seconds?"

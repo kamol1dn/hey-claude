@@ -1,0 +1,16 @@
+{
+ "note": "M9's now_playing, recorded live 2026-11-10 (a paused video in Chrome); the title is made up",
+ "tool": "mcp__windows__now_playing",
+ "args": {},
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"title\": \"Morning stretch, 30 seconds\", \"artist\": \"\", \"album\": \"\", \"app\": \"Chrome\", \"status\": \"paused\", \"position_s\": 3.5, \"duration_s\": 8.3}"
+  }
+ ],
+ "expect": {
+  "widget": "now_playing",
+  "title": "Now playing · Chrome",
+  "icon": true
+ }
+}

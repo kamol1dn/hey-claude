@@ -1,0 +1,52 @@
+{
+ "id": "reminders",
+ "name": "Timers and reminders",
+ "api": "1.0",
+ "description": "the running timers (later reminders and alarms) with live countdowns, soonest first",
+ "title": "{title}",
+ "size": {
+  "width": 420,
+  "max_height": 280
+ },
+ "private": false,
+ "ttl_s": 20,
+ "glyph": "bell",
+ "triggers": {
+  "tools": [
+   "intents__list_timers"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "title": "Timers · 3 running",
+  "items": [
+   {"label": "Tea", "kind": "timer", "left_s": 154, "total_s": 240, "ends": "16:42"},
+   {"label": "Pasta", "kind": "timer", "left_s": 512, "total_s": 600, "ends": "16:48"},
+   {"label": "Laundry", "kind": "timer", "left_s": 2710, "total_s": 3600, "ends": "17:25"}
+  ]
+ },
+ "schema": {
+  "type": "object",
+  "required": ["title", "items"],
+  "properties": {
+   "title": {"type": "string", "maxLength": 40},
+   "items": {
+    "type": "array",
+    "maxItems": 6,
+    "items": {
+     "type": "object",
+     "required": ["left_s", "total_s"],
+     "properties": {
+      "label": {"type": "string", "maxLength": 40},
+      "kind": {"type": "string", "enum": ["timer", "alarm", "reminder"]},
+      "left_s": {"type": "number", "minimum": 0, "maximum": 172800},
+      "total_s": {"type": "number", "minimum": 1, "maximum": 172800},
+      "ends": {"type": "string", "maxLength": 8},
+      "focus": {"type": "boolean"}
+     }
+    }
+   },
+   "more": {"type": "integer", "minimum": 0}
+  }
+ }
+}

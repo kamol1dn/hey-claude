@@ -4,10 +4,14 @@
 tool (`from_builtin`), so the card and the summary look the same whichever
 answered. The summary is one or two plain sentences for TTS, e.g.
 "8 degrees and overcast, feels like 5. Rain likely from around 10 pm."
+Asked how sure that is (`q.sure`), the card adds the model-agreement chip
+(`facts["agreement"]`, heyclaude/weather.agreement) and the summary is the
+models' verdict: "The models mostly agree about tomorrow: 9 to 11 degrees, rain likely."
 """
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 from .parse import SEVERITY, icon_for
@@ -263,6 +267,9 @@ def card(facts: dict, q: WeatherQuery | None = None, label: str = "") -> dict:
     elif facts.get("moon"):
         mm = facts["moon"]
         d["moon"] = {"phase": mm["phase"], "illum": _r(mm["illum"]), "waxing": bool(mm.get("waxing"))}
+    ag = facts.get("agreement") or {}
+    if ag.get("models") and ag.get("level"):            # "how sure is that?": the forecast models compared
+        d["agreement"] = {k: v for k, v in ag.items() if k != "summary"}
     nc = facts.get("nowcast") or {}
     if nc.get("covered") and nc.get("steps") and (any(nc["steps"]) or focus in ("rain", "umbrella")):
         d["nowcast"] = {"text": _clip(nowcast_text(nc), 40), "steps": [int(x) for x in nc["steps"][:8]]}
@@ -331,6 +338,12 @@ def speak(facts: dict, q: WeatherQuery, label: str = "", wind_unit: str = "km/h"
     now = facts.get("now") or {}
     place = "" if q.home else (label or q.place).split(",")[0]
     pre = f"In {place}, " if place else ""
+    if q.sure:                                           # "how sure is that?": what the models say
+        s = (facts.get("agreement") or {}).get("summary") or ""
+        if s:
+            return pre + s[0].lower() + s[1:] if pre else s
+        return (speak(facts, replace(q, sure=False), label, wind_unit) +
+                " I couldn't compare the forecast models just now.").strip()
     i = _target_index(facts, q)
     day = _day(facts, i) or {}
     f = q.focus

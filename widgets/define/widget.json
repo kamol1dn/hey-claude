@@ -1,0 +1,96 @@
+{
+ "id": "define",
+ "name": "Definition",
+ "api": "1.0",
+ "description": "what a word means (English, Russian or Uzbek): the word, its pronunciation, part of speech and up to three senses with examples",
+ "title": "Dictionary · {language}",
+ "size": {
+  "width": 420,
+  "max_height": 280
+ },
+ "private": false,
+ "ttl_s": 16,
+ "glyph": "book",
+ "triggers": {
+  "tools": [
+   "mcp__info__define"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "word": "glimmer",
+  "language": "English",
+  "ipa": "/ˈɡlɪmə(ɹ)/",
+  "senses": [
+   {
+    "pos": "noun",
+    "text": "A faint light; a dim glow.",
+    "example": "The glimmer of the fireflies was pleasant to watch"
+   },
+   {
+    "pos": "noun",
+    "text": "A flash of light."
+   },
+   {
+    "pos": "verb",
+    "text": "To shine with a faint, unsteady light.",
+    "example": "The fireflies glimmered in the dark."
+   }
+  ],
+  "source": "Wiktionary via dictionaryapi.dev"
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "word",
+   "language",
+   "senses"
+  ],
+  "properties": {
+   "word": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "language": {
+    "type": "string",
+    "maxLength": 20
+   },
+   "ipa": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "senses": {
+    "type": "array",
+    "maxItems": 3,
+    "items": {
+     "type": "object",
+     "required": [
+      "text"
+     ],
+     "properties": {
+      "pos": {
+       "type": "string",
+       "maxLength": 20
+      },
+      "text": {
+       "type": "string",
+       "maxLength": 220
+      },
+      "example": {
+       "type": "string",
+       "maxLength": 120
+      },
+      "example_tr": {
+       "type": "string",
+       "maxLength": 120
+      }
+     }
+    }
+   },
+   "source": {
+    "type": "string",
+    "maxLength": 40
+   }
+  }
+ }
+}

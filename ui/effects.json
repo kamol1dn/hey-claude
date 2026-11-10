@@ -13,6 +13,7 @@
   "fallback": {"effect": "generic", "icon": "gear", "label": "{tool_short}", "fmt": "text",
                "data": {"from": "result.old", "to": "result.new"}},
   "silent": [
+    "mcp__windows__now_playing",
     "mcp__windows__get_volume", "mcp__windows__list_app_volumes", "mcp__windows__list_audio_devices",
     "mcp__windows__get_brightness", "mcp__windows__get_theme", "mcp__windows__get_wallpaper",
     "mcp__windows__get_night_light", "mcp__windows__get_radios", "mcp__windows__battery_status",
@@ -44,8 +45,6 @@
                                                 "fmt": "text", "data": {"from": "result.old", "to": "result.new"}},
     "mcp__windows__media_control": {"effect": "media", "icon": "music", "label": "{result.action}", "fmt": "track",
                                     "data": {"from": "result.old", "to": "result.new", "action": "result.action"}},
-    "mcp__windows__now_playing": {"effect": "media", "icon": "music", "label": "Now playing", "fmt": "track",
-                                  "data": {"to": "result"}},
     "mcp__windows__launch_app": {"effect": "generic", "icon": "app", "label": "Opened", "fmt": "text",
                                  "data": {"to": "result.launched"}},
     "mcp__windows__focus_window": {"effect": "generic", "icon": "window", "label": "Switched to", "fmt": "text",

@@ -1,0 +1,76 @@
+{
+ "id": "now_playing",
+ "name": "Now playing",
+ "api": "1.0",
+ "description": "what's playing: the cover, title and artist, a moving progress bar, and previous / play-pause / next",
+ "title": "Now playing · {app}",
+ "size": {
+  "width": 400,
+  "max_height": 150
+ },
+ "private": false,
+ "ttl_s": 15,
+ "glyph": "music",
+ "triggers": {
+  "tools": [
+   "mcp__windows__now_playing"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "title": "Paper Lanterns",
+  "artist": "The Quiet Ferns",
+  "album": "Low Tide Radio",
+  "app": "Spotify",
+  "status": "playing",
+  "position_s": 74.2,
+  "duration_s": 213.6
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "title",
+   "status"
+  ],
+  "properties": {
+   "title": {
+    "type": "string",
+    "maxLength": 120
+   },
+   "artist": {
+    "type": "string",
+    "maxLength": 80
+   },
+   "album": {
+    "type": "string",
+    "maxLength": 80
+   },
+   "app": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "status": {
+    "type": "string",
+    "enum": [
+     "playing",
+     "paused",
+     "stopped",
+     "changing",
+     "opened",
+     "closed",
+     "unknown"
+    ]
+   },
+   "position_s": {
+    "type": "number",
+    "minimum": 0,
+    "maximum": 360000
+   },
+   "duration_s": {
+    "type": "number",
+    "minimum": 0,
+    "maximum": 360000
+   }
+  }
+ }
+}

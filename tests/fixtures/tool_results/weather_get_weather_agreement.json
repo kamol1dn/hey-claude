@@ -1,0 +1,20 @@
+{
+ "note": "the bundled weather server's result asked how sure tomorrow is (agreement=true): a real Open-Meteo forecast and multi-model comparison recorded 2026-11-10, the place renamed",
+ "tool": "mcp__weather__get_weather",
+ "args": {
+  "location": "Sampletown",
+  "agreement": true,
+  "day": 1
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"location\": \"Sampletown, Exampleland\", \"temp\": 9, \"unit\": \"C\", \"condition\": \"Light rain\", \"icon\": \"rain\", \"source\": \"Open-Meteo\", \"feels\": 8, \"wind\": 3, \"high\": 12, \"low\": 8, \"hourly\": [{\"time\": \"03:00\", \"temp\": 9, \"icon\": \"rain\"}, {\"time\": \"04:00\", \"temp\": 9, \"icon\": \"rain\"}, {\"time\": \"05:00\", \"temp\": 9, \"icon\": \"fog\"}, {\"time\": \"06:00\", \"temp\": 9, \"icon\": \"cloud\"}, {\"time\": \"07:00\", \"temp\": 9, \"icon\": \"fog\"}, {\"time\": \"08:00\", \"temp\": 9, \"icon\": \"rain\"}], \"days\": [{\"day\": \"Today\", \"low\": 8, \"high\": 12, \"icon\": \"rain\"}, {\"day\": \"Wed\", \"low\": 9, \"high\": 12, \"icon\": \"rain\"}, {\"day\": \"Thu\", \"low\": 9, \"high\": 12, \"icon\": \"rain\"}], \"sun\": {\"rise\": \"07:15\", \"set\": \"16:58\"}, \"agreement\": {\"level\": \"low\", \"head\": \"Models disagree\", \"detail\": \"±2° · rain 11–67%\", \"text\": \"Models disagree · ±2°, rain 11–67%\", \"day\": \"Tomorrow\", \"date\": \"2026-11-11\", \"models\": [{\"name\": \"ECMWF\", \"high\": 11.5, \"low\": 8.3, \"pop\": 20, \"rain\": 0.1}, {\"name\": \"GFS\", \"high\": 10.4, \"low\": 8.9, \"pop\": 11, \"rain\": 0.3}, {\"name\": \"ICON\", \"high\": 11.5, \"low\": 8.7, \"pop\": 18, \"rain\": 0.1}, {\"name\": \"GEM\", \"high\": 9.9, \"low\": 4.4, \"pop\": 34, \"rain\": 2.0}, {\"name\": \"Météo-France\", \"high\": 11.7, \"low\": 9.5, \"rain\": 0.0}, {\"name\": \"UKMO\", \"high\": 12.5, \"low\": 10.4, \"pop\": 67, \"rain\": 0.0}, {\"name\": \"JMA\", \"high\": 13.1, \"low\": 6.8, \"rain\": 1.4}], \"summary\": \"The models disagree about tomorrow: 10 to 13 degrees, and they're split on rain.\"}}"
+  }
+ ],
+ "expect": {
+  "widget": "weather",
+  "title": "Weather · Sampletown, Exampleland",
+  "icon": true
+ }
+}

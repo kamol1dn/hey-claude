@@ -1,0 +1,79 @@
+{
+ "id": "translate",
+ "name": "Translation",
+ "api": "1.0",
+ "description": "a translation (English, Russian, Uzbek and more): the source and the translation side by side with their language tags",
+ "title": "Translate · {from_name} → {to_name}",
+ "size": {
+  "width": 440,
+  "max_height": 250
+ },
+ "private": false,
+ "ttl_s": 16,
+ "glyph": "translate",
+ "triggers": {
+  "tools": [
+   "mcp__info__translate"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "from": "en",
+  "to": "uz",
+  "from_name": "English",
+  "to_name": "Uzbek",
+  "text": "Good morning, how are you?",
+  "translation": "Xayrli tong, ishlaringiz qalay?",
+  "alt": "Xayrli tong",
+  "detected": true,
+  "source": "MyMemory"
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "from",
+   "to",
+   "from_name",
+   "to_name",
+   "text",
+   "translation"
+  ],
+  "properties": {
+   "from": {
+    "type": "string",
+    "pattern": "^[a-z]{2,3}$"
+   },
+   "to": {
+    "type": "string",
+    "pattern": "^[a-z]{2,3}$"
+   },
+   "from_name": {
+    "type": "string",
+    "maxLength": 20
+   },
+   "to_name": {
+    "type": "string",
+    "maxLength": 20
+   },
+   "text": {
+    "type": "string",
+    "maxLength": 300
+   },
+   "translation": {
+    "type": "string",
+    "maxLength": 300
+   },
+   "alt": {
+    "type": "string",
+    "maxLength": 80
+   },
+   "detected": {
+    "type": "boolean"
+   },
+   "source": {
+    "type": "string",
+    "maxLength": 30
+   }
+  }
+ }
+}

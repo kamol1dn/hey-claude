@@ -151,6 +151,12 @@ var CTRL = 66, MAXT = 560 - 90 - CTRL;
 // width from the question to the collapse: nothing moves sideways during a turn.
 var TURN_W = 440, ROW_X = 26, ROW_PAD = 16;
 function turnW() { return Math.max(TURN_W, S.extraW || 0); }
+// Where the speaking wave ends for a pill `w` wide. Outside a turn the words follow it in the
+// head (x 80), so it stays a short 34..74 mark. In a turn the words go to the row underneath and
+// the head holds only the wave and mic + stop: it runs up to the controls, keeping the same
+// 14 px clearance the thinking label keeps (mic's left edge is w - 68).
+var SPEAK_X1 = 74;
+function speakX1(w) { return S.turn ? Math.max(SPEAK_X1, Math.round(w) - CTRL - 14) : SPEAK_X1; }
 function rowW() { return turnW() - ROW_X - ROW_PAD; }
 var NOTME_W = 70;
 
@@ -401,8 +407,10 @@ function resize(pre) {
     if (S.listGeom) { w = Math.max(w, 460); h = head + 12 + listRowsH() + (S.extraH || 0); }
     // in a turn the panel's height glides too: an answer streaming in grows it line after line,
     // and a bouncy spring restarted every few frames reads as a wobbling bottom edge
-    W.to(Math.round(w), pre === 'snap' ? 'snap' : 'glide'); H.to(Math.round(h), S.turn && pre !== 'snap' ? 'glide' : pre); HEAD.to(head, pre);
+    W.to(Math.round(w), pre === 'snap' ? 'snap' : 'glide');
+    H.to(Math.round(h), S.turn && pre !== 'snap' ? 'glide' : pre); HEAD.to(head, pre);
     EX.to(head >= 46 ? 22 : head >= 40 ? 20 : 18, 'soft');
+    if (st === 'speaking' && GEN === 'speak') TX1.to(speakX1(Math.round(w)));   // the wave follows the pill (a card widens it)
 }
 
 /* ---------------- state machine ---------------- */
@@ -585,7 +593,7 @@ var ENTER = {
         S.speakText = ''; S.wordIdx = keep; S.revealAcc = 0; S.speakTop = 0; S.plans = []; S.sentEnd = keep + 1;
         layoutWords(o.text || '');
         S.speakT0 = NOW; O.words = 1; LB.set(null);
-        TX0.to(34); TX1.to(S.turn ? 208 : 74); setGen('speak'); TC.to(C.live, 0.07); TA.to(1, 0.06); TW.to(2.0);
+        TX0.to(34); TX1.to(speakX1(W.t)); setGen('speak'); TC.to(C.live, 0.07); TA.to(1, 0.06); TW.to(2.0);
         RIMC.to(C.live, 0.1); RIMA.to(0.18, 0.12); GC.to(C.live, 0.2); CORE.to(1); T(O, 'satVis', 0, 150, outQuad);
     },
     error: function (prev, o) {
@@ -692,12 +700,15 @@ function genFill() {
             break;
         }
         case 'speak': {
+            // a longer wave (in a turn it runs to the controls) keeps the density of the 174 px one
+            // (2 swells per 174 px) instead of stretching it
+            var kq = Math.max(1, (x1 - x0) / 174);
             for (i = 0; i < N; i++) {
                 u = i / (N - 1);
                 if (calm) { GX[i] = x0 + u * (x1 - x0) * (0.3 + 0.7 * A); GY[i] = cy; GAa[i] = 0.6 + 0.4 * A; continue; }
                 var ws = Math.pow(Math.sin(Math.PI * u), 1.2), amp = Math.min(8.5, 0.8 + 8 * Math.pow(A, 0.7));
                 GX[i] = x0 + u * (x1 - x0);
-                GY[i] = cy + amp * ws * (Math.sin(2 * Math.PI * (2 * u - S.phi)) + 0.35 * Math.sin(2 * Math.PI * (4.6 * u - 1.6 * S.phi)));
+                GY[i] = cy + amp * ws * (Math.sin(2 * Math.PI * (2 * kq * u - S.phi)) + 0.35 * Math.sin(2 * Math.PI * (4.6 * kq * u - 1.6 * S.phi)));
                 GAa[i] = 1;
             }
             break;
@@ -731,6 +742,8 @@ function genFill() {
         }
     }
 }
+// the rightmost visible sample of the drawn thread (tests: what is really on screen)
+function threadMaxX() { var m = -1; for (var i = 0; i < N; i++) if (DA[i] > 0.05) m = Math.max(m, DX[i]); return m; }
 function thread() {
     genFill();
     var s = (NOW - blendT0) / 220; s = (s >= 1 || MOTION === 'off') ? 1 : outCubic(clamp(s));
@@ -1305,7 +1318,8 @@ function maskRect() {
 }
 function snapshotForTest() {
     return { state: S.state, w: W.x, h: H.x, wt: W.t, ht: H.t, head: HEAD.x, labels: LB.L.map(function (l) { return { text: l.text, a: l.a, out: l.out }; }),
-        tweens: TWEENS.length, timers: TIMERS.length, rings: S.rings.length, gen: GEN };
+        tweens: TWEENS.length, timers: TIMERS.length, rings: S.rings.length, gen: GEN,
+        tx0: TX0.x, tx1: TX1.x, tx1t: TX1.t, turn: S.turn, threadMax: threadMaxX() };
 }
 // What the UX recorder (heyclaude/ux_probe.py) samples ~30 times a second: cheap, no arrays copied
 // except the label texts. `said` = the words of the answer revealed so far in the head.

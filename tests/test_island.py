@@ -1097,6 +1097,52 @@ def test_a_long_answer_is_never_cut_and_the_followup_is_quiet_over_a_card():
     _spin(600)
 
 
+def test_the_speaking_wave_fills_the_head_up_to_the_controls():
+    """Regression: in a turn (every voice request) the answer goes to the row under the head, and
+    the speaking wave stopped at x 208 of a 440+ px pill: half the head looked empty. It runs to
+    the controls now (14 px short of the mic, like the thinking label) at every width the pill
+    takes, and follows it when a card widens it; outside a turn the words still get the room."""
+    isl = _island()
+    b = isl.bridge_
+    b.listening.emit(True, 0.0)
+    b.state.emit("idle", "")
+    _spin(600)
+
+    def drawn():
+        s, p = _v(isl.call("snapshot")), _v(isl.call("probe"))
+        return s, p
+
+    b.state.emit("speaking", "Done. Standup now starts at ten.")            # no turn: words in the head
+    _spin(1200)
+    s, p = drawn()
+    assert s["state"] == "speaking" and not s["turn"]
+    assert s["threadMax"] <= 80, s                                          # words start at x 80
+    b.state.emit("idle", "")
+    _spin(1500)
+    b.turn.emit({"question": "what's on my calendar tomorrow?"})
+    b.state.emit("thinking", "thinking…")
+    _spin(800)
+    b.state.emit("speaking", "You have two meetings tomorrow: design review at ten.")
+    _spin(1500)
+    s, p = drawn()
+    assert s["turn"] and p["w"] >= 440, (s, p)
+    mic_left = p["w"] - 56 - 12
+    assert mic_left - 16 <= s["threadMax"] <= mic_left - 10, (s["threadMax"], p["w"])
+    for calm in (True, False):                                              # calm: the target is the same
+        isl._send("setMotion", ["calm" if calm else "full"])
+        _spin(400)
+        s = _v(isl.call("snapshot"))
+        assert abs(s["tx1t"] - (p["w"] - 80)) <= 1 and s["threadMax"] <= mic_left - 10, s
+    isl.show_approval({"id": "apw", "title": "Run git push?", "detail": "", "tool": "Bash", "session": "x"})
+    _spin(1500)                                                             # a 460 px card: the pill widens
+    s2, p2 = drawn()
+    assert p2["w"] >= 460, p2
+    assert abs(s2["threadMax"] - (p2["w"] - 80)) <= 2, (s2["threadMax"], p2["w"])
+    isl.withdraw_approval("apw")
+    b.state.emit("idle", "")
+    _spin(1500)
+
+
 def test_qsb_is_built_from_the_current_shader():
     import subprocess
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "build_shaders.py"), "--check"], capture_output=True, text=True)

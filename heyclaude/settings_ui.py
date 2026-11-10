@@ -522,6 +522,7 @@ class SettingsWindow(QWidget):
 
     def _build_voice(self):
         v = self._scroll_tab("Voice")
+        self._build_speech(v)
         g = QGroupBox("Speech recognition (whisper)")
         f = self._form(g)
         self.cmb_stt_device = self._combo([("GPU, CPU as fallback", "gpu"), ("CPU only", "cpu")])
@@ -669,6 +670,82 @@ class SettingsWindow(QWidget):
         it = self.tbl_taught.item(r, 0)
         return it.text() if it else ""
 
+    # -- M4c: speech backends ---------------------------------------------------------
+    SPEECH_BACKENDS = [("Local: Whisper + Kokoro on this PC", "local"), ("Windows: no models", "windows"),
+                       ("Cloud: Groq / OpenAI", "cloud"), ("Auto: local while memory is free", "auto")]
+
+    def _build_speech(self, v):
+        g = QGroupBox("Speech backend (also in the tray menu)")
+        f = self._form(g)
+        self.cmb_speech = self._combo(self.SPEECH_BACKENDS)
+        self.cmb_speech.currentIndexChanged.connect(self._speech_status)
+        self._row(f, "speech.backend", "Backend", self.cmb_speech)
+        self.cb_lean = QCheckBox("Lean: unload Whisper and Kokoro when idle")
+        self.sp_unload = QSpinBox(minimum=1, maximum=240, suffix=" min")
+        self._row(f, "speech.lean", "Memory", self.cb_lean, self.sp_unload)
+        self.cmb_cloud_stt = self._combo([("Groq (whisper-large-v3-turbo, free tier)", "groq"),
+                                          ("OpenAI (gpt-4o-mini-transcribe)", "openai")])
+        self.cmb_cloud_stt.currentIndexChanged.connect(self._speech_status)
+        self.btn_key = QPushButton("Set key…", clicked=self._set_cloud_key)
+        self._row(f, "speech.cloud_stt_provider", "Cloud speech-to-text", self.cmb_cloud_stt, self.btn_key)
+        self.cmb_cloud_tts = self._combo([("Windows voice (free)", ""), ("OpenAI", "openai"),
+                                          ("ElevenLabs", "elevenlabs")])
+        self._row(f, "speech.cloud_tts_provider", "Cloud voice", self.cmb_cloud_tts)
+        self.lbl_speech = self._help("")
+        self.lbl_speech.setTextFormat(Qt.RichText)
+        f.addRow("", self.lbl_speech)
+        v.addWidget(g)
+
+    def _speech_status(self, *_):
+        """Key source, Windows online recognition, cost estimate and where audio goes."""
+        lines = []
+        backend = self._combo_value(self.cmb_speech)
+        prov = self._combo_value(self.cmb_cloud_stt) or "groq"
+        try:
+            from .speech import cloud
+            src = cloud.key_source(prov)
+            lines.append(f"{prov} key: " + ({"env": f"from {cloud.ENV_VARS[prov]}", "credential store":
+                                             "in the Windows credential store"}.get(src) or
+                                            f"none (set {cloud.ENV_VARS[prov]} or use Set key…)"))
+            model = _get(self._orig, "speech.groq_model" if prov == "groq" else "speech.openai_stt_model",
+                         "whisper-large-v3-turbo" if prov == "groq" else "gpt-4o-mini-transcribe")
+            logs = sorted(str(p) for p in config.STATE_DIR.glob("latency*.csv"))
+            lines.append("cloud cost: " + cloud.cost_line(logs, prov, model))
+        except Exception as e:
+            lines.append(f"cloud: {e}")
+        try:
+            from .speech.windows import online_speech_enabled
+            on = online_speech_enabled()
+            lines.append("Windows online speech recognition: " + {True: "on", False:
+                         "<b>off</b> (Settings > Privacy & security > Speech); the offline recognizer is used",
+                         None: "unknown"}[on])
+        except Exception:
+            pass
+        where = {"local": "Audio never leaves this PC.",
+                 "windows": "Windows online recognition sends your audio to Microsoft.",
+                 "cloud": f"<b>Your audio is sent to {prov.title()}</b> in this mode (only this mode).",
+                 "auto": "Auto may use Windows or the cloud when memory is short: then audio leaves this PC."}
+        lines.append(where.get(backend, ""))
+        self.lbl_speech.setText("<br>".join(lines))
+
+    def _set_cloud_key(self):
+        from PySide6.QtWidgets import QInputDialog, QLineEdit as _LE
+        prov = self._combo_value(self.cmb_cloud_stt) or "groq"
+        key, ok = QInputDialog.getText(self, "Cloud key", f"{prov.title()} API key (kept in the Windows "
+                                       "credential store, never in config.yaml). Empty = remove it:",
+                                       _LE.Password)
+        if not ok:
+            return
+        from .speech import cloud
+        try:
+            if key.strip():
+                cloud.set_key(prov, key.strip())
+            else:
+                cloud.delete_key(prov)
+        except Exception as e:
+            self._set_status(f"Couldn't store the key: {e}", "#E07A5F")
+        self._speech_status()
+
     def _build_models(self):
         v = self._scroll_tab("Models")
         g = QGroupBox("Quick answers")
@@ -801,6 +878,12 @@ class SettingsWindow(QWidget):
         self.sp_threshold.setValue(float(_get(cfg, "wake.threshold", 0.5)))
         self.sp_cooldown.setValue(float(_get(cfg, "wake.cooldown", 1.0)))
         self._wake_status(cfg)
+        self._set_combo(self.cmb_speech, str(_get(cfg, "speech.backend", "local") or "local"))
+        self.cb_lean.setChecked(bool(_get(cfg, "speech.lean", False)))
+        self.sp_unload.setValue(int(_get(cfg, "speech.unload_after_min", 10) or 10))
+        self._set_combo(self.cmb_cloud_stt, str(_get(cfg, "speech.cloud_stt_provider", "groq") or "groq"))
+        self._set_combo(self.cmb_cloud_tts, str(_get(cfg, "speech.cloud_tts_provider") or ""))
+        self._speech_status()
         self._set_combo(self.cmb_stt_model, _get(cfg, "stt.cpu_model", "base.en"))
         dev = str(_get(cfg, "stt.device", "gpu")).lower()
         self._set_combo(self.cmb_stt_device, "gpu" if dev in ("gpu", "cuda") else "cpu")
@@ -917,6 +1000,14 @@ class SettingsWindow(QWidget):
         # keep the resume point 10 below the busy point unless set by hand lower
         if int(_get(new, "stt.gpu_resume_pct", 60)) >= self.sp_gpu_busy.value():
             _set(new, "stt.gpu_resume_pct", max(5, self.sp_gpu_busy.value() - 10))
+        if self._combo_value(self.cmb_speech) != str(_get(self._orig, "speech.backend", "local") or "local"):
+            _set(new, "speech.stt_backend", None)        # the one switch sets both sides
+            _set(new, "speech.tts_backend", None)
+        _set(new, "speech.backend", self._combo_value(self.cmb_speech))
+        _set(new, "speech.lean", self.cb_lean.isChecked())
+        _set(new, "speech.unload_after_min", self.sp_unload.value())
+        _set(new, "speech.cloud_stt_provider", self._combo_value(self.cmb_cloud_stt))
+        _set(new, "speech.cloud_tts_provider", self._combo_value(self.cmb_cloud_tts) or None)
         _set(new, "tts.engine", self._combo_value(self.cmb_tts_backend))
         _set(new, "tts.device", self._combo_value(self.cmb_tts_device))
         _set(new, "tts.voice", self._combo_value(self.cmb_kokoro_voice) or "af_heart")

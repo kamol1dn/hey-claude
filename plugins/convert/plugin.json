@@ -1,0 +1,31 @@
+{
+ "id": "convert",
+ "api": "1.0",
+ "name": "Calculator & converter",
+ "description": "Arithmetic, units and currencies (exchange rates fetched and cached), on a card.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "calc",
+ "permissions": [
+  "network"
+ ],
+ "contributes": {
+  "widgets": [
+   "convert"
+  ],
+  "tools": [
+   "mcp__info__calculate",
+   "mcp__info__convert_units",
+   "mcp__info__convert_currency"
+  ],
+  "settings": [
+   {
+    "key": "rates_ttl_h",
+    "type": "number",
+    "label": "Keep exchange rates (hours)",
+    "config_key": "info.convert.rates_ttl_h",
+    "default": 6
+   }
+  ]
+ }
+}

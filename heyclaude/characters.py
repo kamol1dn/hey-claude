@@ -156,12 +156,15 @@ _REG_CACHE: dict = {}
 
 def registry(dirs=None, refresh: bool = False) -> dict[str, dict]:
     """id -> manifest for every pack that loads (built-in first; a user pack can't take a
-    built-in's id)."""
-    key = tuple(str(d) for d in (dirs or (BUILTIN_DIR, USER_DIR)))
+    built-in's id), plus the packs plugins bring (<plugin>/characters/). A pack whose plugin
+    is switched off (heyclaude/plugins.py) is left out: the island shows the ember instead."""
+    if dirs is None:
+        dirs = (BUILTIN_DIR, USER_DIR, *_plugin_dirs())
+    key = tuple(str(d) for d in dirs)
     if key in _REG_CACHE and not refresh:
-        return _REG_CACHE[key]
+        return _enabled_only(_REG_CACHE[key])
     out: dict[str, dict] = {}
-    for base in (Path(d) for d in (dirs or (BUILTIN_DIR, USER_DIR))):
+    for base in (Path(d) for d in dirs):
         if not base.is_dir():
             continue
         for man_file in sorted(base.glob("*/character.json")):
@@ -182,7 +185,26 @@ def registry(dirs=None, refresh: bool = False) -> dict[str, dict]:
                 continue
             out[man["id"]] = man
     _REG_CACHE[key] = out
-    return out
+    return _enabled_only(out)
+
+
+def _plugin_dirs() -> list:
+    try:
+        from . import plugins
+        return plugins.get().character_dirs()
+    except Exception as e:                       # the plugin registry never takes the packs down
+        print(f"[character] plugin packs skipped: {e}")
+        return []
+
+
+def _enabled_only(reg: dict) -> dict:
+    try:
+        from . import plugins
+        p = plugins.get()
+        return {k: v for k, v in reg.items() if p.character_enabled(k)}
+    except Exception as e:
+        print(f"[character] plugin check failed, showing every pack: {e}")
+        return reg
 
 
 # ------------------------------------------------------------------ states

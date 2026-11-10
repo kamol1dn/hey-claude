@@ -1,0 +1,44 @@
+{
+ "id": "weather",
+ "api": "1.0",
+ "name": "Weather",
+ "description": "Forecasts on a card, answered locally for plain weather questions (Open-Meteo, weather-mcp).",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "sun",
+ "permissions": [
+  "network"
+ ],
+ "contributes": {
+  "widgets": [
+   "weather"
+  ],
+  "tools": [
+   "mcp__weather",
+   "mcp__weather-mcp"
+  ],
+  "routes": [
+   "weather"
+  ],
+  "settings": [
+   {
+    "key": "location",
+    "type": "string",
+    "label": "Home place",
+    "config_key": "weather.location",
+    "default": ""
+   },
+   {
+    "key": "unit",
+    "type": "enum",
+    "options": [
+     "C",
+     "F"
+    ],
+    "label": "Unit",
+    "config_key": "weather.unit",
+    "default": "C"
+   }
+  ]
+ }
+}

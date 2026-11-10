@@ -1,0 +1,29 @@
+{
+ "id": "deadlines",
+ "api": "1.0",
+ "name": "Deadlines",
+ "description": "What's due and how long is left, from your own notes file.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "hourglass",
+ "permissions": [
+  "personal_data"
+ ],
+ "contributes": {
+  "widgets": [
+   "deadlines"
+  ],
+  "tools": [
+   "mcp__info__deadlines"
+  ],
+  "settings": [
+   {
+    "key": "path",
+    "type": "string",
+    "label": "Deadlines file",
+    "config_key": "info.deadlines.path",
+    "default": ""
+   }
+  ]
+ }
+}

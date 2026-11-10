@@ -1,0 +1,18 @@
+{
+ "id": "system",
+ "api": "1.0",
+ "name": "System status",
+ "description": "Battery, CPU and GPU load, VRAM and RAM on a card.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "chip",
+ "permissions": [],
+ "contributes": {
+  "widgets": [
+   "system"
+  ],
+  "tools": [
+   "mcp__info__system_status"
+  ]
+ }
+}

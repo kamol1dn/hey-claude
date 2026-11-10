@@ -33,21 +33,36 @@ def modules() -> list:
     return out
 
 
-def tools() -> dict:
-    """tool name -> function, for every module."""
+def _skip(skip) -> list[str]:
+    """Tool patterns of switched-off plugins (heyclaude/plugins.py): given by the caller in
+    hey-claude's process, or HEYCLAUDE_SKIP_TOOLS when this runs as the server."""
+    if skip is not None:
+        return list(skip)
+    from heyclaude.plugins import SKIP_ENV, disabled_from_env
+    return disabled_from_env(os.environ.get(SKIP_ENV))
+
+
+def tools(skip=None) -> dict:
+    """tool name -> function, for every module, without switched-off plugins' tools."""
+    from heyclaude.plugins import skipped
+    sk = _skip(skip)
     out = {}
     for mod in modules():
         for fn in mod.TOOLS:
-            out[fn.__name__] = fn
+            if not skipped(f"mcp__{SERVER}__{fn.__name__}", sk):
+                out[fn.__name__] = fn
     return out
 
 
-def tool_names() -> list[str]:
-    return [f"mcp__{SERVER}__{n}" for n in tools()]
+def tool_names(skip=None) -> list[str]:
+    return [f"mcp__{SERVER}__{n}" for n in tools(skip)]
 
 
-def prompt() -> str:
-    parts = [str(getattr(m, "PROMPT", "")).strip() for m in modules()]
+def prompt(skip=None) -> str:
+    from heyclaude.plugins import skipped
+    sk = _skip(skip)
+    parts = [str(getattr(m, "PROMPT", "")).strip() for m in modules()
+             if any(not skipped(f"mcp__{SERVER}__{fn.__name__}", sk) for fn in m.TOOLS)]
     parts = [p for p in parts if p]
     if not parts:
         return ""

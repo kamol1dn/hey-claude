@@ -47,6 +47,7 @@ LIVE = (
     "dictionary.",                   # M4d: Whisper's prompt, replacements and snippets, per request
     "stt.languages",
     "weather.local_route", "weather.mcp.timeout_s", "weather.mcp.fallback", "weather.mcp.cache_s",  # per question
+    "plugins.",                      # switched on/off live (heyclaude/plugins.py); the agent restarts its tools
 )
 
 

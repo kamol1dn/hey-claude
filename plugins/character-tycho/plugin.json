@@ -1,0 +1,15 @@
+{
+ "id": "character-tycho",
+ "api": "1.0",
+ "name": "Character: Tycho",
+ "description": "The Tycho character pack.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "face",
+ "permissions": [],
+ "contributes": {
+  "characters": [
+   "tycho"
+  ]
+ }
+}

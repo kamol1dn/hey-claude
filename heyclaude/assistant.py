@@ -281,6 +281,11 @@ class Assistant:
         self.stopping = True
         self._abort_rec.set()
         self._wakeup.set()
+        try:
+            from . import plugins
+            plugins.get().stop_services()           # plugins' background parts get their stop()
+        except Exception as e:
+            print(f"[plugins] stop: {e}")
 
     # -- live settings ----------------------------------------------------------
     def apply_config(self, new: dict) -> list[str]:
@@ -297,7 +302,20 @@ class Assistant:
             self.reload_wake()
         elif "wake.threshold" in changed and wake is not None:
             wake.threshold = float(self.cfg["wake"]["threshold"])
+        if any(k.startswith("plugins.") for k in changed):
+            from . import plugins
+            plugins.get().sync()                # Settings saved plugins.disabled: tell everyone
         return changed
+
+    def _plugin_switched(self, pid: str, on: bool):
+        """A plugin was switched on or off (heyclaude/plugins.py, any thread)."""
+        print(f"[plugins] {pid} {'on' if on else 'off'}")
+        brain = getattr(self, "brain", None)
+        if brain is not None:
+            try:
+                brain.plugins_changed(pid, on)
+            except Exception as e:
+                print(f"[plugins] the brain couldn't follow {pid}: {e}")
 
     def reload_wake(self):
         """Load `wake.model` again (the wizard's Apply / Undo) and swap it in.
@@ -409,7 +427,11 @@ class Assistant:
         self.tasks = TaskManager(c, on_change=self.push_tasks, on_finish=self._task_finished)
         self.push_tasks()
         self.set_mode("loading", "loading brain…")
+        from . import activities, plugins
+        reg = plugins.init(c, self.config_path)            # before the brain: it asks which tools are on
         self.brain = Brain(c)
+        reg.subscribe(self._plugin_switched)
+        reg.start_services(activities.get())
         self._setup_hooks()
         try:
             from .undo import UndoStack
@@ -1190,6 +1212,16 @@ class Assistant:
                 elif kind == "session":
                     tier = "local"                 # M7: "move it to the desktop", "jump to the session"
                     self._session_command(ev[1], ev[2])
+                elif kind == "plugin":
+                    tier = "plugin"                # a plugin's own instant command (heyclaude/plugins.py)
+                    res = ev[2]
+                    if isinstance(res.get("widget"), dict):
+                        self._ui_emit("widget", res["widget"])
+                    self._say(str(res.get("say") or "Done."))
+                elif kind == "activity":
+                    tier = "local"                 # a live activity's voice phrase ("answer")
+                    from . import activities
+                    self._say(activities.get().act(ev[1], ev[2]) or "Okay.")
                 elif kind == "noop":
                     pass
         except Exception as e:

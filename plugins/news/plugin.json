@@ -1,0 +1,17 @@
+{
+ "id": "news",
+ "api": "1.0",
+ "name": "Headlines",
+ "description": "The headlines card from the agent's web searches for news or sports.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "news",
+ "permissions": [
+  "network"
+ ],
+ "contributes": {
+  "widgets": [
+   "news"
+  ]
+ }
+}

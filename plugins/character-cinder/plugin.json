@@ -1,0 +1,15 @@
+{
+ "id": "character-cinder",
+ "api": "1.0",
+ "name": "Character: Cinder",
+ "description": "The Cinder character pack.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "face",
+ "permissions": [],
+ "contributes": {
+  "characters": [
+   "cinder"
+  ]
+ }
+}

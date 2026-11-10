@@ -1,0 +1,42 @@
+{
+ "id": "directions",
+ "api": "1.0",
+ "name": "Directions",
+ "description": "Travel time, distance and a map for walking, cycling or driving.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "icon": "googlemaps",
+ "glyph": "pin",
+ "permissions": [
+  "network"
+ ],
+ "contributes": {
+  "widgets": [
+   "directions"
+  ],
+  "tools": [
+   "mcp__info__directions",
+   "mcp__info__place"
+  ],
+  "settings": [
+   {
+    "key": "home",
+    "type": "string",
+    "label": "\"From here\" (empty: the weather's place)",
+    "config_key": "info.home",
+    "default": ""
+   },
+   {
+    "key": "units",
+    "type": "enum",
+    "options": [
+     "metric",
+     "imperial"
+    ],
+    "label": "Units",
+    "config_key": "info.units",
+    "default": "metric"
+   }
+  ]
+ }
+}

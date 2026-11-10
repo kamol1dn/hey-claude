@@ -1,0 +1,25 @@
+{
+ "id": "media",
+ "api": "1.0",
+ "name": "Now playing & music",
+ "description": "What's playing with its cover and controls, next / pause by voice, and playing songs on Spotify.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "icon": "spotify",
+ "glyph": "music",
+ "permissions": [],
+ "contributes": {
+  "widgets": [
+   "now_playing"
+  ],
+  "intents": [
+   "media.*"
+  ],
+  "tools": [
+   "mcp__windows__now_playing",
+   "mcp__windows__media_control",
+   "mcp__windows__play_spotify",
+   "mcp__claude_ai_Spotify__search"
+  ]
+ }
+}

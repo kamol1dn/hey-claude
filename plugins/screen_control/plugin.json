@@ -1,0 +1,18 @@
+{
+ "id": "screen_control",
+ "api": "1.0",
+ "name": "Screen control",
+ "description": "Windows-MCP: the agent sees the screen and clicks or types for you, after you approve on the island (off unless agent.windows_mcp is on).",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "cursor",
+ "permissions": [
+  "screen",
+  "acts"
+ ],
+ "contributes": {
+  "tools": [
+   "mcp__windows-mcp"
+  ]
+ }
+}

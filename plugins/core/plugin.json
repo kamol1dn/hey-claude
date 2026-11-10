@@ -1,0 +1,24 @@
+{
+ "id": "core",
+ "api": "1.0",
+ "name": "hey-claude core",
+ "description": "The text card and the cards any answer may use (code, link, image, task), the clock, and \"teach it\". Always on.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "spark",
+ "core": true,
+ "permissions": [],
+ "contributes": {
+  "widgets": [
+   "text",
+   "code",
+   "link",
+   "image",
+   "task_card"
+  ],
+  "intents": [
+   "clock.*",
+   "learn.*"
+  ]
+ }
+}

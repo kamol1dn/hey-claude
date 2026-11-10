@@ -33,6 +33,9 @@ from .config import ROOT
 QML_DIR = ROOT / "ui" / "island"
 WIN_W, WIN_H = 600, 400
 NOT_ME_S = 120
+# Shown modes in which the assistant owns the island: live activities below "alert" wait.
+ACTIVITY_BUSY_MODES = ("listening", "holding", "followup", "thinking", "speaking", "dictating", "input",
+                       "approval_needed")
 FIELD_IDLE_S = 20      # an empty talk-or-type field that heard nothing closes after this (it blocks the wake word)
 
 
@@ -308,6 +311,9 @@ class IslandModel(QObject):
     characterChanged = Signal()                  # M6: the pack (url, manifest, budgets)
     characterStateChanged = Signal()
     charCmd = Signal(str, "QVariantList")        # M6: play / interrupt an antic, suspend
+    # Live activities (heyclaude/activities.py): what plugins show unasked. The QML that draws
+    # them is still to come (docs/plugin-api.md, "Island seam"): this is its whole interface.
+    liveActivityChanged = Signal()
 
     def __init__(self, owner: "QmlIsland"):
         super().__init__()
@@ -326,8 +332,24 @@ class IslandModel(QObject):
         self._char_state = "idle"
         self._char_mood = "neutral"
         self._char_count = 0
+        self._activity: dict = {}
 
     # properties -------------------------------------------------------------
+    # {"primary": {key, plugin, id, template, fallback, priority, data, qml, actions, presentation
+    #  (compact | expanded), fps, seq} | null, "secondary": the same with presentation minimal | null,
+    #  "waiting": [keys], "hidden": [keys], "fps": the frame rate the island may run at for them}
+    liveActivity = Property("QVariantMap", lambda self: self._activity, notify=liveActivityChanged)
+
+    @Slot(str, str)
+    def activityAction(self, key, action):
+        """A button on a live activity (its id from the activity's actions)."""
+        self.o._activity_action(key, action)
+
+    @Slot(str)
+    def activityExpand(self, key):
+        """The user opened a live activity (hover / click); "" closes it."""
+        from . import activities
+        activities.get().expand(key or None)
     characterUrl = Property(str, lambda self: self._char_url, notify=characterChanged)
     characterManifest = Property("QVariantMap", lambda self: self._char_man, notify=characterChanged)
     characterBudgets = Property("QVariantMap", lambda self: self._char_budgets, notify=characterChanged)
@@ -509,6 +531,9 @@ class QmlIsland(QObject):
     _np_art = Signal(str, object)                # card id, cover bytes
     _np_update = Signal(str, "QVariantMap")      # card id, new data
     _np_error = Signal(str)                      # what to flash
+    # plugins and live activities change on their own threads: back on the UI thread
+    _activity_changed = Signal("QVariantMap")
+    _plugin_switched = Signal(str, bool)
 
     NOT_ME_S = NOT_ME_S
 
@@ -619,6 +644,16 @@ class QmlIsland(QObject):
             if sig is not None:
                 sig.connect(slot)
 
+        # plugins (heyclaude/plugins.py): a character pack switched off goes back to the ember;
+        # live activities (heyclaude/activities.py) reach the QML as model.liveActivity
+        from . import activities, plugins
+        self._activity_changed.connect(self._set_activity)
+        self._plugin_switched.connect(lambda pid, on: self.apply_character())
+        self._act_timer = QTimer(self, interval=250, timeout=self._activity_tick)
+        self._unsubs = [activities.get().subscribe(self._activity_changed.emit),
+                        plugins.get().subscribe(self._plugin_switched.emit)]
+        activities.get().set_reduced_motion(getattr(self, "motion", "full") != "full")
+
         self._focus_timer = QTimer(self, interval=150, timeout=self._check_focus)
         self._env_timer = QTimer(self, interval=5000, timeout=self._check_env)
         self._env_timer.start()
@@ -654,6 +689,8 @@ class QmlIsland(QObject):
         self.view.setPosition(g.x() + (g.width() - w) // 2, g.y() + int(self.cfg.get("window_y", 0) or 0))
         self.motion = resolve_motion(self.cfg.get("motion", "auto"))
         self._send("setMotion", [self.motion])
+        from . import activities
+        activities.get().set_reduced_motion(self.motion != "full")    # no continuous activity animation
         self._send("setHideIdle", [bool(self.cfg.get("hide_when_idle", False))])
         self.model._usage_on = bool(self.cfg.get("usage_pill", True))
         self.model.usageChanged.emit()
@@ -890,6 +927,8 @@ class QmlIsland(QObject):
             self.model.answerShown.emit(text)          # it stays on the panel after it's been spoken
         shown = self._shown_mode(mode)
         self.island_state = shown
+        from . import activities                    # a conversation owns the island; activities wait
+        activities.get().set_busy(shown in ACTIVITY_BUSY_MODES)
         for d in self._chars():
             d.set_mode(shown, paused=mode == "off" and self.paused_until > time.time())
         if self.companion is not None and mode != prev:
@@ -1255,6 +1294,32 @@ class QmlIsland(QObject):
         if sig is not None:
             sig.emit(ev_id)
 
+    # -- live activities (heyclaude/activities.py) ------------------------------------
+    def _set_activity(self, layout: dict):
+        """The hub's new layout, on the UI thread: to the QML, and the tick timer runs only
+        while an activity does (expiry, coalesced updates)."""
+        self.model._activity = _qml_safe(layout)
+        self.model.liveActivityChanged.emit()
+        from . import activities
+        running = activities.get().running()
+        if running and not self._act_timer.isActive():
+            self._act_timer.start()
+        elif not running:
+            self._act_timer.stop()
+
+    def _activity_tick(self):
+        from . import activities
+        activities.get().tick()
+        if not activities.get().running():
+            self._act_timer.stop()
+
+    def _activity_action(self, key: str, action: str):
+        from . import activities
+        print(f"[activity] {action} on {key}")
+        reply = activities.get().act(key, action)
+        if reply:
+            self.flash(reply, 3.0)
+
     # -- response widgets ---------------------------------------------------------------
     def show_widget(self, spec: dict):
         from .widgets import for_qml
@@ -1538,6 +1603,10 @@ class QmlIsland(QObject):
 
     def close(self):
         self._char_timer.stop()
+        self._act_timer.stop()
+        for unsub in self._unsubs:                  # the hub and the registry outlive this window
+            unsub()
+        self._unsubs = []
         if self.companion is not None:
             self.companion.close()
         self._env_timer.stop()

@@ -1,0 +1,31 @@
+{
+ "id": "words",
+ "api": "1.0",
+ "name": "Define & translate",
+ "description": "What a word means, and translations between English, Russian and Uzbek.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "translate",
+ "permissions": [
+  "network"
+ ],
+ "contributes": {
+  "widgets": [
+   "define",
+   "translate"
+  ],
+  "tools": [
+   "mcp__info__define",
+   "mcp__info__translate"
+  ],
+  "settings": [
+   {
+    "key": "email",
+    "type": "string",
+    "label": "Email for a bigger free translation quota",
+    "config_key": "info.translate.email",
+    "default": ""
+   }
+  ]
+ }
+}

@@ -16,6 +16,8 @@ Every utterance goes through `Brain.handle(text)`, which yields events:
     ("instant", match)          M10: "volume 30", "next song", "timer 5 minutes": run locally, no model
                                 (heyclaude/intents; match is an intents.Match)
     ("weather", query)          a plain weather question: answered locally from weather-mcp (weather_mcp/)
+    ("plugin", id, result)      a plugin's own instant command (heyclaude/plugins.py): {"say", "widget"}
+    ("activity", key, action)   a live activity's voice phrase ("answer" while a call rings; activities.py)
 
 `ref` is how the user named a task ("inha app", "last", "readme", "#<id>");
 tasks.find_task turns it into a task.
@@ -646,6 +648,34 @@ def info_mcp_servers(cfg: dict) -> dict:
                              "HEYCLAUDE_INFO_CONFIG": json.dumps(i, default=str)}}}
 
 
+def plugin_filter_servers(servers: dict, skip: list[str]) -> dict:
+    """hey-claude's MCP servers without switched-off plugins' tools (heyclaude/plugins.py):
+    a server none of whose tools are left isn't started; our own Python servers get the skip
+    list (HEYCLAUDE_SKIP_TOOLS) and leave those tools out. Unchanged when nothing is off."""
+    if not skip:
+        return servers
+    from . import plugins
+
+    def left(name: str) -> bool:
+        if name == "windows":
+            from .mcp_windows import registry
+            return any(not plugins.skipped(t.full_name, skip) for t in registry.TOOLS.values())
+        if name == "info":
+            from . import mcp_info
+            return bool(mcp_info.tool_names(skip))
+        return not plugins.skipped(f"mcp__{name}__*", skip)     # the whole server is switched off
+
+    out = {}
+    for name, spec in servers.items():
+        if not left(name):
+            print(f"[agent] {name} not started: its plugin is switched off")
+            continue
+        if name in ("windows", "info"):
+            spec = dict(spec, env={**(spec.get("env") or {}), plugins.SKIP_ENV: json.dumps(skip)})
+        out[name] = spec
+    return out
+
+
 AGENT_NEWS_PROMPT = (" For news or sports headlines use WebSearch; the island shows the headlines card from its "
                      "result by itself, so just say the gist.")
 WEATHER_TOOL = "mcp__weather__get_weather"
@@ -739,21 +769,32 @@ class Agent:
 
         a = self.cfg["agent"]
         day = self.day = session_name(self.cfg.get("conversation"))
+        from . import plugins
+        reg = plugins.get()
+        skip = reg.disabled_tools()                       # switched-off plugins' tools: never offered
         win = windows_mcp_servers(a)
         win.update(weather_mcp_servers(self.cfg))
         win.update(info_mcp_servers(self.cfg))
+        win = plugin_filter_servers(win, skip)
+        for name, spec in reg.mcp_servers(_console_python()).items():   # servers plugins bring
+            if name in win:
+                print(f"[agent] plugin server {name!r} skipped: the name is taken")
+            else:
+                win[name] = spec
         from . import mcp_info
         approvals = self._approval_settings()
-        telegram = "telegram" in [str(x) for x in a.get("import_desktop_mcp") or []] or any(
-            str(t).startswith("mcp__telegram__") for t in a.get("allowed_tools") or [])
+        telegram = reg.tool_enabled("mcp__telegram__send_message") and (
+            "telegram" in [str(x) for x in a.get("import_desktop_mcp") or []] or any(
+                str(t).startswith("mcp__telegram__") for t in a.get("allowed_tools") or []))
         prompt = (AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
                   + (AGENT_SCREEN_PROMPT if WINDOWS_MCP_SERVER in win and approvals else "")
                   + (AGENT_APPROVALS_PROMPT if approvals else "")
                   + (AGENT_TELEGRAM_PROMPT.format(downloads=downloads_dir()) if telegram else "")
                   + (AGENT_WEATHER_PROMPT if "weather" in win else "")
                   + (AGENT_WEATHER_MCP_PROMPT if "weather-mcp" in win else "")
-                  + (mcp_info.prompt() if "info" in win else "")
-                  + (AGENT_NEWS_PROMPT if "info" in win else "") + widget_prompt(self.cfg))
+                  + (mcp_info.prompt(skip) if "info" in win else "")
+                  + (AGENT_NEWS_PROMPT if reg.widget_enabled("news") else "")
+                  + reg.prompts() + widget_prompt(self.cfg))
         args = ["--model", a["model"], "--output-format", "stream-json", "--verbose",
                 "--permission-mode", a["permission_mode"], "--permission-prompts", "none",
                 "--append-system-prompt", prompt, "--name", day or "hey-claude assistant"]
@@ -767,12 +808,14 @@ class Agent:
                 from .weather_mcp import agent_tools
                 allowed += [t for t in agent_tools(self.cfg) if t not in allowed]
             if "info" in win:                             # M5b: hey-claude's own tools, all read-only
-                allowed += [t for t in mcp_info.tool_names() if t not in allowed]
+                allowed += [t for t in mcp_info.tool_names(skip) if t not in allowed]
+            allowed += [t for t in reg.read_only_tools() if t not in allowed]   # plugins' declared read-only tools
             if "windows" in win:                          # "play <song>": search + play_spotify
                 allowed += [t for t in SPOTIFY_TOOLS if t not in allowed]
             if WINDOWS_MCP_SERVER in win:                 # Windows-MCP's waits: they don't act
                 allowed += [t for t in (f"mcp__{WINDOWS_MCP_SERVER}__{n}" for n in WINDOWS_MCP_PASSIVE)
                             if t not in allowed]
+            allowed = [t for t in allowed if not plugins.skipped(str(t), skip)]   # switched-off plugins'
             kept, dropped = gate_allowed_tools(allowed)
             if dropped:
                 print(f"[agent] never pre-allowed ({'they ask on the island' if approvals else 'refused'}): "
@@ -782,10 +825,12 @@ class Agent:
         # Tools it must not even be offered: Claude Code's own PowerShell (Windows) would be
         # refused anyway (not allowed), but the model asking for it costs a turn.
         dis = ["PowerShell"] + [str(t) for t in a.get("disallowed_tools") or [] if str(t) != "PowerShell"]
+        dis += [t for t in skip if t not in dis]          # switched-off plugins' tools (connectors included)
         args += ["--disallowedTools", ",".join(dis)]
         mcp = list(a.get("mcp_configs") or [])
-        if a.get("import_desktop_mcp"):
-            f = _desktop_mcp_file(list(a["import_desktop_mcp"]), STATE_DIR / "agent-mcp.json")
+        desktop = [str(n) for n in a.get("import_desktop_mcp") or [] if reg.tool_enabled(f"mcp__{n}__x")]
+        if desktop:
+            f = _desktop_mcp_file(desktop, STATE_DIR / "agent-mcp.json")
             if f:
                 mcp.append(f)
         if win:
@@ -871,7 +916,8 @@ class Brain:
         except Exception as e:
             print(f"[instant] intent engine off: {e}")
         self.wx = None                      # M5b: the local weather route (weather_mcp.WeatherService)
-        if (cfg.get("weather") or {}).get("enabled", True):
+        from . import plugins
+        if (cfg.get("weather") or {}).get("enabled", True) and plugins.get().route_enabled("weather"):
             from .weather_mcp import WeatherService
             self.wx = WeatherService(cfg)   # weather-mcp starts with the warm-up, in its own thread
         self.warm = threading.Event()
@@ -909,10 +955,32 @@ class Brain:
         if getattr(self, "wx", None) is not None:
             self.wx.close()
 
+    def plugins_changed(self, pid: str = "", on: bool = True):
+        """A plugin was switched on or off (heyclaude/plugins.py): the tool agent gets its new
+        tool list with its next request (a new warm process, like a new day), and the weather
+        route starts if the weather plugin came back. Widgets, intents and routes read the
+        registry on every request, so they need nothing here."""
+        if self.agent is not None:
+            with self.agent.chat.lock:
+                self.agent.chat.args = self.agent._args()
+                self.agent.chat.close()          # the next stream() starts a new process
+        from . import plugins
+        if (on and getattr(self, "wx", None) is None and (self.cfg.get("weather") or {}).get("enabled", True)
+                and plugins.get().route_enabled("weather")):
+            try:
+                from .weather_mcp import WeatherService
+                self.wx = WeatherService(self.cfg)
+                self.wx.start()
+            except Exception as e:
+                print(f"[weather] couldn't start the local route: {e}")
+
     def weather_query(self, text: str):
         """M5b: a plain weather question -> its query for the local weather route, else None."""
         wx = getattr(self, "wx", None)
         if wx is None:
+            return None
+        from . import plugins
+        if not plugins.get().route_enabled("weather"):      # the weather plugin is switched off
             return None
         turns = self.convo.turns if self.convo is not None else []
         return wx.query(text, prev_turn_was_weather=bool(turns and turns[-1].tier == "weather"))
@@ -990,6 +1058,26 @@ class Brain:
             self.timing["match_ms"] = round(m.match_ms, 2)
         return m
 
+    def plugin_instant(self, text: str):
+        """(plugin id, {"say", "widget"}) when an enabled plugin's instant.py claims `text`."""
+        try:
+            from . import plugins
+            return plugins.get().instant(text)
+        except Exception as e:
+            print(f"[plugins] instant failed: {e}")
+            return None
+
+    def activity_route(self, text: str):
+        """("activity", key, action) for a live activity's voice phrase ("answer" while a call
+        rings, heyclaude/activities.py), else None."""
+        try:
+            from . import activities
+            hit = activities.get().match_voice(text)
+        except Exception as e:
+            print(f"[activity] voice match failed: {e}")
+            return None
+        return ("activity", hit[0], hit[1]) if hit else None
+
     hub = None                                  # M7: hookrelay.sessions.SessionHub (watched Claude Code sessions)
 
     def session_route(self, text: str):
@@ -1011,6 +1099,8 @@ class Brain:
         if self.convo is not None:
             self.convo.expire_if_idle()
         routed = self.session_route(text)
+        if routed is None:
+            routed = self.activity_route(text)
         if routed is not None:
             self.timing["route"] = "local-" + routed[0]
             yield routed
@@ -1028,6 +1118,10 @@ class Brain:
             wq = self.weather_query(text)
             if wq is not None:
                 routed = ("weather", wq)
+        if routed is None or routed[0] in ("control", "lookup"):      # plugins' own instant commands
+            got = self.plugin_instant(text)
+            if got is not None:
+                routed = ("plugin", got[0], got[1])
         if routed and not (routed[0] in ("lookup", "control") and not self.agent):
             self.timing["route"] = "local-" + routed[0]
             yield routed

@@ -40,10 +40,21 @@ RUNNABLE_EXT = {".exe", ".bat", ".cmd", ".com", ".ps1", ".psm1", ".vbs", ".vbe",
 
 @lru_cache(maxsize=2)
 def registry(folder: str | None = None) -> dict[str, dict]:
-    """id -> manifest (widget.json, plus "dir" and "qml"), for every widget folder that loads."""
+    """id -> manifest (widget.json, plus "dir" and "qml"), for every widget folder that loads:
+    widgets/ and the plugins' own <plugin>/widgets/ (a built-in id can't be taken). Switched-off
+    plugins' widgets are here too; active() is what may be shown."""
     out: dict[str, dict] = {}
-    base = Path(folder) if folder else WIDGETS_DIR
-    for man_file in sorted(base.glob("*/widget.json")):
+    if folder:
+        files = sorted(Path(folder).glob("*/widget.json"))
+    else:
+        files = sorted(WIDGETS_DIR.glob("*/widget.json"))
+        try:
+            from . import plugins
+            for d in plugins.get().widget_dirs():
+                files += sorted(d.glob("*/widget.json"))
+        except Exception as e:                     # the plugin registry never takes the cards down
+            print(f"[widget] plugin widgets skipped: {e}")
+    for man_file in files:
         try:
             with open(man_file, encoding="utf-8") as f:
                 man = json.load(f)
@@ -65,9 +76,25 @@ def registry(folder: str | None = None) -> dict[str, dict]:
         if problems:
             print(f"[widget] {man_file.parent.name} skipped: {'; '.join(problems)}")
             continue
+        if wid in out:
+            print(f"[widget] {man_file.parent} skipped: {wid!r} is already installed")
+            continue
         man = dict(man, dir=str(man_file.parent), qml=qml.resolve().as_uri())
         out[wid] = man
     return out
+
+
+def active() -> dict[str, dict]:
+    """registry() without the widgets of switched-off plugins (heyclaude/plugins.py): what an
+    answer or a tool may show. "text" is always here (the core plugin)."""
+    reg = registry()
+    try:
+        from . import plugins
+        p = plugins.get()
+        return {k: v for k, v in reg.items() if k == "text" or p.widget_enabled(k)}
+    except Exception as e:
+        print(f"[widget] plugin check failed, showing everything: {e}")
+        return reg
 
 
 @lru_cache(maxsize=2)
@@ -167,7 +194,7 @@ def normalise(spec) -> dict | None:
             return None
     if not isinstance(spec, dict):
         return None
-    reg = load()["x-widgets"]
+    reg = active()
     name, data = spec.get("widget"), spec.get("data")
     fallback = spec.get("text") if isinstance(spec.get("text"), str) else ""
     out = {"widget": name, "data": data, "text": fallback[:200]}
@@ -177,7 +204,9 @@ def normalise(spec) -> dict | None:
         ttl = DEFAULT_TTL
     out["ttl_s"] = max(3.0, min(3600.0, ttl))
     if name not in reg or not isinstance(data, dict):
-        return _fallback(out, f"unknown widget {name!r}" if name not in reg else "no data")
+        why = ("its plugin is switched off" if name in registry() else f"unknown widget {name!r}") \
+            if name not in reg else "no data"
+        return _fallback(out, why)
     notes: list = []
     data = _fit(data, reg[name]["schema"], notes=notes)
     if notes:
@@ -206,7 +235,7 @@ def from_tool(tool: str, args: dict | None, result, raw: str | None = None) -> d
     in markdown (the Telegram server does unless asked for JSON). A manifest's
     `triggers.data` is "result" (the JSON is the card's data) or the name of an
     adapter in ADAPTERS that turns the result into the card's data."""
-    for wid, man in registry().items():
+    for wid, man in active().items():
         trig = man.get("triggers") or {}
         if not _tool_matches(tool, trig.get("tools")):
             continue
@@ -547,7 +576,8 @@ def prompt_text() -> str:
              "Use it only when a card clearly helps (a forecast, an agenda, a countdown, a link, a short code "
              "snippet, an image, Telegram chats or a draft); keep the spoken part complete without it. "
              "Valid JSON on a single line. NAME and data (keys marked * are required):"]
-    for name, w in load()["x-widgets"].items():
+    shown = active()
+    for name, w in shown.items():
         trig = (w.get("triggers") or {}).get("tools") or []
         if trig:
             lines.append(f"- {name}: {w['description']}. Shown automatically from {', '.join(trig)}: never write it yourself.")
@@ -556,8 +586,10 @@ def prompt_text() -> str:
         req = set(sch.get("required", []))
         keys = ", ".join(k + ("*" if k in req else "") for k in sch.get("properties", {}))
         lines.append(f"- {name}: {w['description']}. data: {{{keys}}}. e.g. {json.dumps(w['example'], ensure_ascii=False)}")
-    lines.append("Timer: the island counts down and tells the user when it ends; you don't need any tool for it. "
-                 "telegram_draft never sends anything: sending needs the user's approval, which isn't available yet.")
+    if "timer" in shown:
+        lines.append("Timer: the island counts down and tells the user when it ends; you don't need any tool for it.")
+    if "telegram_draft" in shown:
+        lines.append("telegram_draft never sends anything: sending needs the user's approval, which isn't available yet.")
     return "\n".join(lines)
 
 

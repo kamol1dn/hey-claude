@@ -1369,7 +1369,9 @@ ui/               effects.json: which island effect each tool gets (M9); island/
                   its shader (M5); states.json: the state registry; widgets.schema.json: response
                   widgets; services.json + icons/services/: service names and icons; themes/
 models/           hey_claude.onnx (downloaded on first start, git-ignored) and its LICENSE
-docs/             the wake word: shared model, tune-up, Colab
+docs/             the wake word: shared model, tune-up, Colab; plugin-api.md (plugins, live activities)
+plugins/          one folder per built-in feature (plugin.json): what Settings switches on and off;
+                  yours go in state/plugins/ (heyclaude/plugins.py, activities.py; docs/plugin-api.md)
 ```
 
 ## Notes and limits (v1)

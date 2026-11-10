@@ -89,6 +89,9 @@ def icon_for(key: str, spec: dict, overrides: dict | None = None, fetch: bool = 
         p = DECLARED / f"{key}.{ext}"
         if p.exists():
             return _url(p)
+    own = spec.get("icon_path")                     # a plugin's own icon (heyclaude/plugins.py)
+    if own and Path(own).is_file():
+        return _url(Path(own))
     slug = spec.get("icon")
     if slug and (BUNDLED / f"{slug}.svg").exists():
         return _url(BUNDLED / f"{slug}.svg")
@@ -118,11 +121,20 @@ def describe(name: str, args: dict | None = None, overrides: dict | None = None,
     key = server_key(server)
     if tool.lower().startswith(key + "_"):        # telegram_list_dialogs on the telegram server
         tool = tool[len(key) + 1:]
-    spec = data.get("servers", {}).get(key, {})
+    spec = data.get("servers", {}).get(key) or _plugin_spec(key)
     svc = spec.get("name") or pretty_server(server)
     return {"service": svc, "label": f"{svc} · {tool_words(tool)}" if tool else svc,
             "icon_url": icon_for(key, spec, overrides, fetch), "glyph": spec.get("glyph", ""),
             "initials": initials(svc), "server": key, "tool": tool}
+
+
+def _plugin_spec(key: str) -> dict:
+    """The name and icon an enabled plugin declares for its MCP server ({} if none)."""
+    try:
+        from . import plugins
+        return plugins.get().service_icon(key) or {}
+    except Exception:
+        return {}
 
 
 def _builtin_detail(tool: str, args: dict) -> str:

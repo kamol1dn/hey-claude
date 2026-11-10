@@ -1,0 +1,37 @@
+{
+ "id": "timetable",
+ "api": "1.0",
+ "name": "Timetable",
+ "description": "Your next class, its room and the time left, or a day's timetable.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "cap",
+ "permissions": [
+  "personal_data"
+ ],
+ "contributes": {
+  "widgets": [
+   "timetable"
+  ],
+  "tools": [
+   "mcp__info__next_class",
+   "mcp__info__timetable_today"
+  ],
+  "settings": [
+   {
+    "key": "path",
+    "type": "string",
+    "label": "Timetable folder or file",
+    "config_key": "info.timetable.path",
+    "default": ""
+   },
+   {
+    "key": "group",
+    "type": "string",
+    "label": "Your group",
+    "config_key": "info.timetable.group",
+    "default": ""
+   }
+  ]
+ }
+}

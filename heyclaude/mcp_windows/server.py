@@ -48,7 +48,12 @@ def _wrap(fn, sdk_error):
 def build():
     MCPServer, Image, SdkToolError = _sdk()
     server = MCPServer(name="hey-claude windows", instructions=INSTRUCTIONS)
+    import os
+    from heyclaude.plugins import SKIP_ENV, disabled_from_env, skipped
+    skip = disabled_from_env(os.environ.get(SKIP_ENV))      # switched-off plugins' tools (heyclaude/plugins.py)
     for t in registry.TOOLS.values():
+        if skipped(t.full_name, skip):
+            continue
         doc = (inspect.getdoc(t.func) or t.name).strip()
         if t.experimental:
             doc = "EXPERIMENTAL. " + doc

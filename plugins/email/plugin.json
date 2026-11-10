@@ -1,0 +1,22 @@
+{
+ "id": "email",
+ "api": "1.0",
+ "name": "Email",
+ "description": "Your Gmail (the claude.ai connector) for the agent, with the inbox card.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "icon": "gmail",
+ "glyph": "mail",
+ "permissions": [
+  "personal_data",
+  "network"
+ ],
+ "contributes": {
+  "widgets": [
+   "email"
+  ],
+  "tools": [
+   "mcp__claude_ai_Gmail"
+  ]
+ }
+}

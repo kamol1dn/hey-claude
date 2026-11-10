@@ -484,6 +484,14 @@ info:
     default_time: "23:59" # the time for a deadline written without one
     overdue_h: 48         # how long an overdue item stays on the list
 
+# Plugins (docs/plugin-api.md): built-in ones in plugins/, yours in state/plugins/. Each feature
+# (weather, now playing, Telegram, a character pack...) is one; switch one off by listing its id
+# here (Settings does it for you). A switched-off plugin's card, tools, instant commands and
+# routes are gone; nothing else changes. Applies at once.
+plugins:
+  disabled: []            # e.g. [telegram, news]
+  settings: {}            # your plugins' own settings, per plugin id (built-ins use their sections above)
+
 island:
   screen: primary        # primary, or a screen index
   top_margin: auto        # px, or auto = centred in a bar docked at the top of the screen (else 8)

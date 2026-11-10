@@ -1,0 +1,15 @@
+{
+ "id": "character-echo",
+ "api": "1.0",
+ "name": "Character: Echo",
+ "description": "The Echo character pack.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "face",
+ "permissions": [],
+ "contributes": {
+  "characters": [
+   "echo"
+  ]
+ }
+}

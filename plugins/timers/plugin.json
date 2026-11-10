@@ -1,0 +1,19 @@
+{
+ "id": "timers",
+ "api": "1.0",
+ "name": "Timers & reminders",
+ "description": "\"Timer for 5 minutes\" instantly, the countdown card, and the list of what's running.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "timer",
+ "permissions": [],
+ "contributes": {
+  "widgets": [
+   "timer",
+   "reminders"
+  ],
+  "intents": [
+   "timer.*"
+  ]
+ }
+}

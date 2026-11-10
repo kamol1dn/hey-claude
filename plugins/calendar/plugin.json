@@ -1,0 +1,16 @@
+{
+ "id": "calendar",
+ "api": "1.0",
+ "name": "Calendar card",
+ "description": "A day's agenda as a card when the agent reads your calendar.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "icon": "googlecalendar",
+ "glyph": "calendar",
+ "permissions": [],
+ "contributes": {
+  "widgets": [
+   "calendar_list"
+  ]
+ }
+}

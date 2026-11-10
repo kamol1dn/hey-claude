@@ -1,0 +1,58 @@
+{
+ "id": "pc_control",
+ "api": "1.0",
+ "name": "PC settings",
+ "description": "Volume, brightness, dark mode, wallpaper, Wi-Fi and Bluetooth, power mode, apps and windows, Settings pages, screenshots; instantly or through the agent, with Undo.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "gear",
+ "permissions": [
+  "acts"
+ ],
+ "contributes": {
+  "intents": [
+   "volume.*",
+   "brightness.*",
+   "theme.*",
+   "radio.*",
+   "app.*",
+   "settings.*",
+   "screen.*"
+  ],
+  "tools": [
+   "mcp__windows__get_volume",
+   "mcp__windows__set_volume",
+   "mcp__windows__set_mute",
+   "mcp__windows__list_app_volumes",
+   "mcp__windows__set_app_volume",
+   "mcp__windows__list_audio_devices",
+   "mcp__windows__set_default_output_device",
+   "mcp__windows__get_brightness",
+   "mcp__windows__set_brightness",
+   "mcp__windows__get_theme",
+   "mcp__windows__set_theme",
+   "mcp__windows__get_wallpaper",
+   "mcp__windows__set_wallpaper",
+   "mcp__windows__get_night_light",
+   "mcp__windows__set_night_light",
+   "mcp__windows__get_radios",
+   "mcp__windows__set_wifi",
+   "mcp__windows__set_bluetooth",
+   "mcp__windows__battery_status",
+   "mcp__windows__get_power_mode",
+   "mcp__windows__set_power_mode",
+   "mcp__windows__lock_pc",
+   "mcp__windows__request_power_action",
+   "mcp__windows__list_apps",
+   "mcp__windows__launch_app",
+   "mcp__windows__list_windows",
+   "mcp__windows__focus_window",
+   "mcp__windows__minimize_window",
+   "mcp__windows__restore_window",
+   "mcp__windows__snap_window",
+   "mcp__windows__close_window",
+   "mcp__windows__screenshot",
+   "mcp__windows__open_settings_page"
+  ]
+ }
+}

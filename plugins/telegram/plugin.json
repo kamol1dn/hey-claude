@@ -1,0 +1,25 @@
+{
+ "id": "telegram",
+ "api": "1.0",
+ "name": "Telegram",
+ "description": "Your Telegram chats for the agent: chat and message cards, and drafts you approve before they're sent.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "icon": "telegram",
+ "glyph": "chat",
+ "permissions": [
+  "personal_data",
+  "network",
+  "acts"
+ ],
+ "contributes": {
+  "widgets": [
+   "telegram_chats",
+   "telegram_message",
+   "telegram_draft"
+  ],
+  "tools": [
+   "mcp__telegram"
+  ]
+ }
+}

@@ -1,0 +1,15 @@
+{
+ "id": "character-hum",
+ "api": "1.0",
+ "name": "Character: Hum",
+ "description": "The Hum character pack.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "face",
+ "permissions": [],
+ "contributes": {
+  "characters": [
+   "hum"
+  ]
+ }
+}

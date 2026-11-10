@@ -171,9 +171,22 @@ class IntentEngine:
             return None
         t0 = time.perf_counter()
         m = self._match(text)
+        if m is not None and not self._allowed(m.intent):
+            print(f"[instant] {m.intent} belongs to a switched-off plugin: not claimed")
+            return None
         if m is not None:
             m.match_ms = (time.perf_counter() - t0) * 1000
         return m
+
+    def _allowed(self, intent: str) -> bool:
+        """A switched-off plugin's intents (heyclaude/plugins.py) don't claim requests:
+        they go on to Claude as if there were no instant command for them."""
+        try:
+            from .. import plugins
+            return plugins.get().intent_enabled(intent)
+        except Exception as e:
+            print(f"[instant] plugin check failed: {e}")
+            return True
 
     def _other_langs(self, raw: str):
         """(module, lang) for the Russian / Uzbek grammars worth trying on this text."""

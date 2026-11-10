@@ -1,0 +1,21 @@
+{
+ "id": "clipboard",
+ "api": "1.0",
+ "name": "Clipboard",
+ "description": "\"What's on my clipboard\" and \"copy that\", with the clipboard card.",
+ "version": "1.0.0",
+ "author": "hey-claude",
+ "glyph": "clipboard",
+ "permissions": [
+  "personal_data"
+ ],
+ "contributes": {
+  "widgets": [
+   "clipboard"
+  ],
+  "tools": [
+   "mcp__windows__get_clipboard",
+   "mcp__windows__set_clipboard"
+  ]
+ }
+}

@@ -1004,6 +1004,48 @@ slower of the two (turbo: ~5-6 s, mostly hidden while you speak).
 The Claude desktop app's own voice is out of scope: it runs on a private
 Anthropic service with no public API.
 
+## Dictate anywhere (M4d)
+
+Hold **Right Alt** (`dictate.key`), speak, let go: the words are typed where
+the cursor is, in any app: Notepad, a browser text box, a terminal, Word.
+
+- **Double tap** the key for hands-free: it keeps listening until the next
+  tap. **Esc** cancels. Pressing another key while you hold it (AltGr+e,
+  Alt+Tab) makes it a shortcut: nothing is dictated and the key goes through.
+  The key is never swallowed outside dictation (a lone Alt would open a
+  window's menu bar, so a masking key is sent, as AutoHotkey does).
+- It **pastes through the clipboard** and then puts your clipboard back,
+  marked so Windows' clipboard history and cloud clipboard skip both. It
+  never types into a password field (UI Automation's `IsPassword`).
+  **Win+Alt+V** (`dictate.paste_again_hotkey`) pastes the last dictation
+  again, e.g. after it skipped a password field or the window lost focus.
+- It uses whichever speech backend is active (M4c), so lean mode, Windows
+  and cloud work here too; the wake word is ignored while you dictate.
+- **Personal dictionary** (Settings → Dictation, or `dictionary:` in
+  config.yaml), shared with the assistant's own speech-to-text:
+  - *words*: names and terms Whisper should spell your way (eClass,
+    Phoenix, classmates' names), passed as its initial prompt;
+  - *replacements*: `hey cloud => hey Claude`, whole words, any case;
+  - *snippets* (dictation only): a short spoken phrase becomes saved text
+    ("my email" → your address).
+  - `stt.languages: [en, ru, uz]` limits language detection to those
+    (needs a multilingual model).
+  `tools\dictionary_eval.py` measures it: on sentences spoken by three Kokoro
+  voices, turbo spelled 27 of 36 dictionary words right on its own and 35 of
+  36 with the dictionary. (Whisper drops a word from the start of a sentence
+  when it looks like the prompt's vocabulary, e.g. a leading "Hey Claude",
+  so keep greetings out of `words`.)
+- **Clean-up by Claude** (`dictate.cleanup`: off, as_said, natural,
+  polished; per app with `dictate.cleanup_apps`): one `claude -p` call on
+  your subscription. Off by default: it adds a second or two.
+- The island shows *dictating* with the level meter. Local stats only
+  (`state\dictation.json`: words, time saved), shown in Settings.
+
+Speed (release → text in the window) is logged per dictation (`[dictate]
+release_to_text_ms=…`). Turbo on the GPU transcribes a 5 s sentence in about
+0.25-0.3 s; the paste itself is ~35 ms (the clipboard is restored 0.3 s
+later, 0.6 s in terminals, which read it late).
+
 ## Measured latency
 
 ### M4 (2026-11-09): speech end → first word, quick questions

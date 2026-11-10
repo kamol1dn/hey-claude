@@ -6,9 +6,13 @@
     "Core states (no fallback) must be implemented by every theme and pack.",
     "inputs: the live values a state gets. kind: loop (holds until the next state) or oneshot (plays once,",
     "then the app moves on). aliases: names the assistant uses for the same state (Bridge.state modes).",
-    "heyclaude/states.py loads, validates and resolves it."
+    "heyclaude/states.py loads, validates and resolves it.",
+    "budgets: frame rates a character or theme may run at (idle: a resting loop on its own; rest: off / asleep;",
+    "antic: an idle antic playing), the longest antic, and how fast an antic must give way to a real state.",
+    "1.1 (M6): budgets, and the sleep progression drowsy / asleep / waking."
   ],
-  "version": "1.0",
+  "version": "1.1",
+  "budgets": {"idle_fps": 8, "rest_fps": 4, "antic_fps": 30, "live_fps": 60, "antic_max_s": 20, "interrupt_ms": 150},
   "inputs": {
     "level": "mic level 0..1 (~12 Hz while the mic is open)",
     "amplitude": "loudness of the voice it is speaking 0..1 (~30 Hz)",
@@ -42,6 +46,9 @@
     {"id": "happy", "description": "Something went well.", "inputs": [], "kind": "oneshot", "fallback": "idle", "aliases": []},
     {"id": "error", "description": "Something failed.", "inputs": ["text"], "kind": "oneshot", "fallback": "confused", "aliases": []},
     {"id": "confused", "description": "It didn't understand, or needs the user.", "inputs": [], "kind": "oneshot", "fallback": "idle", "aliases": []},
+    {"id": "drowsy", "description": "Idle and nobody around for ~15 min: heavy-lidded, slower.", "inputs": ["cursor", "theme"], "kind": "loop", "fallback": "idle", "aliases": []},
+    {"id": "asleep", "description": "Nobody around for ~30 min: dozing (the wake word still works).", "inputs": ["theme"], "kind": "loop", "fallback": "drowsy", "aliases": []},
+    {"id": "waking", "description": "The user came back after a doze: a stretch, then idle.", "inputs": [], "kind": "oneshot", "fallback": "idle", "aliases": []},
     {"id": "voice_mismatch", "description": "The speaker check rejected a wake (not your voice?).", "inputs": [], "kind": "oneshot", "fallback": "confused", "aliases": ["mismatch"]}
   ]
 }

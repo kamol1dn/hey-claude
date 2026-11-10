@@ -1,0 +1,16 @@
+{
+  "id": "echo",
+  "name": "Echo",
+  "kind": "pixel bat",
+  "line": "A pocket-sized bat with satellite-dish ears. Hears everything, says just enough.",
+  "author": "hey-claude",
+  "licence": "MIT",
+  "registry": "1.1",
+  "implements": ["idle", "off", "listening", "thinking", "talking", "happy", "confused", "working", "sending",
+                 "drowsy", "asleep", "waking"],
+  "oneshot": {"happy": 2.9, "confused": 2.8, "sending": 3.6, "waking": 1.6},
+  "size": {"pill": 24, "desktop": 120},
+  "bounds": [-60, -60, 120, 120],
+  "desktop_bounds": [-100, -80, 200, 170],
+  "antics": []
+}

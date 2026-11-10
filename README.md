@@ -495,8 +495,14 @@ How it works:
   and Claude Code carries on as if there were no hook. It never allows anything
   on its own.
 - hey-claude's own helper runs (the tool agent, task questions) are marked
-  `HEYCLAUDE_INTERNAL` and never show up. Voice tasks carry `HEYCLAUDE_TASK`,
-  so a task and its session are the same row.
+  `HEYCLAUDE_INTERNAL` and never show up as sessions. Voice tasks carry
+  `HEYCLAUDE_TASK`, so a task and its session are the same row.
+- The tool agent's approvals are the exception (see "hey-claude's own agent
+  asks first" below). It runs with `HEYCLAUDE_INTERNAL=agent` and its own
+  `--settings` file (`state/agent-hooks.json`) holding one PermissionRequest
+  hook: the same relay with an `agent` argument. Only that hook is forwarded,
+  so this works whether or not the global hooks are installed, and a request
+  never arrives twice.
 
 On the island:
 
@@ -521,6 +527,35 @@ On the island:
   leaves it to the terminal.
 
 By voice: "jump to the session", "show me the diff", "move it to the desktop".
+
+### hey-claude's own agent asks first
+
+The tool agent (the part that answers "who messaged me on Telegram") used to
+be refused anything off `agent.allowed_tools`, silently. Now such a tool call
+puts a card on the island and waits, like a session's approval
+(`hooks.approvals`; it needs no global hooks):
+
+- It says what it wants ("Open Spotify? Allow or deny.") and listens once,
+  without the wake word, for "yes", "allow that", "no" or "always". A click
+  works too. Its card never makes a session row or counts as a working
+  session.
+- **Screen control.** With Windows-MCP on, its acting tools (Click, Type,
+  Shortcut, Scroll, Move, App, Clipboard, Scrape, Process, FileSystem, …) are
+  never pre-allowed. Allowing the first one covers the rest of that request,
+  so "open Notepad and type a note" asks once. Killing a process, changing
+  files and running an executable still need a click each. The agent is told
+  to take a Snapshot first and plan the whole sequence.
+- **Telegram.** Sending a message or a file always asks, needs a click, and
+  the card shows the recipient and the full draft. Downloaded media goes to
+  your Downloads folder unless you name another, and both the answer and the
+  island's "Saved from Telegram" card say where.
+- **Always** adds the tool to `agent.allowed_tools` in `config.yaml` (the file
+  as it was is copied to `state/config-backups/` first) and allows it at once.
+  It's offered only for one MCP tool or a read-only built-in, never for Bash,
+  edits or screen control.
+- With no answer in `hooks.approval_timeout_s` it is denied, and hey-claude
+  says "I didn't get an answer, so I didn't do that." Starting another
+  request while a card is up denies the card, so the new one runs at once.
 
 **Moving a session to the Claude desktop app** runs
 `claude --desktop --resume <session id>` in its own minimized console (it
@@ -585,7 +620,7 @@ about 0.1 s.
 | display | `get_brightness` / `set_brightness` (laptop panel via WMI, external monitors via DDC/CI), `get_theme` / `set_theme` (dark/light, apps/system), `get_wallpaper` / `set_wallpaper` (per monitor, IDesktopWallpaper), `get_night_light` / `set_night_light` (*experimental*, registry blob) |
 | radios | `get_radios` (Wi-Fi, Bluetooth, airplane mode), `set_wifi`, `set_bluetooth` |
 | power | `battery_status`, `get_power_mode` / `set_power_mode` (efficiency / balanced / performance), `lock_pc`, `request_power_action` |
-| media | `now_playing`, `media_control` (play, pause, play_pause, next, previous) |
+| media | `now_playing`, `media_control` (play, pause, play_pause, next, previous), `play_spotify` (see below) |
 | apps, windows | `list_apps`, `launch_app` (Start-menu apps only), `list_windows`, `focus_window`, `minimize_window`, `restore_window`, `snap_window`, `close_window` |
 | other | `get_clipboard`, `set_clipboard`, `screenshot` (≤ 1280 px JPEG for the agent, never saved), `open_settings_page` (`ms-settings:` pages by name) |
 
@@ -600,7 +635,31 @@ the room, so:
   the click runs it. No voice command can confirm.
 - The default allow-list (`agent.allowed_tools`) has the read tools and the
   comfort-setting writes. It leaves out `close_window` (unsaved work) and the
-  two experimental tools; anything not listed is denied without a prompt.
+  two experimental tools. Anything not listed asks on the island (see
+  "hey-claude's own agent asks first"), or is refused with `hooks.approvals` off.
+
+**Playing music on Spotify** ("play Bohemian Rhapsody on Spotify", "play the
+album Homework"). The claude.ai Spotify connector can search but not play, so
+the agent searches with it, then `play_spotify` opens the `spotify:` URI in the
+**desktop app** and makes sure it actually plays. No Spotify developer keys
+are needed. Tested on this PC:
+- A track URI starts by itself, but only when nothing is playing. While
+  something plays, it only opens the album with the song selected.
+- An album, playlist, artist or search page only opens.
+- So the tool presses the page's own Play button through UI Automation: the
+  big one, the top search result's, or the selected song's row (not the
+  album's track 1). This works with the window minimized and without moving
+  the mouse.
+- It checks Spotify's own media session (not whichever app Windows thinks is
+  current) and returns what's playing.
+- With no connector, `query` alone plays Spotify's top result for
+  `spotify:search:<query>`.
+- If Spotify is closed, it starts it. Each call takes 1–2 s, or about 5 s
+  from a cold start, and is capped at 14 s.
+- It reads Spotify's English button labels, so a Spotify set to another
+  language reports an error instead.
+- `play_spotify` and the connector's `search` are pre-allowed whenever the
+  settings server is on.
 
 **Windows-MCP, optional** ([CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP),
 MIT): accessibility-tree snapshots and screenshots of any app. It installs
@@ -616,12 +675,13 @@ biggest downloads were pywin32 6.6 MB, cryptography 3.6 MB, pydantic-core
 uv's cache). Then set `agent.windows_mcp.enabled: true`. hey-claude starts it as
 `windows-mcp serve --transport stdio --exclude-tools PowerShell,Registry`
 (those two are always excluded) with its telemetry off
-(`ANONYMIZED_TELEMETRY=false`). Only its **read-only** tools, `Snapshot` and
-`Screenshot`, may be allowed. Its acting tools (Click, Type, Shortcut, Drag,
-App, …) need an island approval per app first, which arrives with M7's
-approvals. Until then hey-claude removes them from `--allowedTools` even if
-you add them, and says so in the log. The agent prompt tells it to use the
-settings tools for settings and Windows-MCP only to look.
+(`ANONYMIZED_TELEMETRY=false`). Only the tools that look or wait may be
+pre-allowed: `Snapshot`, `Screenshot`, and `Wait`, `WaitFor` and
+`DisplayInventory` (added by themselves). Its acting tools (Click, Type,
+Shortcut, Move, App, Process, FileSystem, …) are removed from `--allowedTools`
+even if you add them: they ask on the island instead, once per request (see
+"hey-claude's own agent asks first"). The agent prompt tells it to use the
+settings tools for settings and Windows-MCP for everything else on screen.
 
 **The settings server's own packages** (in `requirements.txt`, ~5 MB, pure
 Python or small wheels): `mcp`, `pycaw`, `monitorcontrol` and the `winrt-*`

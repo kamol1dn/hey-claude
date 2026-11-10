@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import apps, audio, clipboard, display, media, power, radios, screen
+from . import apps, audio, clipboard, display, media, power, radios, screen, spotify
 
 SERVER = "windows"                     # the MCP server name: tools are mcp__windows__<name>
 PREFIX = f"mcp__{SERVER}__"
@@ -113,6 +113,7 @@ _T = [
     Tool("media_control", media.media_control, "media", "write", True,
          undo=lambda a, r: [("media_control", {"action": _MEDIA_INVERSE[r["action"]]})]
          if r.get("action") in _MEDIA_INVERSE else None),
+    Tool("play_spotify", spotify.play_spotify, "media", "write", True),     # no undo: nothing to go back to
     # apps and windows
     Tool("list_apps", apps.list_apps, "apps", "read", True),
     Tool("launch_app", apps.launch_app, "apps", "write", True),

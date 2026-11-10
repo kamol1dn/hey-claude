@@ -428,7 +428,7 @@ def test_server_registers_every_tool():
 def test_every_write_tool_returns_old_and_new_or_says_why():
     """Write tools return {old, new} (the undo/effect contract); the few that
     have no 'old' (launch, lock, close, open a page) have no undo either."""
-    no_change_shape = {"launch_app", "lock_pc", "close_window", "open_settings_page", "restore_window"}
+    no_change_shape = {"launch_app", "lock_pc", "close_window", "open_settings_page", "restore_window", "play_spotify"}
     for t in registry.TOOLS.values():
         if t.kind == "write" and t.name not in no_change_shape:
             assert t.undo is not None or t.name in ("focus_window",), f"{t.name}: write tool without undo"
@@ -469,6 +469,8 @@ def test_effects_json_matches_the_tools():
     for name in list(m["tools"]) + list(m["silent"]):
         if name.startswith("mcp__windows-mcp__"):
             assert name.split("__")[-1] in B.WINDOWS_MCP_READ_ONLY, name
+        elif name.startswith("mcp__telegram__"):
+            assert name == "mcp__telegram__telegram_download_media", name   # the "saved to" card
         else:
             assert registry.get(name) is not None, f"effects.json names an unknown tool {name}"
     for t in registry.TOOLS.values():
@@ -600,14 +602,20 @@ def test_agent_args_have_windows_server_and_gated_tools(tmp_path):
     cfg["agent"]["allowed_tools"] = ["Read", "mcp__windows__set_volume", "mcp__windows-mcp__Click"]
     a = B.Agent.__new__(B.Agent)
     a.cfg = cfg
-    with mock.patch.object(config, "STATE_DIR", tmp_path):
+    with mock.patch.object(config, "STATE_DIR", tmp_path), \
+            mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path / "local")}):
         args = a._args()
     allowed = args[args.index("--allowedTools") + 1]
     from heyclaude import mcp_info
     own = [t for t in allowed.split(",") if t.startswith("mcp__info__")]
     assert sorted(own) == sorted(mcp_info.tool_names())               # M5b: hey-claude's own read-only tools
     allowed = ",".join(t for t in allowed.split(",") if not t.startswith("mcp__info__"))
-    assert allowed == "Read,mcp__windows__set_volume,mcp__weather__get_weather"   # M5: the keyless weather tool
+    # M5: the keyless weather tool; "play <song>": the Spotify search and play_spotify
+    assert allowed == ("Read,mcp__windows__set_volume,mcp__weather__get_weather,"
+                       "mcp__windows__play_spotify,mcp__claude_ai_Spotify__search")
+    assert "mcp__windows-mcp__Click" not in allowed                    # screen control asks on the island
+    if os.name == "nt":                                                # M7: the agent's own approval hook
+        assert args.index("--settings") < args.index("--mcp-config")
     mcp_files = args[args.index("--mcp-config") + 1:]
     data = json.load(open(mcp_files[-1], encoding="utf-8"))
     assert "windows" in data["mcpServers"] and "weather" in data["mcpServers"]

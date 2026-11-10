@@ -114,6 +114,8 @@ class Assistant:
         self._turn_writes: list = []           # Windows write tools the agent ran this turn ("teach it")
         # M7: watched Claude Code sessions (hook relay -> named pipe -> SessionHub), made in load()
         self.hub = None
+        self.config_path = None                 # --config (an agent approval's "Always" is saved there)
+        self._ap_listen = 0.0                   # an agent approval card's question was asked: listen once
         self.pipe = None
         self.on_open_diff = None               # callback(title, diffs), set by __main__ (opens on the GUI thread)
 
@@ -541,6 +543,11 @@ class Assistant:
             return
         if ev is None:
             return
+        if name.endswith("__telegram_download_media") and raw:
+            # the card shows the file it saved (the tool answers in markdown: the path is in the text)
+            m = re.search(r"[A-Za-z]:\\[^\r\n\"'`*|<>]+", raw)
+            if m:
+                ev["to"] = ev["text_to"] = m.group(0).strip().rstrip(".")
         if undoable:
             self.undo_stack.record(name, args, result, effect=ev)
         if ev["effect"] == "confirm" and ev["extra"].get("action"):
@@ -876,6 +883,9 @@ class Assistant:
                 hit = followup = True           # talked over the answer: it stops, and we listen
             if not hit and not one_shot and not self.input_open and self.followup.poll():
                 hit = followup = True           # answered and done speaking: listen without the wake word
+            ap_window = False
+            if not hit and not one_shot and not self.input_open and self._approval_window():
+                hit = followup = ap_window = True   # the agent asked for an OK: "yes" / "no" without the wake word
             if not hit or (not followup and time.perf_counter() < cooldown_until):
                 continue
             t_wake = time.perf_counter()
@@ -895,9 +905,16 @@ class Assistant:
             elif not followup:
                 self.followup.cancel()
                 self.speaker.stop()             # barge-in: wake word cuts off speech
-            self.gen += 1
+            if not (ap_window or (self.hub is not None and self.hub.agent_pending())):
+                # (while the agent waits on a card its turn must go on: an answer to the card
+                # leaves it running, and anything else bumps gen in request())
+                self.gen += 1
             lcfg = self.cfg["listen"]
-            if followup and not barged:
+            if ap_window:
+                print(f"[approval] listening {self.APPROVAL_LISTEN_S:.0f}s for an answer, no wake word needed")
+                self.set_mode("listening")
+                lcfg = dict(lcfg, start_timeout=self.APPROVAL_LISTEN_S)
+            elif followup and not barged:
                 print(f"[followup] listening {self.followup.remaining():.1f}s without the wake word")
                 self.set_mode("followup", f"{self.followup.length:.0f}")
                 lcfg = dict(lcfg, start_timeout=self.followup.remaining())
@@ -946,7 +963,10 @@ class Assistant:
                     print("[followup] closed: nothing said")
                 if from_input:
                     self._heard("")
-                self.rest()
+                if ap_window and self.conv_lock.locked():
+                    self.set_mode("thinking", "waiting for your OK on the island")   # the agent is still on it
+                else:
+                    self.rest()
                 if self.simulate:
                     self._sim_done = getattr(src, "finished", True)
                     self._maybe_exit()
@@ -980,7 +1000,7 @@ class Assistant:
                 text = strip_wake(text)
             if self.simulate:
                 self._sim_done = getattr(src, "finished", True)
-            if not text.strip() or (followup and is_end_phrase(text)):
+            if not text.strip() or (followup and not ap_window and is_end_phrase(text)):
                 if text.strip():
                     print(f"[followup] ended by {text!r}")
                 self.rest()
@@ -992,7 +1012,7 @@ class Assistant:
             timing = dict(wake=t_wake, speech_end=t_end or t_rec, vad_done=t_rec, stt_done=t_stt,
                           audio_s=len(audio) / 16000, text=text, stt_reused=reused,
                           stt_device=getattr(self.stt, "label", ""))
-            source = "barge-in" if barged else "followup" if followup else "voice"
+            source = "approval" if ap_window else "barge-in" if barged else "followup" if followup else "voice"
             prev = self._last_said
             if barged and prev is not None and t_wake - prev[1] < self.CONTINUE_S:
                 # The user paused mid-sentence, it answered, and they talked on: one request.
@@ -1052,6 +1072,8 @@ class Assistant:
         new thread (returned) unless `wait`. `source`: voice | followup | typed | text."""
         text = text.strip()
         if not text:
+            return None
+        if self._agent_approval_reply(text):
             return None
         self.gen += 1
         now = time.perf_counter()
@@ -1403,6 +1425,11 @@ class Assistant:
                               window_finder=finder)
         # a handoff asked for mid-turn runs when the turn ends (off the pipe thread: it may wait for the -p run)
         self.hub.on_handoff = lambda s: threading.Thread(target=self._handoff, args=(s.id, True), daemon=True).start()
+        # hey-claude's own agent asks here too (brain.Agent's --settings hook)
+        self.hub.agent_allowed = self._agent_allowed
+        self.hub.on_agent_always = self._agent_always
+        self.hub.on_agent_timeout = self._agent_timeout
+        self.hub.agent_cwd = (self.cfg.get("agent") or {}).get("cwd") or ""
         self.brain.hub = self.hub
         if self.simulate or self.mic_factory is not None:
             return                                   # test runs: the hub only, no pipe
@@ -1432,8 +1459,91 @@ class Assistant:
 
     def _approval_request(self, req: dict):
         print(f"[approval] {req.get('id')}: {req.get('tool')} · {req.get('title')}"
+              + (" (agent)" if req.get("agent") else "")
               + (" (dangerous: click only)" if req.get("dangerous") else ""))
         self._ui_emit("approval", req)
+        if req.get("agent"):
+            self._ask_agent_approval(req)
+
+    # -- the tool agent's own approvals --------------------------------------------
+    APPROVAL_LISTEN_S = 8.0
+
+    def _ask_agent_approval(self, req: dict):
+        """Say what the agent wants to do, and (voice approvals on, mic listening) open
+        one window to answer it without the wake word."""
+        title = str(req.get("title") or "Allow this").rstrip(".?")
+        if req.get("dangerous"):
+            q = f"{title}? That one needs a click on the island."
+        else:
+            q = f"{title}? Allow or deny."
+        sp = getattr(self, "speaker", None)
+        if sp is not None:
+            sp.announce(q)
+        h = self.cfg.get("hooks") or {}
+        if not req.get("dangerous") and h.get("voice_approvals", True) and self.listening.is_set() \
+                and not self.text_mode:
+            self._ap_listen = time.monotonic()
+
+    def _approval_window(self) -> bool:
+        """Once per agent card, after its question was spoken: listen without the wake word."""
+        t = self._ap_listen
+        if not t:
+            return False
+        if self.hub is None or not self.hub.agent_pending() or time.monotonic() - t > 90:
+            self._ap_listen = 0.0
+            return False
+        if self.wake_gate.busy():
+            return False                            # still saying the question
+        self._ap_listen = 0.0
+        return True
+
+    def _agent_approval_reply(self, text: str) -> bool:
+        """A request while the agent waits on a card. A spoken answer ("yes, allow it")
+        is handled here at once (the agent's turn holds the conversation); anything else
+        denies the card so the agent's turn ends and the new request can run."""
+        hub = self.hub
+        if hub is None or not hub.agent_pending():
+            return False
+        h = self.cfg.get("hooks") or {}
+        if h.get("voice_approvals", True) and hub.voice_applies(text):
+            ok, reply = hub.voice(text)
+            print(f"[approval] spoken answer {text!r}: {reply}")
+            if reply and getattr(self, "speaker", None) is not None:
+                self.speaker.announce(reply)
+            if self.conv_lock.locked():
+                self.set_mode("thinking", "checking with your tools…")
+            return True
+        if hub.agent_moved_on():
+            print("[approval] a new request: the agent's open card was denied")
+        return False
+
+    def _agent_allowed(self, tool: str) -> bool:
+        """Allowed since the agent started ("Always" on a card): its process still has
+        the old --allowedTools until it restarts."""
+        from .brain import NEVER_ALLOWED
+        return tool in ((self.cfg.get("agent") or {}).get("allowed_tools") or []) and not NEVER_ALLOWED.search(tool)
+
+    def _agent_always(self, tool: str):
+        """"Always" on an agent card: allowed from now on, and kept in config.yaml
+        (agent.allowed_tools; the file as it was goes to state/config-backups/)."""
+        from . import config
+        a = self.cfg.setdefault("agent", {})
+        lst = a.get("allowed_tools")
+        if not isinstance(lst, list):
+            lst = a["allowed_tools"] = []
+        if tool not in lst:
+            lst.append(tool)
+        try:
+            saved = config.add_to_list("agent.allowed_tools", tool, self.config_path)
+            print(f"[approval] {tool}: always allowed" + (f", saved to {saved}" if saved else ""))
+        except Exception as e:
+            print(f"[approval] {tool}: always allowed for now; saving it failed: {e}")
+
+    def _agent_timeout(self, req: dict):
+        print(f"[approval] {req.get('id')}: no answer, denied")
+        sp = getattr(self, "speaker", None)
+        if sp is not None:
+            sp.announce("I didn't get an answer, so I didn't do that.")
 
     def approval_shown(self, ap_id: str):
         """The island put the card up (GUI thread): the long wait starts."""

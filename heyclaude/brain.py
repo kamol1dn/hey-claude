@@ -107,6 +107,7 @@ _PC_RE = re.compile(
     r"wallpaper|desktop background|wi-?fi|bluetooth|airplane mode|night light|power mode|battery|"
     r"(?:next|previous|last|skip(?: this| the)?) (?:song|track)|skip (?:this|it)|"
     r"(?:pause|resume|stop|play) (?:the |my )?(?:music|song|video|track|playback|spotify)|"
+    r"play\b.{1,80}\b(?:on|in|with) spotify|play (?:the )?(?:song|album|playlist|artist)\b|"
     r"what(?:'?s| is) (?:playing|this song)|what song|now playing|"
     r"lock (?:the |my )?(?:pc|computer|laptop|screen)|screenshot|on my screen|"
     r"(?:open|show) (?:the )?[\w -]{0,30}settings|snap (?:this|the|it|[\w ]{1,30}) (?:window )?(?:to the )?(?:left|right)|"
@@ -274,13 +275,43 @@ AGENT_WINDOWS_PROMPT = (
     "Short commands: 'volume 30' means set it to 30; 'brightness down' or 'quieter' means about 20 less; "
     "'next song' means media_control next. For sleep, restart or shutdown call request_power_action and "
     "tell the user to click Confirm on the island; never try another way. Never click or type through "
-    "the UI to change a setting; Windows-MCP tools, when present, are only for looking at the screen."
+    "the UI to change a setting the mcp__windows tools cover."
+    " To play music, search with mcp__claude_ai_Spotify__search, then call mcp__windows__play_spotify with the "
+    "result's spotify: uri (the 'uri' field, not 'play_uri'); it opens it in the Spotify desktop app, starts it "
+    "and returns what's playing, so just say that in a few words. Without that connector, call play_spotify "
+    "with query set to what the user asked for (Spotify's own top result). Pause, resume and skip stay "
+    "media_control."
+)
+# Playing music (Spotify): pre-allowed with the settings server (both only start music or look).
+SPOTIFY_TOOLS = ("mcp__windows__play_spotify", "mcp__claude_ai_Spotify__search")
+# Added when Windows-MCP is on: screen control, approved on the island.
+AGENT_SCREEN_PROMPT = (
+    " For anything else on the screen (clicking, typing into an app, menus, other apps' windows) use the "
+    "mcp__windows-mcp tools. Always take a Snapshot first to see what's there, plan the whole sequence, then "
+    "act. Acting on the screen needs the user's OK: the first acting call shows an approval card on the island "
+    "and waits, and once allowed it covers the rest of this request, so don't ask in words first and don't "
+    "split one job into several requests. Never use PowerShell or the registry."
+)
+# Added when the agent's tool approvals are on (M7 cards on the island).
+AGENT_APPROVALS_PROMPT = (
+    " Some tools need the user's OK: calling one shows an approval card on the island and waits for a click "
+    "or a spoken yes. Just call the tool (don't ask in words first). If it's denied, don't try it another way; "
+    "say in a few words that you didn't do it."
+)
+AGENT_TELEGRAM_PROMPT = (
+    " Telegram: to download media, save it into {downloads} (pass that folder as output_path) unless the user "
+    "names another folder, and say the file name and the folder in your answer, e.g. 'Saved photo.jpg to "
+    "Downloads.' Send a Telegram message or file only when the user asked for exactly that; the island shows "
+    "your draft and the recipient for approval, so write the final text and call the tool. When the words are "
+    "the user's own (they dictated them), pass prefix 'never'."
 )
 
-# Windows-MCP (CursorTouch) tools that act on the UI. They stay off the allow-list
-# until M7's island approvals exist; PowerShell and Registry are never allowed.
+# Windows-MCP (CursorTouch) tools: the ones that only look or wait may be pre-allowed
+# (the passive ones always are); the acting ones (Click, Type, App, Process, FileSystem...)
+# never are: they ask on the island (M7 approvals). PowerShell and Registry are never allowed.
 WINDOWS_MCP_SERVER = "windows-mcp"
-WINDOWS_MCP_READ_ONLY = ("Snapshot", "Screenshot")
+WINDOWS_MCP_READ_ONLY = ("Snapshot", "Screenshot", "DisplayInventory", "Wait", "WaitFor")
+WINDOWS_MCP_PASSIVE = ("DisplayInventory", "Wait", "WaitFor")
 NEVER_ALLOWED = re.compile(r"(?:^|__)(PowerShell|Registry)$|powershell|regedit", re.I)
 
 
@@ -303,8 +334,10 @@ class _CliChat:
     on_usage = None                         # M5: callback(dict) for Claude Code's rate_limit_event
 
     def __init__(self, exe: str, args: list[str], *, cwd: str, persistent: bool = True,
-                 max_turns: int = 20, final_only: bool = False, name: str = "fast", timeout: float = 60):
+                 max_turns: int = 20, final_only: bool = False, name: str = "fast", timeout: float = 60,
+                 internal: bool | str = True):
         self.exe, self.args, self.cwd = exe, args, cwd
+        self.internal = internal                # HEYCLAUDE_INTERNAL: True, or "agent" (its approvals ask)
         self.persistent, self.max_turns, self.final_only = persistent, max_turns, final_only
         self.name, self.timeout = name, timeout
         self.proc = None
@@ -328,7 +361,7 @@ class _CliChat:
         self.proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE if prompt is None else subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=err, text=True, encoding="utf-8",
-            errors="replace", bufsize=1, env=child_env(internal=True), creationflags=NO_WINDOW, cwd=self.cwd,
+            errors="replace", bufsize=1, env=child_env(internal=self.internal), creationflags=NO_WINDOW, cwd=self.cwd,
         )
         self.turns = 0
         self.epoch += 1
@@ -630,10 +663,28 @@ AGENT_WEATHER_MCP_PROMPT = (
 )
 
 
+def downloads_dir() -> str:
+    """The user's Downloads folder (where the agent saves Telegram media): the shell's
+    own setting (it may have been moved), else ~/Downloads."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+            v, _ = winreg.QueryValueEx(k, "{374DE290-123F-4565-9164-39C4925E467B}")
+        v = os.path.expandvars(str(v))
+        if os.path.isdir(v):
+            return v
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser("~"), "Downloads")
+
+
 def gate_allowed_tools(tools: list[str]) -> tuple[list[str], list[str]]:
-    """(kept, dropped). PowerShell / Registry never pass, and of Windows-MCP
-    only the read-only tools do: its acting tools (Click, Type, Shortcut, Drag,
-    App...) wait for M7's island approvals."""
+    """(kept, dropped) for --allowedTools. PowerShell / Registry never pass, and of
+    Windows-MCP only the tools that look or wait do (WINDOWS_MCP_READ_ONLY). Its
+    acting tools (Click, Type, Shortcut, Move, App, Process, FileSystem...) are never
+    pre-allowed: with the agent's approvals on they ask on the island (allowing one
+    covers the rest of that request), otherwise they are refused."""
     kept, dropped = [], []
     wm = f"mcp__{WINDOWS_MCP_SERVER}"
     for t in tools:
@@ -656,7 +707,7 @@ class Agent:
         a = cfg["agent"]
         self.chat = _CliChat(exe, self._args(), cwd=a.get("cwd") or str(ROOT), persistent=True,
                              max_turns=int(a.get("max_turns", 30)), final_only=True, name="agent",
-                             timeout=float(a.get("timeout", 180)))
+                             timeout=float(a.get("timeout", 180)), internal="agent")
         self.reported = False
         # M9: tool calls are watched so changes get an island effect and an undo.
         self.on_tool_result = None          # callback(name, input, result, is_error, raw=text)
@@ -692,7 +743,13 @@ class Agent:
         win.update(weather_mcp_servers(self.cfg))
         win.update(info_mcp_servers(self.cfg))
         from . import mcp_info
+        approvals = self._approval_settings()
+        telegram = "telegram" in [str(x) for x in a.get("import_desktop_mcp") or []] or any(
+            str(t).startswith("mcp__telegram__") for t in a.get("allowed_tools") or [])
         prompt = (AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
+                  + (AGENT_SCREEN_PROMPT if WINDOWS_MCP_SERVER in win and approvals else "")
+                  + (AGENT_APPROVALS_PROMPT if approvals else "")
+                  + (AGENT_TELEGRAM_PROMPT.format(downloads=downloads_dir()) if telegram else "")
                   + (AGENT_WEATHER_PROMPT if "weather" in win else "")
                   + (AGENT_WEATHER_MCP_PROMPT if "weather-mcp" in win else "")
                   + (mcp_info.prompt() if "info" in win else "")
@@ -711,9 +768,15 @@ class Agent:
                 allowed += [t for t in agent_tools(self.cfg) if t not in allowed]
             if "info" in win:                             # M5b: hey-claude's own tools, all read-only
                 allowed += [t for t in mcp_info.tool_names() if t not in allowed]
+            if "windows" in win:                          # "play <song>": search + play_spotify
+                allowed += [t for t in SPOTIFY_TOOLS if t not in allowed]
+            if WINDOWS_MCP_SERVER in win:                 # Windows-MCP's waits: they don't act
+                allowed += [t for t in (f"mcp__{WINDOWS_MCP_SERVER}__{n}" for n in WINDOWS_MCP_PASSIVE)
+                            if t not in allowed]
             kept, dropped = gate_allowed_tools(allowed)
             if dropped:
-                print(f"[agent] not allowed without approvals (M7): {', '.join(dropped)}")
+                print(f"[agent] never pre-allowed ({'they ask on the island' if approvals else 'refused'}): "
+                      f"{', '.join(dropped)}")
             if kept:
                 args += ["--allowedTools", ",".join(kept)]
         # Tools it must not even be offered: Claude Code's own PowerShell (Windows) would be
@@ -731,10 +794,32 @@ class Agent:
             with open(f, "w", encoding="utf-8") as fh:
                 json.dump({"mcpServers": win}, fh, indent=1)
             mcp.append(str(f))
+        if approvals:
+            args += ["--settings", approvals]            # before --mcp-config: that one takes a list
         if mcp:
             args += ["--mcp-config", *mcp]
         args += [str(x) for x in a.get("extra_args") or []]
         return args
+
+    def _approval_settings(self) -> str | None:
+        """M7 for the agent: a --settings file with its own PermissionRequest hook (the
+        relay, deployed to %LOCALAPPDATA%), so a tool off the allow-list asks on the
+        island instead of being refused. None when hooks or approvals are off."""
+        h = self.cfg.get("hooks")
+        if not (isinstance(h, dict) and h.get("enabled", True) and h.get("approvals", True)) or os.name != "nt":
+            return None
+        from .config import STATE_DIR
+        try:
+            from .hookrelay import install
+            relay = install.deploy_relay()
+            f = STATE_DIR / "agent-hooks.json"            # git-ignored, regenerated at every start
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            with open(f, "w", encoding="utf-8") as fh:
+                json.dump(install.agent_hook_settings(relay=relay), fh, indent=1)
+            return str(f)
+        except Exception as e:
+            print(f"[agent] no approvals on the island ({e}): tools off the allow-list are refused")
+            return None
 
     def ask(self, text: str):
         if session_name(self.cfg.get("conversation")) != self.day:   # a new day, or "save" changed
@@ -844,7 +929,11 @@ class Brain:
 
     def lookup(self, text: str):
         """Tier (b), with the shared conversation."""
-        yield from self.agent.ask(self.with_context("agent", self.agent.chat, text))
+        try:
+            yield from self.agent.ask(self.with_context("agent", self.agent.chat, text))
+        finally:
+            if self.hub is not None:
+                self.hub.agent_turn_done()          # M7: a screen-control OK lasts one request
 
     def forget(self):
         """'Start fresh': a new conversation, and new warm processes (in the

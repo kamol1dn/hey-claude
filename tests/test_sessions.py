@@ -512,6 +512,271 @@ def test_child_env_markers():
     assert child_env({}, task="t1")["HEYCLAUDE_TASK"] == "t1"
 
 
+# ----------------------------------------------------------------- hey-claude's own agent
+def agent_permission(hub, conn, tool="mcp__windows-mcp__Click", tool_input=None):
+    m = {"v": 1, "event": "PermissionRequest", "pid": 100, "ppid": 99, "env": {}, "agent": True,
+         "truncated": False, "wants_reply": True,
+         "payload": {"session_id": "agent-1", "cwd": "D:\\coding\\hey-claude", "hook_event_name": "PermissionRequest",
+                     "tool_name": tool, "tool_input": tool_input if tool_input is not None else {"loc": [10, 20]},
+                     "permission_suggestions": [{"type": "addRules"}]}}
+    th = threading.Thread(target=hub.handle, args=(m, conn), daemon=True)
+    th.start()
+    return th
+
+
+def test_agent_card_has_no_session_row_and_screen_ok_lasts_the_request():
+    hub, rec = make_hub()
+    conn = FakeConn()
+    th = agent_permission(hub, conn)
+    assert wait_for(lambda: rec.approvals)
+    req = rec.approvals[0]
+    assert req["agent"] and req["session"] == "hey-claude" and req["title"] == "Click on the screen"
+    assert req["detail"] == "at 10, 20" and req["note"] and not req["dangerous"]
+    assert [a["id"] for a in req["actions"]] == ["allow", "deny"]          # no "Always" for screen control
+    assert hub.agent_pending() and hub.sessions == {} and hub.snapshot() == []
+    assert hub.decide(req["id"], "allow")
+    th.join(2)
+    assert conn.replies == [{"reply": "allow"}] and not hub.pending
+    # the rest of the request: other screen tools go through without a card
+    conn2 = FakeConn()
+    agent_permission(hub, conn2, "mcp__windows-mcp__Type", {"text": "hello"}).join(2)
+    assert conn2.replies == [{"reply": "allow"}] and len(rec.approvals) == 1
+    # ...but not a dangerous one, and not after the request ended
+    conn3 = FakeConn()
+    th = agent_permission(hub, conn3, "mcp__windows-mcp__Process", {"mode": "kill", "name": "chrome"})
+    assert wait_for(lambda: len(rec.approvals) == 2)
+    assert rec.approvals[1]["dangerous"] and rec.approvals[1]["title"] == "Close chrome"
+    hub.decide(rec.approvals[1]["id"], "deny")
+    th.join(2)
+    assert conn3.replies == [{"reply": "deny", "message": S.AGENT_DENY}]
+    hub.agent_turn_done()
+    conn4 = FakeConn()
+    th = agent_permission(hub, conn4, "mcp__windows-mcp__Type", {"text": "x"})
+    assert wait_for(lambda: len(rec.approvals) == 3)
+    hub.agent_turn_done()                                  # the request ended with the card up: denied
+    th.join(2)
+    assert conn4.replies == [{"reply": "deny", "message": S.AGENT_MOVED_ON}]
+    assert hub.snapshot() == [] and all(r == [] for r in rec.rows)       # never a session row
+
+
+def test_agent_timeout_denies_and_tells():
+    clock = [0.0]
+    told = []
+    hub, rec = make_hub({"approval_timeout_s": 10}, clock=lambda: clock[0])
+    hub.on_agent_timeout = told.append
+    conn = FakeConn()
+    th = agent_permission(hub, conn, "mcp__claude_ai_Gmail__create_draft", {"to": "a@b.c"})
+    assert wait_for(lambda: rec.approvals)
+    clock[0] = 11.0
+    th.join(2)
+    assert conn.replies == [{"reply": "deny", "message": S.AGENT_TIMEOUT}]
+    assert [r["id"] for r in told] == [rec.approvals[0]["id"]] and not hub.pending
+
+
+def test_agent_always_is_kept_by_the_app():
+    kept = []
+    allowed = set()
+    hub, rec = make_hub()
+    hub.on_agent_always = lambda tool: (kept.append(tool), allowed.add(tool))
+    hub.agent_allowed = lambda tool: tool in allowed
+    conn = FakeConn()
+    th = agent_permission(hub, conn, "mcp__claude_ai_Spotify__search", {"query": "x"})
+    assert wait_for(lambda: rec.approvals)
+    assert [a["id"] for a in rec.approvals[0]["actions"]] == ["allow", "deny", "always"]
+    hub.decide(rec.approvals[0]["id"], "always")
+    th.join(2)
+    assert conn.replies == [{"reply": "allow"}]            # never "always": no settings file gets a rule
+    assert kept == ["mcp__claude_ai_Spotify__search"]
+    conn2 = FakeConn()
+    agent_permission(hub, conn2, "mcp__claude_ai_Spotify__search", {"query": "y"}).join(2)
+    assert conn2.replies == [{"reply": "allow"}] and len(rec.approvals) == 1
+
+
+@cases("tool,inp,always", [
+    ("Bash", {"command": "dir"}, False),                       # too broad to keep
+    ("Write", {"file_path": "D:\\coding\\hey-claude\\x.txt", "content": "x"}, False),
+    ("WebFetch", {"url": "https://example.com"}, True),
+    ("mcp__info__x", {}, True),
+])
+def test_agent_always_only_for_narrow_tools(tool, inp, always):
+    hub, rec = make_hub()
+    conn = FakeConn()
+    th = agent_permission(hub, conn, tool, inp)
+    assert wait_for(lambda: rec.approvals)
+    assert ("always" in [a["id"] for a in rec.approvals[0]["actions"]]) == always
+    hub.decide(rec.approvals[0]["id"], "deny")
+    th.join(2)
+
+
+def test_telegram_send_card_shows_the_draft_and_needs_a_click():
+    hub, rec = make_hub()
+    conn = FakeConn()
+    th = agent_permission(hub, conn, "mcp__telegram__telegram_send_message",
+                          {"chat": "@alex", "message": "Running ten minutes late, sorry!"})
+    assert wait_for(lambda: rec.approvals)
+    req = rec.approvals[0]
+    assert req["title"] == "Send a Telegram message to @alex"
+    assert req["detail"] == "Running ten minutes late, sorry!" and req["prose"]
+    assert req["dangerous"] and [a["id"] for a in req["actions"]] == ["allow", "deny"]
+    assert hub.voice("yes allow it") == (True, "That one needs a click on the island.")
+    assert hub.pending                                   # still up
+    hub.decide(req["id"], "allow")
+    th.join(2)
+    assert conn.replies == [{"reply": "allow"}]
+    t, d = S.agent_card("mcp__telegram__telegram_send_file", {"chat": "me", "file_path": "C:\\a\\b.pdf", "caption": "hi"})
+    assert t == "Send a file on Telegram to me" and d == "b.pdf · hi"
+
+
+def test_agent_voice_answers():
+    hub, rec = make_hub()
+    conn = FakeConn()
+    th = agent_permission(hub, conn, "mcp__windows-mcp__App", {"mode": "launch", "name": "Spotify"})
+    assert wait_for(lambda: rec.approvals)
+    assert rec.approvals[0]["title"] == "Open Spotify"
+    assert hub.voice_applies("yes") and hub.voice("yes, allow that") == (True, "Allowed.")
+    th.join(2)
+    assert conn.replies == [{"reply": "allow"}]
+    hub.agent_turn_done()
+    conn2 = FakeConn()
+    th = agent_permission(hub, conn2, "mcp__windows-mcp__Shortcut", {"shortcut": "ctrl+s"})
+    assert wait_for(lambda: len(rec.approvals) == 2)
+    assert hub.voice("I'll do it in the terminal") == (True, "Denied.")    # no terminal: it's a deny
+    th.join(2)
+    assert conn2.replies == [{"reply": "deny", "message": S.AGENT_DENY}]
+
+
+def test_agent_moved_on_and_other_agent_events():
+    hub, rec = make_hub()
+    conn = FakeConn()
+    th = agent_permission(hub, conn, "mcp__windows-mcp__Scroll", {"direction": "down"})
+    assert wait_for(lambda: rec.approvals)
+    assert hub.agent_moved_on() and not hub.agent_moved_on()
+    th.join(2)
+    assert conn.replies == [{"reply": "deny", "message": S.AGENT_MOVED_ON}]
+    hub.handle({"event": "PreToolUse", "agent": True, "payload": {"session_id": "a", "tool_name": "Read"}}, None)
+    assert hub.sessions == {}
+
+
+@cases("tool,title", [
+    ("mcp__claude_ai_Spotify__search", "Spotify · search"),
+    ("mcp__claude_ai_Gmail__create_draft", "Gmail · create draft"),
+    ("mcp__telegram__telegram_mark_read", "Telegram · mark read"),
+    ("Bash", "Runs · dir"),
+])
+def test_agent_card_titles(tool, title):
+    assert S.agent_card(tool, {"command": "dir"} if tool == "Bash" else {})[0] == title
+
+
+@cases("tool,inp,danger", [
+    ("mcp__windows-mcp__Click", {"loc": [1, 2]}, False),
+    ("mcp__windows-mcp__Type", {"text": "rm -rf /"}, False),     # typing is approved per request, not a command
+    ("mcp__windows-mcp__Process", {"mode": "list"}, False),
+    ("mcp__windows-mcp__Process", {"mode": "kill", "pid": 4}, True),
+    ("mcp__windows-mcp__FileSystem", {"mode": "read", "path": "a"}, False),
+    ("mcp__windows-mcp__FileSystem", {"mode": "delete", "path": "a"}, True),
+    ("mcp__windows-mcp__App", {"mode": "launch", "name": "Notepad"}, False),
+    ("mcp__windows-mcp__App", {"mode": "launch_executable", "executable": "x.exe"}, True),
+    ("mcp__telegram__telegram_send_message", {}, True),
+    ("mcp__telegram__telegram_download_media", {}, False),
+    ("Bash", {"command": "git push"}, True),
+])
+def test_agent_danger(tool, inp, danger):
+    assert S.agent_danger(tool, inp, "D:\\coding\\hey-claude") is danger
+
+
+def test_screen_tools_and_gate():
+    from heyclaude import brain as B
+    assert S.is_screen_tool("mcp__windows-mcp__Click") and not S.is_screen_tool("mcp__windows-mcp__Wait")
+    assert not S.is_screen_tool("mcp__windows__set_volume")
+    assert set(B.WINDOWS_MCP_PASSIVE) <= set(B.WINDOWS_MCP_READ_ONLY) and set(S.SCREEN_PASSIVE) == set(B.WINDOWS_MCP_READ_ONLY)
+    acting = ["Click", "Type", "Scroll", "Move", "Shortcut", "App", "Scrape", "MultiSelect", "MultiEdit",
+              "Clipboard", "Notification", "Process", "FileSystem", "PowerShell", "Registry"]
+    kept, dropped = B.gate_allowed_tools([f"mcp__windows-mcp__{n}" for n in acting + ["Wait", "WaitFor", "Snapshot"]])
+    assert kept == ["mcp__windows-mcp__Wait", "mcp__windows-mcp__WaitFor", "mcp__windows-mcp__Snapshot"]
+    assert len(dropped) == len(acting)
+
+
+def test_child_env_agent_mark():
+    from heyclaude.claude_cli import child_env
+    assert child_env({}, internal="agent")["HEYCLAUDE_INTERNAL"] == "agent"
+    assert "HEYCLAUDE_INTERNAL" not in child_env({"HEYCLAUDE_INTERNAL": "agent"})
+
+
+def test_agent_approval_settings_file(tmp_path):
+    from unittest import mock
+    from heyclaude import brain as B
+    from heyclaude import config as C
+    ag = B.Agent.__new__(B.Agent)
+    ag.cfg = {"agent": {}}
+    assert ag._approval_settings() is None                  # no hooks section (hand-made test configs)
+    ag.cfg = {"agent": {}, "hooks": {"enabled": True, "approvals": False}}
+    assert ag._approval_settings() is None
+    ag.cfg = {"agent": {}, "hooks": {"enabled": True, "approvals": True}}
+    with mock.patch.object(C, "STATE_DIR", tmp_path), \
+            mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path / "local")}):
+        f = ag._approval_settings()
+        if os.name != "nt":
+            assert f is None
+            return
+        data = json.load(open(f, encoding="utf-8"))
+        cmd = data["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
+        assert cmd.endswith(" PermissionRequest agent") and (tmp_path / "local" / "hey-claude" / "hook" /
+                                                             "heyclaude-hook.py").is_file()
+
+
+def test_config_add_to_list(tmp_path):
+    from heyclaude import config as C
+    p = tmp_path / "config.yaml"
+    p.write_text("agent:\n  model: sonnet\n  allowed_tools:\n  - Read\nwake:\n  threshold: 0.5\n", encoding="utf-8")
+    bdir = tmp_path / "bak"
+    assert C.add_to_list("agent.allowed_tools", "mcp__x__y", p, backup_dir=bdir) is not None
+    assert C.add_to_list("agent.allowed_tools", "mcp__x__y", p, backup_dir=bdir) is None    # once
+    import yaml
+    data = yaml.safe_load(p.read_text(encoding="utf-8"))
+    assert data["agent"]["allowed_tools"] == ["Read", "mcp__x__y"] and data["agent"]["model"] == "sonnet"
+    assert data["wake"]["threshold"] == 0.5
+    (b,) = list(bdir.iterdir())
+    assert "mcp__x__y" not in b.read_text(encoding="utf-8")
+
+
+def test_assistant_answers_an_agent_card_while_its_turn_runs(tmp_path):
+    """A spoken "yes" while the agent waits on a card is handled at once (the agent's
+    turn holds the conversation lock); another request denies the card instead."""
+    import types
+    from heyclaude.assistant import Assistant
+    a = Assistant.__new__(Assistant)
+    cfgp = tmp_path / "config.yaml"
+    cfgp.write_text("agent:\n  allowed_tools:\n  - Read\n", encoding="utf-8")
+    a.cfg = {"hooks": {"voice_approvals": True}, "agent": {"allowed_tools": ["Read"]}}
+    a.config_path = str(cfgp)
+    hub, rec = make_hub()
+    a.hub = hub
+    said = []
+    a.speaker = types.SimpleNamespace(announce=said.append)
+    a.conv_lock = threading.Lock()
+    a.gen = 5
+    conn = FakeConn()
+    th = agent_permission(hub, conn, "mcp__claude_ai_Spotify__search", {"query": "x"})
+    assert wait_for(lambda: rec.approvals)
+    assert a.request("yes, allow it") is None and a.gen == 5 and said == ["Allowed."]
+    th.join(2)
+    assert conn.replies == [{"reply": "allow"}]
+    conn2 = FakeConn()
+    th = agent_permission(hub, conn2, "mcp__windows-mcp__Click", {"loc": [1, 1]})
+    assert wait_for(lambda: len(rec.approvals) == 2)
+    assert a._agent_approval_reply("what time is it") is False       # a new request: the card goes
+    th.join(2)
+    assert conn2.replies == [{"reply": "deny", "message": S.AGENT_MOVED_ON}]
+    # "Always": allowed at once, and saved to config.yaml (with a backup)
+    from unittest import mock
+    from heyclaude import config as C
+    with mock.patch.object(C, "STATE_DIR", tmp_path):
+        a._agent_always("mcp__claude_ai_Spotify__search")
+    assert a._agent_allowed("mcp__claude_ai_Spotify__search") and not a._agent_allowed("mcp__x__PowerShell")
+    assert "mcp__claude_ai_Spotify__search" in cfgp.read_text(encoding="utf-8")
+    assert list((tmp_path / "config-backups").iterdir())
+
+
 if __name__ == "__main__":
     import pathlib
     import tempfile

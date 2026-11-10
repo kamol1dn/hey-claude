@@ -6,8 +6,9 @@ import QtQuick
 // itself. `dangerous` adds a red "needs a click" marker (voice can't approve it).
 //
 //   [icon]  Title ................................. [! needs a click]
-//           detail (the command or file, monospace, 2 lines at most)
-//           session · 1:42                     [Deny] [Always] [Allow]
+//           detail (the command or file, monospace, 2 lines at most;
+//                   `prose`: a message draft, in text type, 4 lines)
+//           session · note · 1:42              [Deny] [Always] [Allow]
 Item {
     id: card
     objectName: "approvalCard"
@@ -71,8 +72,9 @@ Item {
             objectName: "approvalDetail"
             x: 6; y: 4; width: parent.width - 12
             text: card.req.detail || ""; color: "#CFC9C3"
-            wrapMode: Text.WrapAnywhere; maximumLineCount: 2; elide: Text.ElideRight
-            font.family: "Consolas"; font.pointSize: 8
+            wrapMode: card.req.prose ? Text.WrapAtWordBoundaryOrAnywhere : Text.WrapAnywhere
+            maximumLineCount: card.req.prose ? 4 : 2; elide: Text.ElideRight
+            font.family: card.req.prose ? "Segoe UI Variable Text" : "Consolas"; font.pointSize: card.req.prose ? 9 : 8
         }
     }
     Item {
@@ -83,7 +85,8 @@ Item {
             objectName: "approvalSession"
             anchors.verticalCenter: parent.verticalCenter
             width: Math.max(10, parent.width - buttons.width - 10)
-            text: (card.req.session || "") + (card.leftS > 0 ? (card.req.session ? "  ·  " : "") + card.clock(card.leftS) : "")
+            text: [card.req.session || "", card.req.note || "", card.leftS > 0 ? card.clock(card.leftS) : ""]
+                  .filter(function (x) { return x !== "" }).join("  ·  ")
             color: "#8A847F"; elide: Text.ElideRight
             font.family: "Segoe UI Variable Text"; font.pointSize: 8
         }

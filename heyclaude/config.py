@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import os
 import shutil
+import time
 from pathlib import Path
 
 import yaml
@@ -152,6 +153,28 @@ def save_keys(updates: dict, path: str | os.PathLike | None = None) -> Path:
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, user)
     return user
+
+
+def add_to_list(key: str, value, path: str | os.PathLike | None = None, backup_dir=None) -> Path | None:
+    """Append `value` to the list at dotted `key` in config.yaml, keeping the rest of
+    the file's settings (M7: an approval's "Always" for the tool agent). The file
+    as it was is copied first to state/config-backups/. None when it was already there."""
+    user = ensure_user_config(path)
+    with open(user, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    d = data
+    *parents, leaf = key.split(".")
+    for k in parents:
+        d = d.get(k) if isinstance(d.get(k), dict) else {}
+    cur = d.get(leaf) if isinstance(d, dict) else None
+    lst = list(cur) if isinstance(cur, list) else []
+    if value in lst:
+        return None
+    bdir = Path(backup_dir) if backup_dir else STATE_DIR / "config-backups"
+    bdir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copyfile(user, bdir / f"{user.name}.{stamp}.bak")
+    return save_keys({key: lst + [value]}, path)
 
 
 def diff(old: dict, new: dict, prefix: str = "") -> list[str]:

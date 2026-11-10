@@ -23,7 +23,12 @@ Rules (docs/m7-hooks-notes.md "Relay rules"):
 - The parent process (the shell Claude Code started) is watched every 100 ms;
   when it dies (the user answered in the terminal) the relay exits at once, so
   the app's pipe read sees EOF.
-- ``HEYCLAUDE_INTERNAL`` set: exit 0 at once (hey-claude's own claude runs).
+- ``HEYCLAUDE_INTERNAL`` set: exit 0 at once (hey-claude's own claude runs), with one
+  exception: hey-claude's tool agent runs with ``HEYCLAUDE_INTERNAL=agent`` and its own
+  ``--settings`` hook ``... heyclaude-hook.py PermissionRequest agent``. That one call is
+  forwarded, marked ``"agent": true``, so the agent's approvals show on the island.
+  The global hooks (no ``agent`` argument) still exit at once for it, so a request is
+  forwarded once whether or not the global hooks are installed.
 - ``HEYCLAUDE_PIPE``: overrides the pipe name, for tests. Only names starting
   with ``\\\\.\\pipe\\hey-claude-`` are accepted.
 
@@ -154,12 +159,14 @@ def env_context(environ=None):
     return out
 
 
-def build_message(event, payload, environ=None):
+def build_message(event, payload, environ=None, agent=False):
     """The one line (bytes, '\\n'-terminated) the relay sends to the app."""
     def line(p, t):
         msg = {"v": 1, "event": event, "pid": os.getpid(), "ppid": os.getppid(),
                "env": env_context(environ), "payload": p, "truncated": t,
                "wants_reply": event == "PermissionRequest"}
+        if agent:
+            msg["agent"] = True
         return json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode("utf-8", "replace") + b"\n"
 
     p, t = sanitize(event, payload)
@@ -496,14 +503,14 @@ def _parent_watch(ppid):
         return None
 
 
-def _work(event, raw, connect_fn, deadline, state):
+def _work(event, raw, connect_fn, deadline, state, agent=False):
     """Worker thread: parse, send, (maybe) receive; leaves output bytes in state."""
     if raw[:3] == b"\xef\xbb\xbf":
         raw = raw[3:]
     payload = json.loads(raw.decode("utf-8"))
     if not isinstance(payload, dict):
         return
-    data = build_message(event, payload)
+    data = build_message(event, payload, agent=agent)
     if state.get("stop"):
         return
     client = connect_fn(pipe_name(), CONNECT_TIMEOUT)
@@ -532,12 +539,16 @@ def main(argv=None, stdin_bytes=None, stdout=None, connect=None):
     code, always 0. stdin_bytes / stdout (a binary stream) / connect(name, timeout) can be
     injected for tests."""
     try:
-        if os.environ.get("HEYCLAUDE_INTERNAL"):
-            return 0
         argv = sys.argv[1:] if argv is None else argv
         event = argv[0] if argv else ""
         if not (isinstance(event, str) and 0 < len(event) <= 64 and event.isalnum()):
             return 0
+        agent = len(argv) > 1 and argv[1] == "agent"
+        internal = os.environ.get("HEYCLAUDE_INTERNAL")
+        if internal or agent:
+            # only the tool agent's own approval hook gets through (see the module notes)
+            if not (agent and internal == "agent" and event == "PermissionRequest"):
+                return 0
         if sys.platform != "win32" and connect is None:
             return 0
         connect_fn = connect or globals()["connect"]
@@ -548,7 +559,7 @@ def main(argv=None, stdin_bytes=None, stdout=None, connect=None):
         def run():
             try:
                 raw = stdin_bytes if stdin_bytes is not None else sys.stdin.buffer.read()
-                _work(event, raw, connect_fn, deadline, state)
+                _work(event, raw, connect_fn, deadline, state, agent)
             except BaseException:
                 state.pop("out", None)
 

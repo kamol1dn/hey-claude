@@ -113,6 +113,17 @@ def hook_command(python, relay, event: str) -> str:
     return f'"{_fwd(python)}" -I -S "{_fwd(relay)}" {event}'
 
 
+def agent_hook_settings(python=None, relay=None) -> dict:
+    """A --settings file's content for hey-claude's tool agent: just its own
+    PermissionRequest hook (the relay with the "agent" argument), so the agent's
+    approvals reach the island whether or not the global hooks are installed. The
+    agent runs with HEYCLAUDE_INTERNAL=agent; see heyclaude_hook.py."""
+    relay = relay or (relay_dir() / RELAY_NAME)
+    cmd = hook_command(python or hook_python(), relay, "PermissionRequest") + " agent"
+    return {"hooks": {"PermissionRequest": [{"matcher": "*", "hooks": [
+        {"type": "command", "command": cmd, "timeout": EVENTS["PermissionRequest"]}]}]}}
+
+
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 

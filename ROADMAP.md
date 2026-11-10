@@ -861,6 +861,18 @@ Live (CLI 2.1.317, hooks installed with the user's OK):
   answers format: question text -> string, multi-select comma-separated.
 - Jump found and raised the window in Windows Terminal (default terminal and wt.exe) and classic conhost.
 - Uninstall planned against the real file reproduces the original bytes (same SHA-256).
+**hey-claude's own agent asks too (2026-11-10).** The warm tool agent used to refuse anything off
+`agent.allowed_tools` with no prompt (`HEYCLAUDE_INTERNAL` made the relay exit, `--permission-prompts none`,
+and Windows-MCP's acting tools were dropped). Now it runs with `HEYCLAUDE_INTERNAL=agent` and its own
+`--settings` PermissionRequest hook (the relay with an `agent` argument; the global hooks still exit for it),
+so its approvals reach the island without a session row: Allow / Deny / Always by click or voice (it asks
+aloud and listens once without the wake word), dangerous ones by click, a timeout denies with "I didn't get
+an answer". Windows-MCP's acting tools are offered through approvals (one OK covers the rest of the request;
+kill / file changes / running an .exe need a click each); Telegram sends always ask, with the draft and
+recipient; "Always" is kept in config.yaml with a backup. Checked: PermissionRequest fires for the agent's
+stream-json process with its flags; a dry run with the real agent (the user's config and MCP servers), the
+real relay and a test pipe gave one screen card for a move + scroll, a denied Telegram send with its draft on
+the card, an "Always" for the Spotify connector's search, and a timeout that denied.
 Not built: automatic handoff for "serious" tasks, per-task worktrees / "merge it", toasts and Telegram on
 finish, the dashboard window, the `--permission-prompt-tool` fallback (not needed: hooks cover `-p`).
 Seen live: two cards at once (a session's Bash approval plus another session's question) stack, and it's

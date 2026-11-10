@@ -86,10 +86,12 @@ class SessionsTab:
         self.cb_enabled = QCheckBox("Watch Claude Code sessions")
         win._row(f, "hooks.enabled", "", self.cb_enabled)
         self.cb_approvals = QCheckBox("Ask on the island (Allow / Deny / Always)")
+        self.cb_approvals.setToolTip("hey-claude's own agent asks here too, for any tool off its allowed list "
+                                     "(screen control, sending on Telegram...). Off: those are refused.")
         win._row(f, "hooks.approvals", "", self.cb_approvals)
         self.sp_timeout = QSpinBox(minimum=10, maximum=108, suffix=" s")
         self.sp_timeout.setToolTip("After this the card goes away and Claude Code asks in the terminal "
-                                   "(a headless task is denied). At most 108 s, under the hook's own limit.")
+                                   "(a headless task or hey-claude's own agent: denied). At most 108 s, under the hook's own limit.")
         win._row(f, "hooks.approval_timeout_s", "Then the terminal asks after", self.sp_timeout)
         self.cb_voice = QCheckBox("Answer by voice (\"yes, allow that\"; dangerous ones need a click)")
         win._row(f, "hooks.voice_approvals", "", self.cb_voice)

@@ -335,6 +335,37 @@ def test_a_dangerous_approval_card_and_approval_needed():
     _reset(isl)
 
 
+def test_an_agent_card_shows_and_clicks_while_thinking():
+    """hey-claude's own agent asks mid-turn (the island is "thinking"): the card must
+    be up and clickable then, with its note, and a Telegram draft in text type."""
+    isl = _island()
+    _reset(isl)
+    b = isl.bridge_
+    got = []
+    isl.approval_decided.connect(lambda i, a: got.append((i, a)))
+    b.state.emit("thinking", "checking with your tools…")
+    req = {"id": "ag1", "title": "Click on the screen", "detail": "at 10, 20", "tool": "mcp__windows-mcp__Click",
+           "session": "hey-claude", "session_id": "", "agent": True, "dangerous": False, "kind": "permission",
+           "note": "Allow covers the rest of this request", "prose": False,
+           "actions": [{"id": "allow", "label": "Allow", "primary": True}, {"id": "deny", "label": "Deny"}],
+           "expires": time.time() + 100}
+    b.approval.emit(req)
+    _spin(600)
+    assert isl.island_state == "thinking"
+    r = _rect(isl, "action:allow", "ag1")
+    assert r is not None and r["w"] > 0 and r["h"] > 0
+    assert _rect(isl, "approvalSession", "ag1") is not None
+    _click(isl, r)
+    assert got == [("ag1", "allow")], got
+    tg = dict(req, id="ag2", title="Send a Telegram message to @alex", tool="mcp__telegram__telegram_send_message",
+              detail="Running ten minutes late, sorry! " * 4, prose=True, dangerous=True, note="")
+    b.approval.emit(tg)
+    _spin(500)
+    assert _rect(isl, "dangerMarker", "ag2") is not None and _rect(isl, "approvalDetail", "ag2") is not None
+    b.approval_withdrawn.emit("ag2")
+    _reset(isl)
+
+
 def test_question_card_single_and_multi_select():
     isl = _island()
     _reset(isl)

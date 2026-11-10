@@ -100,6 +100,7 @@ def main(argv=None, harness=None):
                      simulate=args.simulate, text_mode=args.text,
                      exit_when_done=args.exit, mic_factory=getattr(harness, "mic_factory", None))
     asst.on_listening = lambda on, until: bridge.listening.emit(on, float(until or 0))
+    asst.config_path = args.config                # M7: an agent approval's "Always" is saved there
     state = {"restart": False}
 
     def restart():

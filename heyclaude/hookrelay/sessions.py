@@ -19,6 +19,12 @@ PermissionRequest:
 Replies to the relay are only `allow` / `deny` / `always` / `answers` / `pass`;
 the relay builds Claude Code's JSON. Voice is a convenience: anything flagged
 dangerous needs a click.
+
+hey-claude's own tool agent asks here too (messages marked "agent"): its cards
+never make a session row; a timeout or Deny denies (there's no terminal to fall
+back to); "Always" is kept by the app (on_agent_always) and answered as a plain
+allow; and allowing one screen-control tool (Windows-MCP) covers the rest of
+that request (agent_turn_done ends it).
 """
 from __future__ import annotations
 
@@ -141,6 +147,118 @@ def is_dangerous(tool: str, inp: dict, cwd: str = "") -> bool:
     return False
 
 
+# ----------------------------------------------------------------- hey-claude's own agent
+AGENT_LABEL = "hey-claude"
+WINDOWS_MCP = "mcp__windows-mcp__"
+# Windows-MCP tools that only look or wait: never asked about (brain.WINDOWS_MCP_PASSIVE too)
+SCREEN_PASSIVE = ("Snapshot", "Screenshot", "DisplayInventory", "Wait", "WaitFor")
+AGENT_DENY = ("The user denied this on hey-claude's island. Don't try it another way; say in a few "
+              "words that you didn't do it.")
+AGENT_TIMEOUT = ("The user didn't answer hey-claude's approval card in time and was already told so. "
+                 "Don't retry it or try another way; reply with just: Okay.")
+AGENT_MOVED_ON = "The user moved on to another request. Stop here and reply with just: Okay."
+_TRUE = (True, "true", "True")
+# built-in tools whose "Always" is narrow enough to keep (an MCP tool is one exact tool)
+AGENT_ALWAYS_OK = ("Read", "Glob", "Grep", "WebSearch", "WebFetch", "NotebookRead")
+
+
+def is_screen_tool(tool: str) -> bool:
+    """A Windows-MCP tool that acts on the screen or the PC (clicks, typing, apps...)."""
+    return tool.startswith(WINDOWS_MCP) and tool[len(WINDOWS_MCP):] not in SCREEN_PASSIVE
+
+
+def agent_danger(tool: str, inp: dict, cwd: str = "") -> bool:
+    """is_dangerous for the agent's tools, with Windows-MCP's modes: killing a process,
+    changing files and running an executable need a click; clicking and typing don't."""
+    inp = inp or {}
+    if tool.startswith(WINDOWS_MCP):
+        name, mode = tool[len(WINDOWS_MCP):], str(inp.get("mode") or "").lower()
+        if name == "Process":
+            return mode == "kill"
+        if name == "FileSystem":
+            return mode in ("write", "copy", "move", "delete")
+        if name == "App":
+            return mode == "launch_executable"
+        return False
+    return is_dangerous(tool, inp, cwd)
+
+
+def _loc(inp: dict) -> str:
+    if inp.get("label") not in (None, ""):
+        return f"element {inp['label']}"
+    loc = inp.get("loc")
+    if isinstance(loc, (list, tuple)) and len(loc) >= 2:
+        return f"at {loc[0]}, {loc[1]}"
+    return str(loc or "")
+
+
+def agent_card(tool: str, inp: dict) -> tuple[str, str]:
+    """(title, detail) for an agent approval card, in words."""
+    inp = inp or {}
+    if tool.startswith("mcp__telegram__"):
+        name = tool.split("__")[-1]
+        chat = _short(inp.get("chat") or "?", 40)
+        if name == "telegram_send_message":
+            return f"Send a Telegram message to {chat}", _short(inp.get("message"), 600)
+        if name == "telegram_send_file":
+            cap = _short(inp.get("caption"), 300)
+            return f"Send a file on Telegram to {chat}", _base(inp.get("file_path")) + (f" · {cap}" if cap else "")
+    if tool.startswith(WINDOWS_MCP):
+        name, mode = tool[len(WINDOWS_MCP):], str(inp.get("mode") or "")
+        if name == "Click":
+            n = {0: "Hover", 2: "Double-click"}.get(inp.get("clicks"), "Click")
+            btn = inp.get("button") if inp.get("button") not in (None, "left") else ""
+            return f"{n} on the screen", " ".join(x for x in (_loc(inp), f"({btn} button)" if btn else "") if x)
+        if name == "Type":
+            enter = " then Enter" if inp.get("press_enter") in _TRUE else ""
+            return "Type on the screen", f"\u201c{_short(inp.get('text'), 300)}\u201d{enter}"
+        if name == "Shortcut":
+            return f"Press {_short(inp.get('shortcut'), 40)}", ""
+        if name == "Scroll":
+            return f"Scroll {inp.get('direction') or 'down'}", _loc(inp)
+        if name == "Move":
+            return ("Drag on the screen" if inp.get("drag") in _TRUE else "Move the mouse"), _loc(inp)
+        if name == "App":
+            verb = {"launch": "Open", "switch": "Switch to", "resize": "Resize",
+                    "launch_executable": "Run"}.get(mode or "launch", "Use")
+            what = inp.get("name") or inp.get("executable") or "an app"
+            args = inp.get("args")
+            return f"{verb} {_short(what, 50)}", _short(" ".join(map(str, args)) if isinstance(args, list) else args, 200)
+        if name == "Clipboard":
+            if mode == "set":
+                return "Copy text to the clipboard", _short(inp.get("text"), 300)
+            return "Read the clipboard", ""
+        if name == "Notification":
+            return "Show a notification", _short(f"{inp.get('title') or ''}: {inp.get('message') or ''}", 300)
+        if name == "Process":
+            if mode == "kill":
+                return f"Close {_short(inp.get('name') or inp.get('pid'), 40)}", "force" if inp.get("force") in _TRUE else ""
+            return "List running programs", ""
+        if name == "FileSystem":
+            verb = {"read": "Read", "write": "Write", "copy": "Copy", "move": "Move", "delete": "Delete",
+                    "list": "List", "search": "Search", "info": "Look at"}.get(mode, "Use")
+            dest = inp.get("destination")
+            return f"{verb} a file", _short(str(inp.get("path") or "") + (f" \u2192 {dest}" if dest else ""), 300)
+        if name == "Scrape":
+            return "Read a web page", _short(inp.get("url"), 200)
+        if name == "MultiSelect":
+            return "Select several items on the screen", ""
+        if name == "MultiEdit":
+            return "Fill in several fields on the screen", ""
+        return f"Use the screen \u00b7 {name}", _short(json.dumps(inp, ensure_ascii=False), 200)
+    detail = str(inp.get("command") or inp.get("file_path") or inp.get("url") or target_of(tool, inp) or "")
+    if tool.startswith("mcp__") and tool.count("__") >= 2:
+        # "Spotify · search", "Gmail · create draft" (not "Uses · claude_ai_Spotify search")
+        server, name = tool[5:].split("__", 1)
+        server = re.sub(r"^claude_ai_", "", server).replace("_", " ").strip() or server
+        low = server.lower().replace(" ", "_")
+        if name.lower().startswith(low + "_"):
+            name = name[len(low) + 1:]
+        title = f"{server[:1].upper() + server[1:]} · {name.replace('_', ' ')}"
+        return title, _short(detail or (json.dumps(inp, ensure_ascii=False) if inp else ""), 300)
+    return ticker(tool, inp), _short(detail, 300)
+
+
 # ----------------------------------------------------------------- voice
 def _norm(text: str) -> str:
     t = re.sub(r"[^\w\s']", " ", (text or "").lower())
@@ -246,6 +364,8 @@ class Pending:
     acked: threading.Event = field(default_factory=threading.Event)
     done: threading.Event = field(default_factory=threading.Event)
     result: dict | None = None
+    action: str = ""
+    agent: bool = False
 
 
 def read_title(transcript: str, tail_bytes: int = 256 * 1024) -> str:
@@ -281,6 +401,12 @@ class SessionHub:
         self.on_approval = on_approval or (lambda req: None)
         self.on_withdraw = on_withdraw or (lambda ap_id: None)
         self.on_handoff = None                # callback(session) when a queued handoff can run
+        # hey-claude's own agent (messages marked "agent"):
+        self.agent_allowed = None             # (tool) -> bool: allowed since it started ("Always")
+        self.on_agent_always = None           # callback(tool): keep it allowed (config.yaml)
+        self.on_agent_timeout = None          # callback(req): nobody answered the card
+        self.agent_cwd = ""
+        self._screen_granted = False          # a screen-control tool was allowed in this agent request
         self.window_finder = window_finder    # (pid, cwd) -> hwnd | None
         self.clock = clock
         self.sessions: dict[str, Session] = {}
@@ -434,6 +560,12 @@ class SessionHub:
         event = str(msg.get("event") or "")
         payload = msg.get("payload") or {}
         if not isinstance(payload, dict):
+            return
+        if msg.get("agent"):                       # hey-claude's own agent: approvals only, no session row
+            if event == "PermissionRequest":
+                self._agent_permission(payload, msg, conn)
+            elif msg.get("wants_reply") and conn is not None:
+                conn.reply({"reply": "pass"})
             return
         s = self._session(payload, msg, conn)
         if s is None:
@@ -598,6 +730,94 @@ class SessionHub:
         if ap.result is not None:
             reply(ap.result)
 
+    def _agent_permission(self, payload: dict, msg: dict, conn):
+        def reply(obj):
+            if conn is not None:
+                conn.reply(obj)
+
+        tool = str(payload.get("tool_name") or "")
+        inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        if not self.approvals_on or tool in ("", "AskUserQuestion"):
+            reply({"reply": "pass"})                    # no output: the agent's own rules deny it
+            return
+        danger = agent_danger(tool, inp, str(payload.get("cwd") or self.agent_cwd))
+        screen = is_screen_tool(tool)
+        if not danger and ((screen and self._screen_granted)
+                           or (not screen and self.agent_allowed is not None and self.agent_allowed(tool))):
+            reply({"reply": "allow"})
+            return
+        title, detail = agent_card(tool, inp)
+        actions = [{"id": "allow", "label": "Allow", "primary": not danger}, {"id": "deny", "label": "Deny"}]
+        if not danger and not screen and (tool.startswith("mcp__") or tool in AGENT_ALWAYS_OK):
+            actions.append({"id": "always", "label": "Always"})     # never for Bash / edits: too broad
+        req = {"id": "ap-" + uuid.uuid4().hex[:10], "session": AGENT_LABEL, "session_id": "", "agent": True,
+               "tool": tool, "kind": "permission", "dangerous": danger, "title": title, "detail": detail,
+               "actions": actions, "expires": self.clock() + self.timeout_s,
+               "note": "Allow covers the rest of this request" if screen and not danger else "",
+               "prose": tool.startswith("mcp__telegram__")}
+        ap = Pending(id=req["id"], session="", tool=tool, target=target_of(tool, inp), req=req,
+                     dangerous=danger, agent=True)
+        with self.lock:
+            if len(self.pending) >= MAX_PENDING:
+                ap = None
+            else:
+                self.pending[req["id"]] = ap
+        if ap is None:
+            reply({"reply": "pass"})
+            return
+        self.on_approval(req)
+        if not ap.acked.wait(ACK_S):                       # the island never showed it
+            self._settle(ap, {"reply": "pass"})
+            reply({"reply": "pass"})
+            return
+        deadline = self.clock() + self.timeout_s
+        while not ap.done.wait(0.1):
+            if conn is not None and conn.closed():          # the agent's process went away
+                self._settle(ap, None)
+                return
+            if self._stop.is_set():
+                self._settle(ap, {"reply": "deny", "message": AGENT_DENY})
+                break
+            if self.clock() >= deadline:
+                if self._settle(ap, {"reply": "deny", "message": AGENT_TIMEOUT}) and self.on_agent_timeout:
+                    try:
+                        self.on_agent_timeout(req)
+                    except Exception as e:
+                        print(f"[sessions] agent timeout: {e}")
+                break
+        res = ap.result
+        if res is None:
+            return
+        if res.get("reply") == "always":
+            res = {"reply": "allow"}                       # kept by the app, not in a settings file
+            if self.on_agent_always is not None:
+                try:
+                    self.on_agent_always(tool)
+                except Exception as e:
+                    print(f"[sessions] keeping {tool} allowed failed: {e}")
+        if res.get("reply") == "deny" and ap.action == "deny":
+            res = {"reply": "deny", "message": AGENT_DENY}
+        if res.get("reply") == "allow" and screen and not danger:
+            self._screen_granted = True
+        reply(res)
+
+    def agent_pending(self) -> bool:
+        with self.lock:
+            return any(p.agent for p in self.pending.values())
+
+    def agent_turn_done(self):
+        """The agent's request ended: the screen grant ends with it, and a card still
+        up for it is withdrawn."""
+        self._screen_granted = False
+        self.agent_moved_on()
+
+    def agent_moved_on(self) -> bool:
+        """Deny the agent's open cards (a new request came in): its turn can end."""
+        hit = False
+        for ap in [p for p in list(self.pending.values()) if p.agent]:
+            hit |= self._settle(ap, {"reply": "deny", "message": AGENT_MOVED_ON})
+        return hit
+
     def _settle(self, ap: Pending, result: dict | None) -> bool:
         """Finish a pending approval (once). The card goes away either way."""
         with self.lock:
@@ -638,8 +858,11 @@ class SessionHub:
             return False                                    # a question needs its answers
         if action == "always" and not any(a.get("id") == "always" for a in ap.req.get("actions") or []):
             action = "allow"
+        if ap.agent and action == "pass":
+            action = "deny"                                 # no terminal to hand it to
         result = {"allow": {"reply": "allow"}, "always": {"reply": "always"},
                   "deny": {"reply": "deny", "message": DENY_MESSAGE}}.get(action, {"reply": "pass"})
+        ap.action = action
         return self._settle(ap, result)
 
     def answer(self, ap_id: str, answers: dict) -> bool:
@@ -682,6 +905,8 @@ class SessionHub:
         if d in ("allow", "always") and ap.dangerous:
             return True, "That one needs a click on the island."
         self.decide(ap.id, d, by_voice=True)
+        if ap.agent and d == "pass":
+            d = "deny"
         return True, {"allow": "Allowed.", "always": "Allowed, and it won't ask again.", "deny": "Denied.",
                       "pass": "Okay, answer it in the terminal."}[d]
 

@@ -69,6 +69,10 @@
     "mcp__windows-mcp__Screenshot": {"effect": "flash", "icon": "camera", "label": "Looking at your screen",
                                      "fmt": "none", "data": {}, "ttl_s": 2.5},
     "mcp__windows-mcp__Snapshot": {"effect": "flash", "icon": "camera", "label": "Reading the screen", "fmt": "none",
-                                   "data": {}, "ttl_s": 2.5}
+                                   "data": {}, "ttl_s": 2.5},
+    "mcp__windows__play_spotify": {"effect": "media", "icon": "music", "label": "Playing", "fmt": "track",
+                                   "data": {"to": "result.playing"}},
+    "mcp__telegram__telegram_download_media": {"effect": "generic", "icon": "file", "label": "Saved from Telegram",
+                                               "fmt": "text", "data": {"to": "input.output_path"}, "ttl_s": 12}
   }
 }

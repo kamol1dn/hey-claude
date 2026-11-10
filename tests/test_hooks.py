@@ -284,6 +284,45 @@ def test_internal_runs_never_connect():
     assert calls == [] and out.getvalue() == b""
 
 
+def test_agent_hook_is_the_only_internal_one_forwarded():
+    """hey-claude's tool agent (HEYCLAUDE_INTERNAL=agent): only its own --settings hook
+    ("PermissionRequest agent") is forwarded, marked "agent"; the global hooks still exit."""
+    def run(argv, internal, event_payload=PERM):
+        fake = _FakeClient(b'{"reply":"allow"}')
+        calls = []
+        env = {"HEYCLAUDE_INTERNAL": internal} if internal else {}
+        with mock.patch.dict(os.environ, env):
+            if not internal:
+                os.environ.pop("HEYCLAUDE_INTERNAL", None)
+            out = io.BytesIO()
+            assert R.main(argv, json.dumps(event_payload).encode(), out,
+                          lambda n, t: calls.append(n) or fake) == 0
+        return calls, out.getvalue(), fake.sent
+
+    calls, out, sent = run(["PermissionRequest", "agent"], "agent")
+    assert calls and out == ALLOW
+    msg = json.loads(sent[0])
+    assert msg["agent"] is True and msg["wants_reply"] is True
+    for argv, internal in ((["PermissionRequest"], "agent"),            # the global hook, in the agent
+                           (["PermissionRequest", "agent"], "1"),       # another internal run
+                           (["PermissionRequest", "agent"], ""),        # not the agent at all
+                           (["PreToolUse", "agent"], "agent")):         # only approvals
+        calls, out, _ = run(argv, internal)
+        assert calls == [] and out == b"", (argv, internal)
+    # an ordinary session's message carries no "agent" mark
+    os.environ.pop("HEYCLAUDE_INTERNAL", None)
+    assert "agent" not in json.loads(R.build_message("PermissionRequest", PERM))
+
+
+def test_agent_hook_settings():
+    s = I.agent_hook_settings(python="C:/Py/python.exe", relay="C:/r/heyclaude-hook.py")
+    (group,) = s["hooks"]["PermissionRequest"]
+    (hook,) = group["hooks"]
+    assert group["matcher"] == "*" and hook["timeout"] == I.EVENTS["PermissionRequest"]
+    assert hook["command"] == '"C:/Py/python.exe" -I -S "C:/r/heyclaude-hook.py" PermissionRequest agent'
+    assert list(s) == ["hooks"] and list(s["hooks"]) == ["PermissionRequest"]
+
+
 def test_pipe_override_must_be_ours():
     with mock.patch.dict(os.environ, {"HEYCLAUDE_PIPE": "\\\\.\\pipe\\someone-else"}):
         assert R.pipe_name() is None

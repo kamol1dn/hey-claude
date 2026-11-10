@@ -257,6 +257,7 @@ agent:
     - mcp__windows__request_power_action
     - mcp__windows__now_playing
     - mcp__windows__media_control
+    - mcp__windows__play_spotify
     - mcp__windows__list_apps
     - mcp__windows__launch_app
     - mcp__windows__list_windows
@@ -268,10 +269,15 @@ agent:
     - mcp__windows__set_clipboard
     - mcp__windows__screenshot
     - mcp__windows__open_settings_page
-    # Windows-MCP (only when windows_mcp.enabled): looking at the screen only.
-    # Its acting tools (Click, Type, Shortcut, Drag, App, ...) stay off until
-    # M7's island approvals exist; hey-claude drops them from this list (and
-    # PowerShell / Registry, always) even if you add them.
+    # Windows-MCP (only when windows_mcp.enabled): looking at the screen. Its
+    # waits (Wait, WaitFor, DisplayInventory) are added by themselves. Its acting
+    # tools (Click, Type, Shortcut, Move, App, Process, FileSystem, ...) are never
+    # pre-allowed, even if you add them here: the agent asks on the island (one
+    # OK covers the rest of that request; killing a process, changing files or
+    # running an .exe needs a click). PowerShell / Registry: never.
+    # Anything else not on this list also asks on the island (hooks.approvals);
+    # "Always" on a card adds the tool here (the file as it was goes to
+    # state/config-backups/). Sending on Telegram always asks, with the draft.
     - mcp__windows-mcp__Snapshot
     - mcp__windows-mcp__Screenshot
   # M9: control Windows by voice ("volume 30", "dark mode", "next song",
@@ -350,7 +356,8 @@ tasks:
 hooks:
   enabled: true                  # listen for hook events (a named pipe only your Windows user can connect to)
   approvals: true                # Allow / Deny / Always on the island; off = the terminal always asks
-  approval_timeout_s: 100        # then the terminal's own prompt (tasks: denied). At most 108
+                                 # (and hey-claude's own agent is refused anything off agent.allowed_tools)
+  approval_timeout_s: 100        # then the terminal's own prompt (tasks and the agent: denied). At most 108
   voice_approvals: true          # "yes, allow that" / "deny" / "always" while a card is up (dangerous ones need a click)
   done_flash: true               # the one-shot "done" moment when a session stops
 

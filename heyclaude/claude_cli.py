@@ -20,7 +20,8 @@ _SESSION_VARS = (
 # M7: the hook relay (hookrelay/heyclaude_hook.py) reads these. A task hey-claude
 # starts carries its id, so the island links the watched session to the task;
 # hey-claude's own helper runs (the tool agent, task questions) are marked
-# internal and never show up as sessions or ask for approvals.
+# internal and never show up as sessions. The tool agent's mark is "agent": its
+# own approval hook (brain.Agent, --settings) asks on the island.
 TASK_VAR = "HEYCLAUDE_TASK"
 INTERNAL_VAR = "HEYCLAUDE_INTERNAL"
 
@@ -59,16 +60,17 @@ def find_claude(configured: str | None = None) -> str:
     )
 
 
-def child_env(base: dict | None = None, *, internal: bool = False, task: str | None = None) -> dict:
+def child_env(base: dict | None = None, *, internal: bool | str = False, task: str | None = None) -> dict:
     """Environment for every `claude` process hey-claude starts: no parent
     session variables, and no API key (so it uses the subscription login).
-    internal: hey-claude's own helper run (the hooks ignore it); task: the id of
-    a voice task (the hooks report it with the session)."""
+    internal: hey-claude's own helper run (the hooks ignore it; "agent" for the tool
+    agent, whose own approval hook still asks); task: the id of a voice task (the
+    hooks report it with the session)."""
     env = dict(os.environ if base is None else base)
     for k in _SESSION_VARS + _BILLING_VARS + (TASK_VAR, INTERNAL_VAR):
         env.pop(k, None)
     if internal:
-        env[INTERNAL_VAR] = "1"
+        env[INTERNAL_VAR] = internal if isinstance(internal, str) else "1"
     if task:
         env[TASK_VAR] = str(task)
     return env

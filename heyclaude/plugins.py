@@ -20,7 +20,9 @@ The existing loaders ask this registry before they offer anything: a disabled pl
 falls back to the text card, its tools are neither started nor offered to the agent, its
 instant intents and routes stop claiming requests, and its character pack disappears.
 Something no plugin claims is always on, so a missing or broken manifest never removes a
-feature. Everything is enabled by default (`plugins.disabled: []`).
+feature. Built-in plugins are on by default (`plugins.disabled: []`); your own plugins in
+state/plugins/ start off, since they run arbitrary code, until you switch them on
+(`plugins.enabled`).
 
 Versioning follows ui/states.json: `api` is major.minor; a plugin works here when the major
 matches. A newer minor may add contribution kinds; this host ignores the ones it doesn't know
@@ -45,6 +47,7 @@ BUILTIN_DIR = ROOT / "plugins"
 USER_DIR = STATE_DIR / "plugins"
 MANIFEST = "plugin.json"
 CONFIG_KEY = "plugins.disabled"
+ENABLED_KEY = "plugins.enabled"          # your own plugins you switched on (they start off)
 SETTINGS_KEY = "plugins.settings"
 
 # Contribution kinds this host understands, and the API version that added each.
@@ -268,7 +271,7 @@ class PluginRegistry:
         self.plugins: dict[str, dict] = {}
         self.broken: dict[str, dict] = {}             # folder name -> {"dir", "problems", "builtin", "manifest"}
         self.rescan()
-        self._snapshot = set(self._disabled())
+        self._snapshot = self._off()
 
     # -- discovery -------------------------------------------------------------------------
     def rescan(self):
@@ -315,54 +318,87 @@ class PluginRegistry:
             p = self.cfg["plugins"] = {}
         return p
 
-    def _disabled(self) -> list[str]:
-        v = (self.cfg.get("plugins") or {}).get("disabled") if isinstance(self.cfg.get("plugins"), dict) else None
+    def _list(self, key: str) -> list[str]:
+        sec = self.cfg.get("plugins")
+        v = sec.get(key) if isinstance(sec, dict) else None
         return [str(x) for x in v] if isinstance(v, list) else []
+
+    def _disabled(self) -> list[str]:
+        return self._list("disabled")
+
+    def _opted_in(self) -> list[str]:
+        """Your own plugins (state/plugins/) that you switched on: they start off."""
+        return self._list("enabled")
 
     def can_disable(self, pid: str) -> bool:
         man = self.plugins.get(pid)
         return man is not None and not man.get("core")
 
     def is_enabled(self, pid: str) -> bool:
-        """On unless it's in plugins.disabled (core plugins are always on), it's broken, or its
-        service crashed this session."""
+        """A built-in is on unless it's in plugins.disabled (core ones are always on); one of
+        yours (state/plugins/) only once it's in plugins.enabled, since it runs arbitrary code.
+        Never while its service crashed this session."""
         man = self.plugins.get(pid)
         if man is None:
             return False
         if man.get("core"):
             return True
-        return pid not in self._disabled() and pid not in self._failed
+        if pid in self._failed or pid in self._disabled():
+            return False
+        return bool(man.get("builtin")) or pid in self._opted_in()
+
+    def feature_on(self, pid: str) -> bool:
+        """For hey-claude's own code asking about a built-in feature: on when that plugin is on,
+        or when there is no such plugin (nothing removes a feature no plugin claims)."""
+        return pid not in self.plugins or self.is_enabled(pid)
 
     def set_enabled(self, pid: str, on: bool) -> bool:
-        """Switch a plugin on or off, save it (plugins.disabled in config.yaml) and tell the
-        listeners. Returns whether anything changed. ValueError for an unknown or core plugin."""
+        """Switch a plugin on or off, save it (plugins.disabled, and plugins.enabled for your own
+        plugins, in config.yaml) and tell the listeners. Returns whether anything changed.
+        ValueError for an unknown or core plugin."""
         if pid not in self.plugins:
             raise ValueError(f"no plugin {pid!r}")
         if not on and not self.can_disable(pid):
             raise ValueError(f"{pid!r} is part of hey-claude and can't be switched off")
+        user = not self.plugins[pid].get("builtin")
         with self._lock:
-            cur = self._disabled()
-            was = pid not in cur
+            was = self.is_enabled(pid)
+            dis, opt = self._disabled(), self._opted_in()
             if on:
                 self._failed.pop(pid, None)            # switching it on again is a retry
-                new = [x for x in cur if x != pid]
+                new_dis = [x for x in dis if x != pid]
+                new_opt = opt if (not user or pid in opt) else opt + [pid]
             else:
-                new = cur if pid in cur else cur + [pid]
-            if new == cur and was == on:
-                return False
-            # in place: whoever holds cfg["plugins"] (Settings, the app) sees the same list
-            self._section()["disabled"] = sorted(new)
+                new_dis = dis if (user or pid in dis) else dis + [pid]
+                new_opt = [x for x in opt if x != pid]
+                if user:
+                    new_dis = [x for x in dis if x != pid]
+            if new_dis == dis and new_opt == opt:
+                if was == on:
+                    return False
+                self.sync()
+                return True
+            # in place: whoever holds cfg["plugins"] (Settings, the app) sees the same lists
+            sec = self._section()
+            sec["disabled"] = sorted(new_dis)
+            keys = {CONFIG_KEY: sorted(new_dis)}
+            if new_opt != opt or "enabled" in sec:
+                sec["enabled"] = sorted(new_opt)
+                keys[ENABLED_KEY] = sorted(new_opt)
             if self.persist:
                 from . import config
-                config.save_keys({CONFIG_KEY: sorted(new)}, self.config_path)
+                config.save_keys(keys, self.config_path)
         self.sync()
         return True
+
+    def _off(self) -> set[str]:
+        return {pid for pid in self.plugins if not self.is_enabled(pid)}
 
     def sync(self) -> list[str]:
         """Tell the listeners about plugins switched on or off since last time (set_enabled
         calls it; the app calls it after Settings saved the whole config). Returns their ids."""
         with self._lock:
-            now = set(self._disabled()) | set(self._failed)
+            now = self._off()
             changed = sorted(now ^ self._snapshot)
             self._snapshot = now
         for pid in changed:

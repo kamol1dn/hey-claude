@@ -115,6 +115,36 @@ _PC_RE = re.compile(
     r"(?:open|show) (?:the )?[\w -]{0,30}settings|snap (?:this|the|it|[\w ]{1,30}) (?:window )?(?:to the )?(?:left|right)|"
     r"minimi[sz]e|clipboard|(?:put|send) (?:the |my )?(?:pc|computer|laptop) to sleep|"
     r"(?:restart|shut ?down|reboot) (?:the |my )?(?:pc|computer|laptop))\b", re.I)
+# Which plugin each kind of control phrase belongs to (heyclaude/plugins.py): with that plugin
+# switched off the shortcut stops claiming its phrases (they go on to the quick model).
+_PC_OWNERS = (
+    ("media", re.compile(
+        r"\b(?:(?:next|previous|last|skip(?: this| the)?) (?:song|track)|skip (?:this|it)|"
+        r"(?:pause|resume|stop|play) (?:the |my )?(?:music|song|video|track|playback|spotify)|"
+        r"play\b.{1,80}\b(?:on|in|with) spotify|play (?:the )?(?:song|album|playlist|artist)\b|"
+        r"what(?:'?s| is) (?:playing|this song)|what song|now playing)\b", re.I)),
+    ("clipboard", re.compile(r"\bclipboard\b", re.I)),
+    ("screen_control", re.compile(r"\b(?:screenshot|on my screen)\b", re.I)),
+)
+
+
+def _plugin_on(pid: str) -> bool:
+    """A built-in feature's plugin is on (or there's no such plugin: then it's always on)."""
+    try:
+        from . import plugins
+        return plugins.get().feature_on(pid)
+    except Exception:
+        return True
+
+
+def control_owner(text: str) -> str:
+    """The plugin a control phrase belongs to: media, clipboard, screen_control or pc_control."""
+    for pid, rx in _PC_OWNERS:
+        if rx.search(text):
+            return pid
+    return "pc_control"
+
+
 _UNDO_RE = re.compile(
     r"^(?:(?:and|so|ok(?:ay)?|please|now|then|can you|could you|would you|hey|no|oops|wait)[,\s]+)*"
     r"(?:undo|revert|reverse)(?: (?:that|it|this|the last (?:change|thing|one)|what you (?:just )?did))?"
@@ -193,7 +223,7 @@ def local_route(text: str, projects: Projects):
         return ("task_ask", _task_ref(t, projects), t)
     m = _TASK_RE.match(t)
     if not m:
-        if _PC_RE.search(t):
+        if _PC_RE.search(t) and _plugin_on(control_owner(t)):
             return ("control", t)
         if _LOOKUP_RE.search(t):
             return ("lookup", t)
@@ -236,10 +266,14 @@ def widget_prompt(cfg: dict | None) -> str:
 
 def system_prompt(projects: Projects, has_agent: bool = True) -> str:
     names = ", ".join(projects.map) or "(none configured)"
+    # controlling the PC is only offered for what a switched-on plugin can do (heyclaude/plugins.py)
+    pc = (["volume, brightness, dark mode, wallpaper, Wi-Fi, Bluetooth"] if _plugin_on("pc_control") else []) \
+        + (["music"] if _plugin_on("media") else []) \
+        + (["apps, windows, Settings"] if _plugin_on("pc_control") else [])
+    control = f", or controlling this PC ({', '.join(pc)})" if pc else ""
     lookup = (
         "If answering needs the user's own data or live information (their messages, Telegram, "
-        "email, calendar, files, Drive, or a web search, news, weather, prices), or controlling this "
-        "PC (volume, brightness, dark mode, wallpaper, Wi-Fi, Bluetooth, music, apps, windows, Settings), "
+        "email, calendar, files, Drive, or a web search, news, weather, prices)" + control + ", "
         "do not guess; reply with exactly: LOOKUP\n" if has_agent else "")
     return (
         "You are a voice assistant on the user's Windows PC. Your reply is read aloud by TTS, so: "
@@ -268,22 +302,35 @@ AGENT_PROMPT = (
     "conversation that another part of the assistant answered; use it to resolve 'there', "
     "'then', 'that' and the like."
 )
-# Added when the Windows settings server is on (M9).
-AGENT_WINDOWS_PROMPT = (
+# Added when the Windows settings server is on (M9). The music lines only with the media plugin on,
+# the rest only with pc_control on (windows_prompt()).
+AGENT_PC_PROMPT = (
     " To control this PC (volume, mute, brightness, dark or light mode, wallpaper, night light, Wi-Fi, "
-    "Bluetooth, power mode, media playback, opening apps, windows, clipboard, Settings pages) use the "
+    "Bluetooth, power mode, {media}opening apps, windows, clipboard, Settings pages) use the "
     "mcp__windows tools: they are exact and undoable. Act right away without asking; the island shows "
     "the change with an Undo button, so just confirm in a few words, e.g. 'Volume 30.' or 'Dark mode on.' "
     "Short commands: 'volume 30' means set it to 30; 'brightness down' or 'quieter' means about 20 less; "
-    "'next song' means media_control next. For sleep, restart or shutdown call request_power_action and "
+    "{next}For sleep, restart or shutdown call request_power_action and "
     "tell the user to click Confirm on the island; never try another way. Never click or type through "
     "the UI to change a setting the mcp__windows tools cover."
+)
+AGENT_MEDIA_PROMPT = (
     " To play music, search with mcp__claude_ai_Spotify__search, then call mcp__windows__play_spotify with the "
     "result's spotify: uri (the 'uri' field, not 'play_uri'); it opens it in the Spotify desktop app, starts it "
     "and returns what's playing, so just say that in a few words. Without that connector, call play_spotify "
     "with query set to what the user asked for (Spotify's own top result). Pause, resume and skip stay "
     "media_control."
 )
+
+
+def windows_prompt(pc: bool = True, media: bool = True) -> str:
+    """The Windows settings server's lines for the agent, for the plugins that are on."""
+    out = AGENT_PC_PROMPT.format(media="media playback, " if media else "",
+                                 next="'next song' means media_control next. " if media else "") if pc else ""
+    return out + (AGENT_MEDIA_PROMPT if media else "")
+
+
+AGENT_WINDOWS_PROMPT = windows_prompt()           # everything on (as before the plugins)
 # Playing music (Spotify): pre-allowed with the settings server (both only start music or look).
 SPOTIFY_TOOLS = ("mcp__windows__play_spotify", "mcp__claude_ai_Spotify__search")
 # Added when Windows-MCP is on: screen control, approved on the island.
@@ -786,7 +833,8 @@ class Agent:
         telegram = reg.tool_enabled("mcp__telegram__send_message") and (
             "telegram" in [str(x) for x in a.get("import_desktop_mcp") or []] or any(
                 str(t).startswith("mcp__telegram__") for t in a.get("allowed_tools") or []))
-        prompt = (AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
+        prompt = (AGENT_PROMPT + (windows_prompt(reg.feature_on("pc_control"), reg.feature_on("media"))
+                                  if "windows" in win else "")
                   + (AGENT_SCREEN_PROMPT if WINDOWS_MCP_SERVER in win and approvals else "")
                   + (AGENT_APPROVALS_PROMPT if approvals else "")
                   + (AGENT_TELEGRAM_PROMPT.format(downloads=downloads_dir()) if telegram else "")

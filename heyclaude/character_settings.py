@@ -30,6 +30,19 @@ PREVIEW_STATES = ["idle", "listening", "thinking", "talking", "happy", "confused
                   "drowsy", "asleep", "waking", "woke", "done", "error", "approval_needed"]
 
 
+def _all_packs() -> dict:
+    """Every pack that loads, also those whose plugin is switched off: CH.registry() leaves those
+    out, but the gallery keeps them (hidden) so Settings > Plugins can bring one back without a
+    restart. Read from the registry's own cache (characters.py isn't Settings' to change)."""
+    on = CH.registry(refresh=True)
+    try:
+        key = tuple(str(d) for d in (CH.BUILTIN_DIR, CH.USER_DIR, *CH._plugin_dirs()))
+        full = CH._REG_CACHE.get(key)
+        return dict(full) if isinstance(full, dict) and set(on) <= set(full) else on
+    except Exception:
+        return on
+
+
 def _ember_icon(size: int = 72) -> QIcon:
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
@@ -59,7 +72,8 @@ class CharacterTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.reg = CH.registry(refresh=True)
+        self.reg = _all_packs()                  # every pack, also those whose plugin is off (hidden)
+        self._kept = None                         # a pack in the config that isn't shown (its plugin is off)
         self._filling = False
         self._antic_boxes: dict[str, kit.Switch] = {}
         self._off: set[str] = set()
@@ -98,6 +112,11 @@ class CharacterTab(QWidget):
             it.setToolTip(f"{man['name']}, {man.get('kind', '')}. {man.get('line', '')}\nby {man.get('author', '?')}")
             it.setSizeHint(QSize(TILE_W, TILE_H))
             self.gallery.addItem(it)
+            try:
+                from . import plugins
+                it.setHidden(not plugins.get().character_enabled(pid))
+            except Exception:
+                pass
         self.gallery.currentItemChanged.connect(self._picked)
         self.lb_line = QLabel("")
         self.lb_line.setWordWrap(True)
@@ -166,7 +185,8 @@ class CharacterTab(QWidget):
     def _fit_gallery(self):
         """The gallery is as tall as its rows of tiles: no scroll bar, nothing cut off."""
         per_row = max(1, self.gallery.width() // self.gallery.gridSize().width())
-        rows = -(-self.gallery.count() // per_row)
+        shown = sum(not self.gallery.item(i).isHidden() for i in range(self.gallery.count()))
+        rows = max(1, -(-shown // per_row))
         h = rows * self.gallery.gridSize().height() + 2
         if self.gallery.height() != h:
             self.gallery.setFixedHeight(h)
@@ -177,11 +197,15 @@ class CharacterTab(QWidget):
         self._filling = True
         pid = str(cc.get("pack", CH.NONE) or CH.NONE)
         self._off = set(cc.get("antics_off") or [])
+        self._kept = None
         for i in range(self.gallery.count()):
-            if self.gallery.item(i).data(Qt.UserRole) == pid:
+            if self.gallery.item(i).data(Qt.UserRole) == pid and not self.gallery.item(i).isHidden():
                 self.gallery.setCurrentRow(i)
                 break
         else:
+            # its plugin is switched off (or it isn't installed): the island shows the ember, and an
+            # untouched save keeps the pack as written, so switching the plugin on brings it back
+            self._kept = pid if pid != CH.NONE else None
             self.gallery.setCurrentRow(0)
         i = self.cmb_where.findData(str(cc.get("where", "island")))
         self.cmb_where.setCurrentIndex(max(0, i))
@@ -194,7 +218,7 @@ class CharacterTab(QWidget):
     def collect(self, new: dict):
         isl = new.setdefault("island", {})
         cc = isl.setdefault("character", {})
-        cc["pack"] = self.current()
+        cc["pack"] = self._kept or self.current()
         cc["where"] = self.cmb_where.currentData()
         cc["desktop_size"] = int(self.sp_size.value())
         cc["antics"] = self.cmb_freq.currentData()
@@ -215,7 +239,43 @@ class CharacterTab(QWidget):
         pid = self.current()
         self._show(pid)
         if not self._filling:
+            self._kept = None                        # you picked one: that's the pack now
             self.preview_pack.emit(pid)
+
+    def available(self, pid: str) -> bool:
+        it = self._item(pid)
+        return it is not None and not it.isHidden()
+
+    def _item(self, pid: str):
+        for i in range(self.gallery.count()):
+            if self.gallery.item(i).data(Qt.UserRole) == pid:
+                return self.gallery.item(i)
+        return None
+
+    def set_available(self, pid: str, on: bool, quiet: bool = False):
+        """A pack's plugin was switched on or off (Settings > Plugins, staged until Save). Off: the
+        pack leaves the gallery and, if it was the one in use, the ember takes its place (the
+        island previews that unless `quiet`). On again: it comes back, and back into use if it
+        was the one in use before."""
+        it = self._item(pid)
+        if it is None or it.isHidden() == (not on):
+            return
+        it.setHidden(not on)
+        if not on and self.current() == pid:
+            self._filling = True
+            self.gallery.setCurrentRow(0)
+            self._filling = False
+            self._kept = pid
+            if not quiet:
+                self.preview_pack.emit(CH.NONE)
+        elif on and self._kept == pid:
+            self._filling = True
+            self.gallery.setCurrentItem(it)
+            self._filling = False
+            self._kept = None
+            if not quiet:
+                self.preview_pack.emit(pid)
+        self._fit_gallery()
 
     def _clear(self, grid):
         while grid.count():

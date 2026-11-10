@@ -75,6 +75,46 @@ def button(text: str = "", kind: str = "secondary", clicked=None, tip: str = "",
     return b
 
 
+ICON_TILE = 32
+ICON_INDENT = ICON_TILE + S[3]   # a list row's text starts here (after its icon); its sub-settings too
+
+
+def icon_tile(path: str = "", glyph: str = "", name: str = "", px: int = ICON_TILE, dpr: float = 2.0):
+    """A list row's icon: an image (svg/png) or a Fluent glyph, else the name's initial, on a
+    rounded tile in the raised surface colour."""
+    from PySide6.QtGui import QFont, QIcon, QPixmap
+    t = th.T
+    pm = QPixmap(round(px * dpr), round(px * dpr))
+    pm.setDevicePixelRatio(dpr)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    p.setPen(QPen(QColor(t["line"]), 1))
+    p.setBrush(QColor(t["raised"]))
+    p.drawRoundedRect(QRectF(0.5, 0.5, px - 1, px - 1), 8, 8)
+    # a logo (svg) sits small in the tile; a character preview (a raster sprite) fills more of it
+    inner = round(px * (0.56 if str(path).lower().endswith(".svg") else 0.8))
+    off = (px - inner) / 2
+    img = QIcon(path).pixmap(round(inner * dpr), round(inner * dpr)) if path else QPixmap()
+    if not img.isNull():
+        img.setDevicePixelRatio(dpr)
+        p.drawPixmap(QRectF(off, off, inner, inner), img, QRectF(img.rect()))
+    elif glyph in th.GLYPHS or glyph in th.PLUGIN_GLYPHS:
+        g = th.glyph_pixmap(th.PLUGIN_GLYPHS.get(glyph, glyph), t["dim"], round(px * 0.5), dpr)
+        q = px * 0.25
+        p.drawPixmap(QRectF(q, q, px * 0.5, px * 0.5), g, QRectF(g.rect()))
+    else:
+        f = QFont(th.families()["text"])
+        f.setPixelSize(round(px * 0.42))
+        f.setWeight(QFont.DemiBold)
+        p.setFont(f)
+        p.setPen(QColor(t["dim"]))
+        p.drawText(QRectF(0, 0, px, px), Qt.AlignCenter, (name or "?")[:1].upper())
+    p.end()
+    return pm
+
+
 def fit_spin(sp):
     """One width for every spin box, and its text starting where a combo's or a field's does
     (the stylesheet's padding doesn't reach a spin box's inner editor)."""

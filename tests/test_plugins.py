@@ -173,7 +173,11 @@ def test_discovery_isolates_broken_plugins():
     _write(user / "hello", {"id": "hello", "api": "1.0", "name": "Hello", "description": "says hi",
                             "contributes": {"instant": "instant.py"}},
            {"instant.py": "def match(text):\n    return {'say': 'Hi!'} if text == 'hello plugin' else None\n"})
-    reg = P.PluginRegistry({}, dirs=[builtin, user], persist=False)
+    off = P.PluginRegistry({}, dirs=[builtin, user], persist=False)
+    assert off.is_enabled("weather") and not any(off.is_enabled(p) for p in ("crashy", "hello", "lyrics"))
+    assert off.instant("hello plugin") is None                       # yours start off: they run code
+    reg = P.PluginRegistry({"plugins": {"enabled": ["crashy", "hello", "lyrics", "badsvc"]}},
+                           dirs=[builtin, user], persist=False)
     assert sorted(reg.plugins) == ["crashy", "hello", "lyrics", "weather"]
     assert reg.plugins["weather"]["name"] == "W" and reg.plugins["weather"]["builtin"]
     assert sorted(reg.broken) == ["future", "notjson", "weather", "wrongid"]
@@ -308,6 +312,46 @@ def test_switched_off_plugins_are_really_gone():
         P.reset(None)
 
 
+def test_pc_control_and_media_off_release_the_control_shortcut():
+    """With pc_control or media switched off, the no-model "control" shortcut stops claiming their
+    phrases, the quick model stops offering them, and the agent's prompt drops their lines."""
+    from heyclaude import brain as B
+    from heyclaude import config
+    cfg = config.defaults()
+    reg = _with(P.PluginRegistry(cfg, persist=False))
+    proj = B.Projects({"hey claude": "x"})
+    try:
+        assert B.local_route("volume 30", proj) == ("control", "volume 30")
+        assert B.local_route("next song", proj) == ("control", "next song")
+        assert B.AGENT_WINDOWS_PROMPT == B.windows_prompt(True, True)
+        assert "Spotify" in B.windows_prompt(True, True) and "media playback" in B.windows_prompt(True, True)
+        full_sys = B.system_prompt(proj)
+        assert "volume, brightness" in full_sys and "music" in full_sys
+        reg.set_enabled("media", False)
+        assert B.local_route("next song", proj) is None                     # no tool for it: not claimed
+        assert B.local_route("play the song bohemian rhapsody", proj) is None
+        assert B.local_route("volume 30", proj) == ("control", "volume 30")   # pc_control still on
+        sp = B.system_prompt(proj)
+        assert "music" not in sp and "volume, brightness" in sp
+        no_media = B.windows_prompt(True, False)
+        assert "Spotify" not in no_media and "play_spotify" not in no_media and "media playback" not in no_media
+        assert "next song" not in no_media and "Volume 30." in no_media
+        args = _agent_args(cfg)
+        prompt = args[args.index("--append-system-prompt") + 1]
+        assert "Spotify" not in prompt and "media_control next" not in prompt and "mcp__windows tools" in prompt
+        reg.set_enabled("pc_control", False)
+        assert B.local_route("volume 30", proj) is None and B.local_route("dark mode on", proj) is None
+        assert "controlling this PC" not in B.system_prompt(proj)
+        assert B.windows_prompt(False, False) == ""
+        reg.set_enabled("media", True)
+        assert B.local_route("next song", proj) == ("control", "next song") and B.local_route("mute", proj) is None
+        assert "controlling this PC (music)" in B.system_prompt(proj)
+        reg.set_enabled("pc_control", True)
+        assert B.system_prompt(proj) == full_sys
+    finally:
+        P.reset(None)
+
+
 _AGENT_TMP = None
 
 
@@ -355,6 +399,10 @@ def test_a_user_plugin_snaps_in_and_out():
     reg = _with(P.PluginRegistry({}, dirs=[ROOT / "plugins", d / "user"], persist=False))
     try:
         assert "lyrics" in reg.plugins and not reg.broken, reg.broken
+        # yours start switched off (they run arbitrary code): nothing of it is offered yet
+        assert not reg.is_enabled("lyrics") and "lyrics_card" not in W.active() and reg.mcp_servers() == {}
+        assert reg.set_enabled("lyrics", True) and reg.cfg["plugins"]["enabled"] == ["lyrics"]
+        assert reg.cfg["plugins"].get("disabled", []) == []
         assert "lyrics_card" in W.registry() and "lyrics_card" in W.active()
         assert W.normalise({"widget": "lyrics_card", "data": {"text": "la la"}})["widget"] == "lyrics_card"
         assert reg.instant("show lyrics") == ("lyrics", {"say": "Lyrics on."})

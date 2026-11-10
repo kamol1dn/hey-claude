@@ -151,8 +151,11 @@ card's spoken yes / no comes first); its handler's return value is spoken.
    and validated. A bad one (unreadable JSON, wrong id, incompatible API, missing file) is
    skipped, listed in Settings as *broken* or *incompatible* with the reasons, and nothing
    else is affected.
-2. **Enable**: everything is on by default. `plugins.disabled` in `config.yaml` lists what is
-   off. Core plugins (the text card, the clock, "teach it") can't be switched off.
+2. **Enable**: built-in plugins are on by default; `plugins.disabled` in `config.yaml` lists
+   the ones switched off. **Your own plugins (`state/plugins/`) start off**, because they run
+   arbitrary code: Settings > Plugins shows them with their permissions, and switching one on
+   adds it to `plugins.enabled`. Core plugins (the text card, the clock, "teach it") can't be
+   switched off.
 3. **Switch off / on without a restart**: the card stops (an answer that asks for it shows its
    text instead), its instant commands and routes stop claiming requests (they go on to
    Claude), its character pack goes back to the ember, its service gets `stop()` and its
@@ -305,14 +308,22 @@ reg = plugins.get()
 for p in reg.list():          # PluginInfo: id, name, description, icon_url, glyph, version, author,
     ...                       # builtin, core, can_disable, enabled, status, problems, kinds,
                               # contributes, permissions [{id, text}], settings [schema], dir; .as_dict()
-reg.set_enabled("telegram", False)          # saves plugins.disabled, notifies, applies live
+reg.set_enabled("telegram", False)          # saves plugins.disabled (plugins.enabled for yours), notifies, applies live
+reg.feature_on("media")                     # hey-claude's own code: on, or no such plugin
 reg.subscribe(lambda pid, on: ...)          # any thread
 reg.settings_schema("weather")              # [{key, type, label, help, default, options, config_key}]
 reg.setting("weather", "location"); reg.set_setting("weather", "unit", "F")
 ```
 
 If Settings saves the whole config instead, the app calls `reg.sync()` (it does in
-`Assistant.apply_config` for any `plugins.*` key) and the same notifications go out.
+`Assistant.apply_config` for any `plugins.*` key) and the same notifications go out. That is
+what Settings > Plugins does: its switches are staged like every other setting and applied
+by Save (writing `plugins.disabled` and `plugins.enabled`); Close without saving drops them.
+
+With `pc_control` or `media` switched off, the no-model "control" shortcut stops claiming
+their phrases ("volume 30", "next song"), the quick model no longer offers to control those
+things, and the tool agent's prompt leaves out their lines (music and Spotify with `media` off).
+Switching off the character pack that is in use puts the ember back.
 
 ## 12. Island seam (status)
 

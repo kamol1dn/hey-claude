@@ -487,9 +487,11 @@ info:
 # Plugins (docs/plugin-api.md): built-in ones in plugins/, yours in state/plugins/. Each feature
 # (weather, now playing, Telegram, a character pack...) is one; switch one off by listing its id
 # here (Settings does it for you). A switched-off plugin's card, tools, instant commands and
-# routes are gone; nothing else changes. Applies at once.
+# routes are gone; nothing else changes. Applies at once. Yours (state/plugins/) start off, since
+# they run arbitrary code: list one under enabled to switch it on (Settings > Plugins does it).
 plugins:
   disabled: []            # e.g. [telegram, news]
+  enabled: []             # your own plugins you switched on, e.g. [lyrics]
   settings: {}            # your plugins' own settings, per plugin id (built-ins use their sections above)
 
 island:
@@ -499,7 +501,7 @@ island:
   engine: qml
   # Size of the whole island (pill, panel, cards, text, icons): 0.8-2.0, or auto
   # (1.0; 1.25 on a screen of 27" or more). Vector all the way, so it stays sharp.
-  # Settings > General > Island has a slider that previews it live.
+  # Settings > Island has a slider that previews it live.
   scale: auto
   # Motion: auto (calm when Windows "Animation effects" is off), full, calm (no decoration), off (instant).
   motion: auto

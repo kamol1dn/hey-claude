@@ -41,7 +41,28 @@ def main():
     cfg = config.defaults()
     cfg["projects"] = {"hey claude": str(ROOT), "website": "D:/sites/portfolio"}
     with tempfile.TemporaryDirectory() as d:
+        try:                      # two example plugins of your own: one to switch on, one that can't load
+            import json
+            from heyclaude import plugins
+            user = Path(d) / "user-plugins"
+            (user / "lyrics").mkdir(parents=True)
+            (user / "lyrics" / "plugin.json").write_text(json.dumps({
+                "id": "lyrics", "api": "1.0", "name": "Lyrics", "version": "0.1.0", "glyph": "music",
+                "description": "The current song's lyrics, line by line, on the island while music plays.",
+                "permissions": ["network", "background"], "contributes": {"service": "service.py"}}),
+                encoding="utf-8")
+            (user / "lyrics" / "service.py").write_text("def start(ctx): pass\n", encoding="utf-8")
+            (user / "phone").mkdir()
+            (user / "phone" / "plugin.json").write_text(json.dumps({
+                "id": "phone", "api": "2.0", "name": "Phone", "description": "Calls from your phone."}),
+                encoding="utf-8")
+            plugins.reset(plugins.PluginRegistry(cfg, dirs=[plugins.BUILTIN_DIR, user], persist=False))
+        except Exception as e:
+            print("demo plugins:", e)
         w = SettingsWindow(cfg, config_path=Path(d) / "config.yaml", state_dir=d)
+        rec = getattr(w, "_plugin_rows", {}).get("directions")
+        if rec is not None and rec["row"]._chev is not None:
+            rec["row"]._chev.setChecked(True)        # one plugin's own settings, opened
         w.setAttribute(Qt.WA_DontShowOnScreen, True)
         try:                                         # no page cross-fade caught mid-way in a shot
             from heyclaude import settings_theme

@@ -156,6 +156,160 @@ def test_window_keeps_every_value():
         w.deleteLater()
 
 
+def _window(cfg, d, reg=None):
+    from heyclaude import plugins
+    from heyclaude.settings_ui import SettingsWindow
+    plugins.reset(reg)
+    w = SettingsWindow(cfg, config_path=Path(d) / "config.yaml", state_dir=d)
+    w.has_unsaved_changes = lambda: False      # tests close without the dialog
+    return w
+
+
+def test_frame_rate_round_trip():
+    """island.fps: the four choices with their labels, an untouched value (even one only the
+    engine knows, like 90) written back exactly, a picked one saved as its value."""
+    from heyclaude.island_qml import FPS_CHOICES
+    with tempfile.TemporaryDirectory() as d:
+        cfg = config.defaults()
+        assert cfg["island"]["fps"] == "auto"
+        w = _window(cfg, d)
+        data = [w.cmb_fps.itemData(i) for i in range(w.cmb_fps.count())]
+        assert data == list(FPS_CHOICES)
+        assert [w.cmb_fps.itemText(i) for i in range(4)] == ["Auto", "30 fps", "60 fps", "Every refresh"]
+        assert "whole fraction" in w.row_fps.desc_label.text() and not w.row_fps.tag      # live, no restart tag
+        assert not config.diff(cfg, w._collect()[0])
+        w._set_combo(w.cmb_fps, "native")
+        new = w._collect()[0]
+        assert new["island"]["fps"] == "native" and config.diff(cfg, new) == ["island.fps"]
+        w.live_fps = lambda: 72.0
+        w._fps_now()
+        assert "Now 72 fps." in w.row_fps.desc_label.text()
+        w.close()
+        for raw in (90, "45fps", 60):                              # by hand in config.yaml
+            cfg = config.defaults()
+            cfg["island"]["fps"] = raw
+            w = _window(cfg, d)
+            new, errors, _ = w._collect()
+            assert not errors and new["island"]["fps"] == raw and type(new["island"]["fps"]) is type(raw)
+            assert not config.diff(cfg, new)
+            if raw == 90:
+                assert w.cmb_fps.currentText() == "90 fps"
+            w._set_combo(w.cmb_fps, "auto")
+            assert w._collect()[0]["island"]["fps"] == "auto"
+            w.close()
+
+
+def _demo_registry(cfg, d):
+    import json
+    from heyclaude import plugins
+    user = Path(d) / "user-plugins"
+    (user / "lyrics").mkdir(parents=True)
+    (user / "lyrics" / "plugin.json").write_text(json.dumps({
+        "id": "lyrics", "api": "1.0", "name": "Lyrics", "description": "Song lyrics.",
+        "permissions": ["network"], "contributes": {
+            "settings": [{"key": "source", "type": "enum", "options": ["lrclib", "musixmatch"],
+                          "label": "Lyrics from", "default": "lrclib"}]}}), encoding="utf-8")
+    (user / "phone").mkdir()
+    (user / "phone" / "plugin.json").write_text(json.dumps({"id": "phone", "api": "2.0", "name": "Phone",
+                                                            "description": "Calls."}), encoding="utf-8")
+    return plugins.PluginRegistry(cfg, dirs=[plugins.BUILTIN_DIR, user], persist=False)
+
+
+def test_plugins_page():
+    """Rows match the registry; core has no switch; a broken plugin shows why; yours start off and
+    show what they can do; switches are staged, saved with Save (plugins.disabled / .enabled) and
+    never overwritten with a stale copy; a plugin's own settings are written only when changed."""
+    import yaml
+    from heyclaude import plugins
+    with tempfile.TemporaryDirectory() as d:
+        cfg = config.defaults()
+        reg = _demo_registry(cfg, d)
+        w = _window(cfg, d, reg)
+        try:
+            assert "Plugins" in [w.tabs.tabText(i) for i in range(w.tabs.count())]
+            listed = {p.id for p in reg.list()}
+            assert set(w._plugin_rows) == listed
+            core = w._plugin_rows["core"]
+            assert core["switch"] is None and "Always on" in [x.text() for x in core["row"].findChildren(
+                type(core["row"].title_label))]
+            phone = w._plugin_rows["phone"]
+            assert phone["switch"] is None and "isn't compatible" in phone["row"].desc_label.text()
+            assert phone["row"].desc_label.property("tone") == "bad"
+            lyr = w._plugin_rows["lyrics"]
+            assert not lyr["switch"].isChecked() and "talks to the internet" in lyr["row"].desc_label.text()
+            assert lyr["row"]._chev is not None                       # its own settings, behind the chevron
+            assert w._plugin_rows["telegram"]["switch"].isChecked()
+            assert not config.diff(cfg, w._collect()[0])              # untouched: nothing changes
+            # staged: nothing applied before Save
+            w._plugin_rows["telegram"]["switch"].setChecked(False)
+            lyr["switch"].setChecked(True)
+            assert reg.is_enabled("telegram") and not reg.is_enabled("lyrics")
+            new = w._collect()[0]
+            assert new["plugins"]["disabled"] == ["telegram"] and new["plugins"]["enabled"] == ["lyrics"]
+            # something else switches news off meanwhile (the app's registry saves it at once): the
+            # window follows it (any thread -> GUI), and Save doesn't put back a stale list
+            reg.persist, reg.config_path = True, Path(d) / "config.yaml"
+            reg.set_enabled("news", False)
+            APP.processEvents()
+            assert not w._plugin_rows["news"]["switch"].isChecked()
+            new = w._collect()[0]
+            assert new["plugins"]["disabled"] == ["news", "telegram"]
+            assert w.save()
+            written = yaml.safe_load((Path(d) / "config.yaml").read_text(encoding="utf-8"))
+            assert written["plugins"]["disabled"] == ["news", "telegram"] and written["plugins"]["enabled"] == ["lyrics"]
+            assert not w._plugin_staged
+            # what the app does with the saved config: apply it in place, then sync
+            config.apply_in_place(reg.cfg, new)
+            reg.sync()
+            assert not reg.is_enabled("telegram") and reg.is_enabled("lyrics")
+            # a plugin's own setting: written only once changed
+            assert "lyrics" not in (new.get("plugins", {}).get("settings") or {})
+            combo = lyr["row"]._details.findChild(type(w.cmb_motion))
+            w._set_combo(combo, "musixmatch")
+            assert w._collect()[0]["plugins"]["settings"]["lyrics"]["source"] == "musixmatch"
+            # reload drops what's staged
+            w._plugin_rows["weather"]["switch"].setChecked(False)
+            w.reload(w._orig)
+            assert w._plugin_rows["weather"]["switch"].isChecked() and not w._plugin_staged
+        finally:
+            w.close()
+            plugins.reset(None)
+
+
+def test_plugins_page_bare_and_character_follows():
+    """With no app registry the page still builds; switching off the pack in use moves the
+    Character page to the ember at once (the pack is hidden, not selectable) and back again."""
+    from heyclaude import plugins
+    with tempfile.TemporaryDirectory() as d:
+        cfg = config.defaults()
+        cfg["island"]["character"]["pack"] = "wren"
+        w = _window(cfg, d, None)                       # plugins.get(): a fresh default registry
+        try:
+            assert "character-wren" in w._plugin_rows and w.char_tab.current() == "wren"
+            seen = []
+            w.char_tab.preview_pack.connect(seen.append)
+            w._plugin_rows["character-wren"]["switch"].setChecked(False)
+            assert w.char_tab.current() == "none" or w.char_tab.current() == w.char_tab.gallery.item(0).data(0x0100)
+            assert not w.char_tab.available("wren") and seen[-1] == w.char_tab.gallery.item(0).data(0x0100)
+            new = w._collect()[0]
+            assert new["plugins"]["disabled"] == ["character-wren"]
+            assert new["island"]["character"]["pack"] == "wren"       # kept: switching it back on restores it
+            w._plugin_rows["character-wren"]["switch"].setChecked(True)
+            assert w.char_tab.current() == "wren" and w.char_tab.available("wren") and seen[-1] == "wren"
+            assert not config.diff(cfg, w._collect()[0])
+            # a config whose pack's plugin is already off: the ember shows, the pack is kept
+            cfg2 = config.defaults()
+            cfg2["island"]["character"]["pack"] = "echo"
+            cfg2["plugins"]["disabled"] = ["character-echo"]
+            w.reload(cfg2)
+            assert not w.char_tab.available("echo") and w.char_tab.current() != "echo"
+            assert not w._plugin_rows["character-echo"]["switch"].isChecked()
+            assert not config.diff(cfg2, w._collect()[0])
+        finally:
+            w.close()
+            plugins.reset(None)
+
+
 if __name__ == "__main__":
     n = 0
     for name, fn in list(globals().items()):

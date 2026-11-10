@@ -332,9 +332,7 @@ class SettingsWindow(QWidget):
         self._build_permissions()
         from .hooks_settings import SessionsTab
         self.sessions_tab = SessionsTab(self)       # M7: Claude Code hooks, approvals
-        # A "Plugins" page goes last, in its own sidebar section: one kit.Group of list rows
-        # (kit.SettingRow(name, line, (kit.Switch(),), kind="trailing", icon=pixmap)), and
-        # row.set_details(widget) for a plugin with settings of its own.
+        self._build_plugins()                        # last, in its own sidebar section
 
         # Bottom: status line + Restart now + Save / Close.
         footer = QFrame()
@@ -516,6 +514,45 @@ class SettingsWindow(QWidget):
         note.setTextFormat(Qt.RichText)
         p.add(note)
 
+    # island.fps: values from island_qml.FPS_CHOICES; any other number already in config.yaml shows as
+    # "<n> fps" and is written back exactly as it was unless you pick something else
+    FPS_LABELS = {"auto": "Auto", "30": "30 fps", "60": "60 fps", "native": "Every refresh"}
+    FPS_DESC = ("Always a whole fraction of the screen's refresh rate (60 on a 144 Hz screen runs at 72); "
+                "about 30 on battery.")
+
+    @property
+    def FPS_ITEMS(self):
+        try:
+            from .island_qml import FPS_CHOICES
+        except Exception:
+            FPS_CHOICES = ("auto", "30", "60", "native")
+        return [(self.FPS_LABELS.get(v, f"{v} fps"), v) for v in FPS_CHOICES]
+
+    def _fps_now(self):
+        """The rate the island runs at now, in the description, when the app told us how to ask."""
+        fps = None
+        try:
+            fps = self.live_fps() if callable(self.live_fps) else None
+        except Exception:
+            fps = None
+        self.row_fps.set_desc(self.FPS_DESC + (f" Now {round(fps)} fps." if fps else ""))
+
+    live_fps = None          # __main__ sets a callable: the island's effective live rate
+
+    @staticmethod
+    def _fps_key(raw) -> str:
+        return str("auto" if raw is None else raw).strip().lower()
+
+    def _fill_fps(self, cfg: dict):
+        raw = _get(cfg, "island.fps", "auto")
+        self._fps_raw = raw
+        v = self._fps_key(raw)
+        if self.cmb_fps.findData(v) < 0:                  # a rate set by hand (any positive number works)
+            num = v.removesuffix("fps").strip()
+            self.cmb_fps.addItem(f"{num} fps" if num.replace(".", "", 1).isdigit() else v, v)
+        self.cmb_fps.setCurrentIndex(self.cmb_fps.findData(v))
+        self._fps_now()
+
     def _build_island(self):
         p = self._page("Island", "How the island at the top of the screen looks and moves.", "island")
         g = p.add_group("Size")
@@ -533,7 +570,8 @@ class SettingsWindow(QWidget):
         g = p.add_group("Motion and visibility")
         self.cmb_motion = self._combo([("Follow Windows", "auto"), ("Full", "full"), ("Calm", "calm"), ("Off", "off")])
         self._row(g, "island.motion", "Motion", self.cmb_motion)
-        # The island's frame rate (auto / 30 / 60 / display rate) goes here, as a field row like Motion.
+        self.cmb_fps = self._combo(self.FPS_ITEMS)
+        self.row_fps = self._row(g, "island.fps", "Frame rate", self.cmb_fps, desc=self.FPS_DESC)
         self.cb_hide_idle = self._switch(g, "island.hide_when_idle", "Hide when idle")
 
     def _build_character(self):
@@ -917,6 +955,265 @@ class SettingsWindow(QWidget):
         self._row(g, "tasks.allowed_tools", "Allowed tools", self.ed_tasks_tools, kind="stacked",
                   desc="Anything else that would need a permission prompt is denied.")
 
+    # -- plugins (heyclaude/plugins.py) -------------------------------------------------------
+    # The switches are staged like every other setting on this window (and like the Character
+    # page's pick): Save writes plugins.disabled / plugins.enabled and the app applies them
+    # (reg.sync()); Close without saving drops them. The Character page follows a staged pack
+    # switch at once.
+    _plugin_event = Signal(str, bool)
+    SHOWN_ELSEWHERE = {"weather.location": "Home place is on the General page."}
+
+    def _registry(self):
+        try:
+            from . import plugins
+            return plugins.get()
+        except Exception as e:
+            print(f"[settings] plugins unavailable: {e}")
+            return None
+
+    def _build_plugins(self):
+        self._plugin_staged: dict[str, bool] = {}
+        self._plugin_rows: dict[str, dict] = {}
+        self._plugin_lists = {"disabled": [], "enabled": []}
+        p = self._page("Plugins", "Every feature is a plugin. Switch one off and its card, tools and commands are "
+                       "gone; Save applies it.", "plugins", section="")
+        self.plugin_page = p
+        reg = self._registry()
+        try:
+            infos = reg.list() if reg is not None else []
+        except Exception as e:
+            infos = []
+            p.add(self._help(f"Couldn't read the plugins: {e}"))
+        groups = {
+            "features": p.add_group("Features", "Built in. Switch off what you don't use."),
+            "characters": p.add_group("Characters", "Packs for the Character page. Switching off the one in "
+                                                    "use puts the ember back."),
+            "yours": p.add_group("Your plugins", "From state/plugins/. They run code on this PC, so each starts "
+                                                 "off until you switch it on; read what it can do first."),
+        }
+        for info in infos:
+            if not info.builtin:
+                key = "yours"
+            elif "characters" in info.kinds or info.id.startswith("character-"):
+                key = "characters"
+            else:
+                key = "features"
+            self._plugin_row(groups[key], info)
+        if not any(not i.builtin for i in infos):
+            groups["yours"].add_note("None yet. Put a plugin's folder in state/plugins/ (docs/plugin-api.md) and "
+                                     "reopen Settings.")
+        if not any(i.builtin and ("characters" in i.kinds or i.id.startswith("character-")) for i in infos):
+            groups["characters"].hide()
+        if reg is not None:
+            self._plugin_event.connect(self._on_plugin_event)
+            unsub = reg.subscribe(lambda pid, on: self._plugin_event.emit(pid, on))    # any thread -> GUI
+            self.destroyed.connect(lambda *_: unsub())
+
+    def _plugin_icon(self, info):
+        """The plugin's own icon, a character pack's preview, or its glyph, on a 32 px tile."""
+        path = ""
+        if info.icon_url:
+            from PySide6.QtCore import QUrl
+            path = QUrl(info.icon_url).toLocalFile()
+        cids = (info.contributes or {}).get("characters") or []
+        if not path and cids:
+            man = self.char_tab.reg.get(cids[0]) if hasattr(self, "char_tab") else None
+            path = (man or {}).get("preview") or ""
+        return kit.icon_tile(path, info.glyph, info.name)
+
+    def _plugin_row(self, group: kit.Group, info):
+        desc = info.description
+        if not info.builtin and info.permissions:
+            desc += "\nIt " + "; ".join(x["text"] for x in info.permissions) + "."
+        controls = []
+        sw = None
+        if info.core:
+            lab = QLabel("Always on")
+            lab.setObjectName("note")
+            controls.append(lab)
+        elif info.status in ("broken", "incompatible"):
+            lab = QLabel("Not loaded" if info.status == "broken" else "Incompatible")
+            lab.setObjectName("note")
+            kit.set_tone(lab, "bad")
+            controls.append(lab)
+        else:
+            sw = kit.Switch()
+            sw.toggled.connect(lambda on, pid=info.id: self._stage_plugin(pid, on))
+            controls.append(sw)
+        row = kit.SettingRow(info.name, desc, controls, kind="trailing", icon=self._plugin_icon(info))
+        row.setToolTip(f"{info.name}{' ' + info.version if info.version else ''}"
+                       f"{' by ' + info.author if info.author else ''}\n{info.dir}")
+        if info.status in ("broken", "incompatible"):
+            row.set_desc("Not loaded: " + "; ".join(info.problems) if info.status == "broken"
+                         else "; ".join(info.problems))
+            kit.set_tone(row.desc_label, "bad")
+            row.title_label.setToolTip(info.description)
+        group.add(row)
+        rec = {"info": info, "row": row, "switch": sw, "fields": []}
+        if info.settings and info.status not in ("broken", "incompatible"):
+            row.set_details(self._plugin_settings(info, rec))
+        self._plugin_rows[info.id] = rec
+
+    def _plugin_settings(self, info, rec) -> QWidget:
+        """A plugin's own settings, under its row (staged like the rest; written on Save)."""
+        box = QWidget()
+        v = QVBoxLayout(box)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        for s in info.settings:
+            ck = s["config_key"]
+            if ck in self.SHOWN_ELSEWHERE:
+                lab = QLabel(self.SHOWN_ELSEWHERE[ck])
+                lab.setObjectName("note")
+                lab.setContentsMargins(kit.ICON_INDENT, th.S[2], 0, th.S[2])
+                v.addWidget(lab)
+                continue
+            typ = s.get("type", "string")
+            if typ == "boolean":
+                w = kit.Switch()
+                get, put = w.isChecked, (lambda x, w=w: w.setChecked(bool(x)))
+                kind = "trailing"
+            elif typ == "enum":
+                w = self._combo([(o, o) for o in s.get("options") or []])
+                get, put = (lambda w=w: self._combo_value(w)), (lambda x, w=w: self._set_combo(w, x))
+                kind = "field"
+            elif typ in ("number", "integer"):
+                w = QSpinBox() if typ == "integer" else QDoubleSpinBox(decimals=2)
+                w.setRange(-1_000_000, 1_000_000)
+                get = w.value
+                put = (lambda x, w=w, f=(int if typ == "integer" else float): w.setValue(f(x or 0)))
+                kind = "field"
+            else:
+                w = QLineEdit()
+                if typ == "secret":
+                    w.setEchoMode(QLineEdit.Password)
+                get, put = (lambda w=w: w.text().strip()), (lambda x, w=w: w.setText("" if x is None else str(x)))
+                kind = "field"
+            row = kit.SettingRow(s["label"], s.get("help", ""), (w,), kind=kind)
+            row.layout().setContentsMargins(kit.ICON_INDENT, th.S[2], 0, th.S[2])
+            v.addWidget(row)
+            self.plugin_page.register(row)
+            rec["fields"].append({"key": ck, "default": s.get("default"), "get": get, "put": put})
+        return box
+
+    def _plugin_on(self, info) -> bool:
+        """On, as this window has it: the saved lists plus what's staged."""
+        if info.id in self._plugin_staged:
+            return self._plugin_staged[info.id]
+        if info.core:
+            return True
+        if info.status in ("broken", "incompatible", "failed"):
+            return False
+        if info.id in self._plugin_lists["disabled"]:
+            return False
+        return info.builtin or info.id in self._plugin_lists["enabled"]
+
+    def _live_lists(self, cfg: dict) -> dict:
+        """plugins.disabled / plugins.enabled: the running app's (its registry saves them the moment
+        anything else switches a plugin) or, with no app registry (tests), the window's config."""
+        reg = self._registry()
+        src = reg.cfg if reg is not None and reg.persist else cfg
+        sec = src.get("plugins") if isinstance(src.get("plugins"), dict) else {}
+        return {k: [str(x) for x in (sec.get(k) or [])] for k in ("disabled", "enabled")}
+
+    def _fill_plugins(self, cfg: dict):
+        self._plugin_staged.clear()
+        self._plugin_lists = self._live_lists(cfg)
+        sec = self._orig.setdefault("plugins", {}) if isinstance(self._orig.get("plugins"), dict) else None
+        if sec is not None:                          # what the app has now is the starting point (no false diff)
+            for k, v in self._plugin_lists.items():
+                if k in sec or v:
+                    sec[k] = list(v)
+        for rec in self._plugin_rows.values():
+            for f in rec["fields"]:
+                cur = _get(cfg, f["key"], None)
+                f["loaded"] = cur
+                f["put"](f["default"] if cur is None else cur)
+                f["start"] = f["get"]()
+        self._refresh_plugins()
+
+    def _refresh_plugins(self):
+        """Switches, failure lines and the Character page's packs, from the lists + staged."""
+        reg = self._registry()
+        fresh = {}
+        try:
+            fresh = {i.id: i for i in reg.list()} if reg is not None else {}
+        except Exception:
+            pass
+        for pid, rec in self._plugin_rows.items():
+            info = fresh.get(pid, rec["info"])
+            rec["info"] = info
+            sw = rec["switch"]
+            on = self._plugin_on(info)
+            if sw is not None:
+                sw.blockSignals(True)
+                sw.setChecked(on)
+                sw._set_pos(1.0 if on else 0.0)
+                sw.blockSignals(False)
+            if info.status == "failed" and pid not in self._plugin_staged:
+                rec["row"].set_desc("Switched off for this session: " + "; ".join(info.problems))
+                kit.set_tone(rec["row"].desc_label, "bad")
+            elif info.status == "ok" and rec["row"].desc_label.property("tone") == "bad":
+                rec["row"].set_desc(info.description)
+                kit.set_tone(rec["row"].desc_label, "")
+            for cid in (info.contributes or {}).get("characters") or []:
+                self.char_tab.set_available(cid, on, quiet=True)
+
+    def _stage_plugin(self, pid: str, on: bool):
+        rec = self._plugin_rows[pid]
+        self._plugin_staged.pop(pid, None)
+        if self._plugin_on(rec["info"]) != on:
+            self._plugin_staged[pid] = on
+        for cid in (rec["info"].contributes or {}).get("characters") or []:
+            self.char_tab.set_available(cid, on)
+
+    def _on_plugin_event(self, pid: str, on: bool):
+        """Something else switched a plugin (or its code crashed): follow the app, keep what's staged."""
+        live = self._live_lists(self._orig)
+        sec = self._orig.get("plugins")
+        if isinstance(sec, dict):
+            for k, v in live.items():
+                if k in sec or v:
+                    sec[k] = list(v)
+        self._plugin_lists = live
+        self._refresh_plugins()
+
+    def _retry_failed_plugins(self):
+        """A plugin whose code crashed this session and that you switched back on: nothing in the
+        config changes, so the registry is asked to retry it directly."""
+        reg = self._registry()
+        for pid, on in list(self._plugin_staged.items()):
+            if on and self._plugin_rows[pid]["info"].status == "failed" and reg is not None:
+                try:
+                    reg.set_enabled(pid, True)
+                except ValueError:
+                    pass
+                self._plugin_staged.pop(pid, None)
+
+    def _collect_plugins(self, new: dict):
+        """plugins.disabled / plugins.enabled from the app's current lists plus what's staged (never a
+        stale copy), and the plugins' own settings that were changed."""
+        if self._plugin_staged:
+            dis = list(self._plugin_lists["disabled"])
+            opt = list(self._plugin_lists["enabled"])
+            for pid, on in self._plugin_staged.items():
+                user = not self._plugin_rows[pid]["info"].builtin
+                dis = [x for x in dis if x != pid]
+                opt = [x for x in opt if x != pid]
+                if on and user:
+                    opt.append(pid)
+                elif not on and not user:
+                    dis.append(pid)
+            sec = new.setdefault("plugins", {})
+            sec["disabled"] = sorted(dis)
+            if opt or "enabled" in sec:
+                sec["enabled"] = sorted(opt)
+        for rec in self._plugin_rows.values():
+            for f in rec["fields"]:
+                val = f["get"]()
+                if val != f.get("start"):            # only what you changed: no defaults written into config.yaml
+                    _set(new, f["key"], val)
+
     # -- filling / collecting -----------------------------------------------
     def _fill(self, cfg: dict):
         self.sessions_tab.fill(cfg)
@@ -935,8 +1232,10 @@ class SettingsWindow(QWidget):
         self._filling_scale = False
         self._scale_changed()
         self._set_combo(self.cmb_motion, str(_get(cfg, "island.motion", "auto")))
+        self._fill_fps(cfg)
         self.cb_hide_idle.setChecked(bool(_get(cfg, "island.hide_when_idle", False)))
         self.ed_weather.setText(str(_get(cfg, "weather.location", "") or ""))
+        self._fill_plugins(cfg)                      # first: it says which character packs are on
         self.char_tab.fill(cfg)
 
         self._set_combo(self.cmb_wake, _get(cfg, "wake.model", "hey_jarvis"))
@@ -1045,6 +1344,9 @@ class SettingsWindow(QWidget):
         _set(new, "app.start_with_windows", self.cb_autostart.isChecked())
         _set(new, "island.scale", "auto" if self.cb_scale_auto.isChecked() else self.sl_scale.value() * 5 / 100)
         _set(new, "island.motion", self._combo_value(self.cmb_motion))
+        fps = self._combo_value(self.cmb_fps)
+        raw = getattr(self, "_fps_raw", "auto")
+        _set(new, "island.fps", raw if self._fps_key(raw) == fps else fps)   # an untouched value stays as written
         _set(new, "island.hide_when_idle", self.cb_hide_idle.isChecked())
         _set(new, "weather.location", self.ed_weather.text().strip())
         hold = " ".join(self.ed_hold.text().lower().split())
@@ -1162,6 +1464,7 @@ class SettingsWindow(QWidget):
         _set(new, "agent.allowed_tools", self._tools(self.ed_agent_tools))
         _set(new, "tasks.allowed_tools", self._tools(self.ed_tasks_tools))
         self.char_tab.collect(new)
+        self._collect_plugins(new)
         return new, errors, warnings
 
     def _text(self, edit: QLineEdit, key: str):
@@ -1197,6 +1500,7 @@ class SettingsWindow(QWidget):
         if errors:
             self._set_status("Not saved. " + " ".join(errors), "bad")
             return False
+        self._retry_failed_plugins()
         changed = config.diff(self._orig, new)
         if not changed:
             msg = "No changes to save."
@@ -1211,8 +1515,13 @@ class SettingsWindow(QWidget):
             self._set_status(f"Couldn't write the config file: {e}", "bad")
             return False
         self._orig = copy.deepcopy(new)
+        self._plugin_staged.clear()                  # now in _orig: the app applies them (reg.sync())
+        self._fps_raw = _get(new, "island.fps", "auto")
         self.ed_hotkey.setText(str(new["app"].get("hotkey") or ""))   # show the normalized form
         self.saved.emit(copy.deepcopy(new), list(changed))
+        self._refresh_plugins()
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(250, self._fps_now)       # the island re-timed itself: show the new rate
         restart = config.needs_restart(changed)
         for k in restart:
             if k not in self._pending_restart:

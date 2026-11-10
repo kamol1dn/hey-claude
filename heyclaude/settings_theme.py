@@ -215,6 +215,15 @@ GLYPHS = {   # Segoe Fluent Icons / MDL2 code points
 }
 
 
+# A plugin manifest's "glyph" -> one of the Fluent code points (unknown ones get the name's initial)
+PLUGIN_GLYPHS = {
+    "calendar": "", "face": "", "clipboard": "", "calc": "", "spark": "",
+    "hourglass": "", "pin": "", "mail": "", "music": "", "news": "",
+    "gear": "", "cursor": "", "chip": "", "chat": "", "timer": "",
+    "cap": "", "sun": "", "translate": "", "phone": "",
+}
+
+
 def glyph_pixmap(name: str, color: str, px: int = 16, dpr: float = 2.0) -> QPixmap:
     """A Fluent icon glyph as a pixmap (a small dot when no icon font is installed)."""
     pm = QPixmap(round(px * dpr), round(px * dpr))

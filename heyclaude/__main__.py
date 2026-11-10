@@ -174,6 +174,9 @@ def main(argv=None, harness=None):
             w.saved.connect(on_saved)
             if island is not None and hasattr(island, "preview_scale"):
                 w.island_preview.connect(island.preview_scale)          # M5: live size preview
+            if island is not None and hasattr(island, "apply_fps"):
+                w.live_fps = lambda: getattr(island, "live_fps", None)  # "now 72 fps" under Frame rate
+                w._fps_now()
             if island is not None and hasattr(island, "preview_character"):
                 w.character_preview.connect(island.preview_character)  # M6: the picker switches live
                 w.character_play.connect(island.play_antic)

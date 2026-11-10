@@ -78,6 +78,8 @@ Item {
                 id: qcol
                 readonly property int qi: index
                 readonly property var q: modelData
+                // room for a description line only when the options have any (no jumping on hover)
+                readonly property bool hasHints: (q.options || []).some(function (o) { return !!o.description })
                 width: qs.width
                 spacing: 5
                 Row {
@@ -94,11 +96,14 @@ Item {
                         width: parent.width - (qcol.q.header ? hdr.implicitWidth + 16 : 0)
                         text: (qcol.q.question || "") + (qcol.q.multiSelect ? "<font color=\"#8A847F\">  (any)</font>" : "")
                         textFormat: Text.StyledText
-                        color: "#E6E1DC"; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                        color: "#E6E1DC"; wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight
                         font.family: "Segoe UI Variable Text"; font.pointSize: 9
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
+                // the hovered option's description, inside the card (a floating tip
+                // ran past the island's edge and was clipped)
+                property string hint: ""
                 Flow {
                     width: parent.width
                     spacing: 6
@@ -111,11 +116,23 @@ Item {
                             label: (qcol.q.multiSelect ? (sel ? "✓ " : "") : "") + card.short(lab, 34)
                             w: Math.max(48, Math.ceil(fmP.advanceWidth(label)) + 26)
                             accent: sel
-                            tip: modelData.description || ""
+                            onHoveredChanged: {
+                                if (hovered) qcol.hint = String(modelData.description || "")
+                                else if (qcol.hint === String(modelData.description || "")) qcol.hint = ""
+                            }
                             border.width: sel ? 1 : 0; border.color: Qt.rgba(217 / 255, 119 / 255, 87 / 255, 0.7)
                             onTapped: card.toggle(qcol.qi, lab)
                         }
                     }
+                }
+                Text {
+                    objectName: "optionHint"
+                    width: parent.width
+                    height: qcol.hasHints ? Math.max(implicitHeight, fmP.height * 2) : 0
+                    visible: qcol.hasHints
+                    text: qcol.hint
+                    color: "#9A9A9A"; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                    font.family: "Segoe UI Variable Text"; font.pointSize: 8
                 }
             }
         }
@@ -127,7 +144,7 @@ Item {
         Row {
             spacing: 6
             x: parent.width - width
-            Pill { objectName: "inTerminal"; label: "In terminal"; w: 76; tip: "Answer it in the terminal instead"
+            Pill { objectName: "inTerminal"; label: "In terminal"; w: 76
                 onTapped: card.decided("pass") }
             Pill { objectName: "submit"; label: "Submit"; w: 62; primary: card.complete; enabled_: card.complete
                 onTapped: card.submit() }

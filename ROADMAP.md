@@ -757,7 +757,31 @@ motion and character.
   through fallbacks;
 - adding a new state to the registry needs no change to any existing pack.
 
-## M7: Tasks v2
+## M7: Tasks v2 ✅ built (2026-11-10)
+
+**Status:** built; see README "Watching Claude Code sessions (M7)". `heyclaude/hookrelay/`:
+the stdlib relay (`heyclaude-hook.py`, installed to `%LOCALAPPDATA%\hey-claude\hook`), the per-user
+pipe (explicit DACL, both sides check the other's user SID), the settings.json writer (merge next to
+existing hooks, dated backup, exact restore), the session hub (ticker, diffs, "done" moment, approvals,
+voice answers, handoff after the turn) and jump/handoff. Island: sessions in the hover list (Diff / Jump /
+To desktop), Allow / Deny / Always cards with a "needs a click" marker for dangerous ones, Claude's
+questions as option pills, `approval_needed`. Settings → Sessions installs/uninstalls the hooks.
+Offline tests: test_hooks (31), test_sessions (35), test_jump (30), test_island_sessions (11).
+Live (CLI 2.1.317, hooks installed with the user's OK):
+- PermissionRequest fires in `claude -p` even with `--permission-prompts none`, so voice **tasks** now pause
+  on the island; a real `claude -p` session's Bash approval was clicked Allow on the island and the run
+  continued (file written, then its edit, no denials, 29 s). Deny and the edit diff (+1 −1) checked
+  against a temp `--settings` file first.
+- A Claude **desktop-app** session's AskUserQuestion showed on the island and was answered there.
+  `claude -p` disables AskUserQuestion, so it can't be tested headless. The CLI's schema confirms the
+  answers format: question text -> string, multi-select comma-separated.
+- Jump found and raised the window in Windows Terminal (default terminal and wt.exe) and classic conhost.
+- Uninstall planned against the real file reproduces the original bytes (same SHA-256).
+Not built: automatic handoff for "serious" tasks, per-task worktrees / "merge it", toasts and Telegram on
+finish, the dashboard window, the `--permission-prompt-tool` fallback (not needed: hooks cover `-p`).
+Seen live: two cards at once (a session's Bash approval plus another session's question) stack, and it's
+easy to answer the wrong one; and the hover list can collapse when the pointer moves onto a row in the
+offscreen tests (not confirmed on the desktop).
 
 **Goal:** voice-started work you can supervise and trust.
 

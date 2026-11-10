@@ -479,7 +479,7 @@ Item {
                         Pill { visible: (rowItem.r.diffs || 0) > 0; objectName: "act:diff"; label: "Diff"; w: 46; accent: true
                             onTapped: root.sessionAct(rowItem.r.sid, "diff") }
                         Pill { objectName: "act:jump"; label: "Jump"; w: 48; primary: true; onTapped: root.sessionAct(rowItem.r.sid, "jump") }
-                        Pill { visible: !rowItem.r.desktop; objectName: "act:desktop"; label: "To desktop"; w: 74; tip: "Move it to the Claude desktop app"
+                        Pill { visible: !rowItem.r.desktop; objectName: "act:desktop"; label: "To desktop"; w: 74
                             onTapped: root.sessionAct(rowItem.r.sid, "desktop") }
                         Pill { objectName: "act:dismiss"; label: "Dismiss"; w: 58; onTapped: root.sessionAct(rowItem.r.sid, "dismiss") }
                     }

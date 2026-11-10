@@ -52,6 +52,8 @@ Item {
     onSmallChanged: if (ld.item) { ld.item.small = host.small; ld.item.bounds = boundsFor() }
     Component.onCompleted: load()
 
+    property real hostFps: 0                // the host's tick rate; see CanvasCharacter.hostTick
+    function hostTick() { if (ld.item && ld.item.hostTick) ld.item.hostTick() }
     function playAntic(id, dur) { return ld.item ? ld.item.playAntic(id, dur) : false }
     function interrupt() { return ld.item ? ld.item.interrupt() : false }
     function advance(dt) { return ld.item ? ld.item.advance(dt) : 0 }
@@ -61,7 +63,7 @@ Item {
         var c = ld.item
         if (!c) return { ready: false, status: ld.status }
         return { ready: true, state: c.stateId, antic: c.antic, fps: c.fps, frames: c.frames, w: c.width, h: c.height,
-                 bounds: c.bounds, small: c.small }
+                 bounds: c.bounds, small: c.small, riding: !!c._riding }
     }
 
     Loader {
@@ -84,6 +86,7 @@ Item {
     Binding { target: ld.item; property: "look"; value: host.look; when: ld.item !== null }
     Binding { target: ld.item; property: "near"; value: host.near; when: ld.item !== null }
     Binding { target: ld.item; property: "budgets"; value: host.budgets; when: ld.item !== null }
+    Binding { target: ld.item; property: "hostFps"; value: host.hostFps; when: ld.item !== null }
     Connections {
         target: ld.item
         ignoreUnknownSignals: true

@@ -153,15 +153,18 @@ Item {
     // tests / lab: step by dt and paint now
     function advance(dt) { step(dt); canvas.requestPaint(); fps = wanted(); return fps }
 
-    // The host's own repaint rate (the island's engine tick). When the character wants no
-    // more than that and no more than the idle budget, it rides the host's ticks
-    // (hostTick()) instead of a second timer, so the two never paint out of phase.
+    // The host's own repaint rate (the island's engine tick: its rest tiers, or the live tier,
+    // vsync-locked at island.fps). When the character wants no more than that, it rides the
+    // host's ticks (hostTick(), every n-th one) instead of a second timer, so the two never
+    // paint out of phase; a free timer next to a vsync-locked host judders.
     property real hostFps: 0
     property bool _riding: false
+    property int _hostN: 0
     function hostTick() {
         if (!_riding || !sim) return
+        if (++_hostN < Math.max(1, Math.round(hostFps / Math.max(1, fps)))) return
+        _hostN = 0
         var now = Date.now()
-        if (now - _last < 1000 / Math.max(1, fps) - 6) return
         var dt = Math.min(0.25, Math.max(0.001, (now - _last) / 1000))
         _last = now
         step(dt)
@@ -175,8 +178,8 @@ Item {
         var f = wanted()
         fps = f
         if (f <= 0) { ticker.stop(); _riding = false; canvas.requestPaint(); return }
-        if (hostFps >= f - 0.01 && f <= budgets.idle_fps) {
-            if (!_riding) { _riding = true; _last = Date.now() }
+        if (hostFps > 0 && hostFps >= f - 0.01) {
+            if (!_riding) { _riding = true; _last = Date.now(); _hostN = 0 }
             ticker.stop()
             return
         }

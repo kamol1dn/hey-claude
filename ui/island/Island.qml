@@ -57,7 +57,7 @@ Item {
         function h2(v) { var s = Math.round(Math.max(0, Math.min(255, v))).toString(16); return s.length < 2 ? "0" + s : s }
         return "#" + h2(a * 255) + h2(c[0]) + h2(c[1]) + h2(c[2])
     }
-    function now() { return clockMode === "fake" ? fakeNow : Date.now() }
+    function now() { return clockMode === "fake" ? fakeNow : frameNow >= 0 ? frameNow : Date.now() }
 
     Component.onCompleted: {
         E.init({
@@ -71,13 +71,50 @@ Item {
         tick()
     }
 
-    // -- the driver: exactly one of FrameAnimation / Timer / nothing ----------------
+    // -- the driver: the vsync-locked live tick / the rest timer / nothing --------------
+    // Live tier: one engine step every `liveDiv`-th vsync, phase-locked to presentation. A free
+    // ~60 Hz timer is not: on a 144 Hz panel a 13 ms timer gave 2-vsync frames with a 1-vsync one
+    // every ~7 (13.5 % of frames), and a running FrameAnimation draws every vsync (144/s) even
+    // when only every 2nd frame changes. So: after the frame a tick made is presented
+    // (frameSwapped), the next tick is timed for the last vsync interval before the target vsync,
+    // and the engine's clock for it sits on the vsync grid, so motion advances by exactly what
+    // the screen shows. No swap (nothing changed on screen): a fallback timer ticks anyway.
+    // island.fps (heyclaude/island_qml.py resolve_live_fps) sets liveDiv; battery and the
+    // software renderer cap it at ~30 fps.
     property real lastGap: 0
     property real lastTier: -2
+    property bool live: false
+    readonly property real refreshHz: model && model.refreshHz > 0 ? model.refreshHz : 60
+    readonly property int liveDiv: model && model.liveDiv > 0 ? model.liveDiv : 1
+    readonly property real vsyncMs: 1000 / refreshHz
+    readonly property real livePeriod: vsyncMs * liveDiv
+    readonly property real liveFps: refreshHz / liveDiv
+    property real liveAlpha: 0.25            // where in the vsync interval before the target the tick lands (measured: 0.1-0.35 all exact at 144 Hz)
+    property bool awaitSwap: false
+    property real swapGrid: 0                // the last presented live frame's time, on a smoothed vsync grid
+    property real plannedNow: -1
+    property real frameNow: -1               // the engine's clock during a locked tick
     function kick() {
-        if (frames.running) return
+        if (live) return
         rest.stop()
-        frames.start()
+        live = true; awaitSwap = false; swapGrid = 0; plannedNow = -1
+        Qt.callLater(root.tick)                 // the first frame of a wake lands at once
+    }
+    Connections {
+        target: root.Window.window
+        function onFrameSwapped() {
+            if (!root.live || !root.awaitSwap) return
+            root.awaitSwap = false
+            var t = Date.now(), P = root.vsyncMs
+            if (root.swapGrid > 0) {
+                var pred = root.swapGrid + Math.round((t - root.swapGrid) / P) * P, err = t - pred
+                root.swapGrid = Math.abs(err) < P / 3 ? pred + 0.1 * err : t      // a slow PLL: ms clock noise averages out
+            } else root.swapGrid = t
+            var target = root.swapGrid + (root.liveDiv - 1 + root.liveAlpha) * P
+            root.plannedNow = target
+            frames.interval = Math.max(0, Math.round(target - Date.now()))
+            frames.restart()
+        }
     }
     // Frame pacing for the UX recorder: while the engine wants every frame (live tier),
     // ticks further apart than ~2 frames are hitches. Bounded; drained by takeHitches().
@@ -88,13 +125,17 @@ Item {
     property int liveTicks: 0
     function tick() {
         var tnow = Date.now()
-        if (root.lastGap >= 0 && root.lastGap <= 40 && root.lastTickMs > 0) {   // live tier (60 fps, or 30 on battery/software)
+        if (root.lastGap >= 0 && root.lastGap <= 40 && root.lastTickMs > 0) {   // live tier (or the 30 fps tiers)
             root.liveTicks++
             var dms = tnow - root.lastTickMs
-            if (dms > 2 * Math.max(16, root.lastGap) + 2 && root.hitches.length < 4000) root.hitches.push([tnow, dms])
+            if (dms > 2 * Math.max(root.livePeriod, root.lastGap) + 2 && root.hitches.length < 4000) root.hitches.push([tnow, dms])
         }
         root.lastTickMs = tnow
+        // a locked tick steps the engine to its planned time on the vsync grid (unless it ran late)
+        root.frameNow = root.plannedNow >= 0 && Math.abs(tnow - root.plannedNow) < root.vsyncMs / 2 ? root.plannedNow : -1
+        root.plannedNow = -1
         var gap = E.frame()
+        root.frameNow = -1
         root.o = E.out
         root.oChanged()                         // same object every frame: tell the bindings
         body.apply(E.out)
@@ -102,28 +143,27 @@ Item {
         frameCount++
         updateMask()
         lastGap = gap
-        if (gap === 0) { if (!frames.running) { frames.triggeredOnStart = false; frames.start(); frames.triggeredOnStart = true } rest.stop() }
-        else {
-            frames.running = false
+        if (gap === 0) {
+            root.live = true; rest.stop()
+            // re-timed by the next frameSwapped; this fallback only fires when nothing was drawn
+            // (generous: a swap held up by a system stall must not be overtaken by an extra tick)
+            root.awaitSwap = true
+            frames.interval = Math.round(2 * root.livePeriod + root.vsyncMs / 2)
+            frames.restart()
+        } else {
+            root.live = false; root.awaitSwap = false; frames.stop()
             if (gap === Infinity) rest.stop()
             else { rest.interval = Math.max(1, Math.round(gap)); rest.restart() }
         }
         var tier = gap === Infinity ? -1 : gap
         if (model && tier !== root.lastTier) { root.lastTier = tier; model.frame(tier) }   // only when the tier changes
-        if (root.hasChar) {                     // M6: at rest the character paints on our ticks, in phase
-            var hf = gap === Infinity ? 0 : 1000 / Math.max(1, gap)
+        if (root.hasChar) {                     // M6: the character paints on our ticks, in phase
+            var hf = gap === Infinity ? 0 : gap === 0 ? root.liveFps : 1000 / Math.max(1, gap)
             if (character.hostFps !== hf) character.hostFps = hf
             character.hostTick()
         }
     }
-    // Live tier: a ~60 Hz timer. (A running FrameAnimation makes Qt draw every vsync,
-    // 144 a second on this laptop's panel, even when nothing changed.)
-    Timer {
-        id: frames
-        interval: 13; repeat: true; running: false   // every 2nd vsync on 144 Hz, every vsync on 60 Hz
-        triggeredOnStart: true                  // the first frame of a wake lands at once
-        onTriggered: root.tick()
-    }
+    Timer { id: frames; repeat: false; onTriggered: root.tick() }
     Timer { id: rest; repeat: false; onTriggered: root.tick() }
 
     property bool suspendedChar: false
@@ -145,6 +185,7 @@ Item {
         function onCmd(fn, args) {
             if (fn === "clock") { root.clockMode = args[0]; root.fakeNow = args[1]; return }
             if (fn === "step") { root.fakeNow = args[0]; root.tick(); return }
+            if (fn === "liveAlpha") { root.liveAlpha = args[0]; return }      // the motion lab's pacing sweep
             if (fn === "openInput") { root.openInput(args[0] || ""); return }
             if (fn === "closeInput") { root.closeInput(args[0]); return }
             if (fn === "inputText") { field.text = args[0]; field.cursorPosition = field.length; return }
@@ -258,7 +299,13 @@ Item {
                 x: o.ex; y: o.cy
                 source: model ? model.characterUrl : ""
                 manifest: model ? model.characterManifest : ({})
-                budgets: model ? model.characterBudgets : ({ idle_fps: 8, rest_fps: 4, antic_fps: 30, live_fps: 60 })
+                // live: the island's own rate (island.fps, ~30 on battery), so it rides our ticks in phase
+                budgets: {
+                    var b = Object.assign({}, model ? model.characterBudgets : ({ idle_fps: 8, rest_fps: 4, antic_fps: 30, live_fps: 60 }))
+                    b.live_fps = root.liveFps
+                    b.antic_fps = Math.min(b.antic_fps || 30, root.liveFps)
+                    return b
+                }
                 stateId: model ? model.characterState : "idle"
                 mood: model ? model.characterMood : "neutral"
                 count: model ? model.characterCount : 0
@@ -765,12 +812,12 @@ Item {
 
     // debug: the rest invariant (section 11 check 2), asked for by Python 1 s after a rest state
     function restCheck() {
-        return { frameAnimation: frames.running, timer: rest.running, interval: rest.interval, layer: false,
+        return { frameAnimation: root.live, live: root.live, liveDiv: root.liveDiv, refreshHz: root.refreshHz, timer: rest.running, interval: rest.interval, layer: false,
                  extrasAnimating: extras.animating, state: o.state }
     }
     function engineStats() { var s = E.stats(); return { nan: s.nan, frames: s.frames, maxEdge: s.maxEdge, state: E.stateName() } }
     function snapshot() { return E.snapshotForTest() }
-    function busyWhy() { return E.busyWhy() + " | frames.running " + frames.running + " rest " + rest.running + "/" + rest.interval }
+    function busyWhy() { return E.busyWhy() + " | live " + root.live + " rest " + rest.running + "/" + rest.interval }
     function extrasInfo() { var i = extras.info(); i.pillW = o.w; i.pillH = o.h; i.head = o.head; return i }
     function hit(x, y) { return hitCtl(x, y) }
     function probeUx() { var p = E.probeForUx(); var i = extras.info(); p.question = i.question; p.answer = i.answer;

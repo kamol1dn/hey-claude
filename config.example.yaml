@@ -496,6 +496,11 @@ island:
   # Motion: auto (calm when Windows "Animation effects" is off), full, calm (no decoration), off (instant).
   motion: auto
   renderer: auto          # auto (GPU: D3D11) or software (no GPU; live states at 30 fps)
+  # Frame rate while it moves (listening, thinking, speaking; at rest it is 0-8 fps whatever this
+  # says). Always a whole fraction of the display's refresh, so frames stay evenly paced:
+  # auto (every frame below 100 Hz; 144 Hz -> 72, 120 -> 60), 30, 60 (the nearest whole
+  # fraction: 72 on 144 Hz), or native (every refresh: 120/144/...). ~30 on battery regardless.
+  fps: auto
   hide_when_idle: false   # nothing on screen at rest; touch the top-centre edge to peek
   widgets: true           # answers may carry a card (weather, agenda, timer...): ui/widgets.schema.json
   icons: true             # the service icon of a tool in use ("Google Calendar · list events")

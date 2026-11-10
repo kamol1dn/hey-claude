@@ -56,7 +56,6 @@ var env = {
 };
 var MOTION = 'full';            // full | calm | off
 var NOW = 0;
-var LIVE_CAP = 60;              // 30 on battery or the software backend
 var awake = false;              // an outside event wants frames now (FrameAnimation)
 var inFrame = false;            // retargets made by frame() itself don't count: busy() sees them
 function wake() { if (!inFrame) awake = true; }
@@ -1070,7 +1069,8 @@ function still() {
     for (var i = 0; i < FOLS.length; i++) { var f = FOLS[i]; if (Math.abs(f.x - f.t) >= (Math.abs(f.t) > 2 ? 0.5 : 0.002)) return 100; }
     return AU.L < 0.003 && AU.A < 0.003 ? Infinity : 100;
 }
-function liveGap() { return LIVE_CAP >= 60 ? 0 : 33; }
+// live: every frame of the island's live tick (Island.qml: vsync-locked at island.fps; ~30 on battery)
+function liveGap() { return 0; }
 // ms to the next frame: 0 = every vsync, Infinity = stopped
 function frameGap() {
     var st = S.state, el = NOW - S.enteredAt, full = MOTION === 'full';
@@ -1105,7 +1105,7 @@ function frameGap() {
 function frame() {
     NOW = env.now();
     var raw = Math.max(0, (NOW - (lastT || NOW)) / 1000); lastT = NOW;
-    var dt = Math.min(raw, lastGap ? Math.min(0.6, lastGap / 1000 + 0.05) : 1 / 30);
+    var dt = Math.min(raw, lastGap ? Math.min(0.6, lastGap / 1000 + 0.05) : 1 / 20);   // live: up to 50 ms (a 28.8 fps tick is 34.7)
     awake = false;
     inFrame = true;
     STATS.frames++;
@@ -1155,7 +1155,6 @@ function init(e) {
     wake();
 }
 function setMotion(m) { MOTION = m === 'calm' || m === 'off' ? m : 'full'; respace(); resize(); wake(); }
-function setLiveCap(fps) { LIVE_CAP = fps; }
 function setBadge(b, dir) {
     NOW = env.now();
     if (b === S.badge) return;

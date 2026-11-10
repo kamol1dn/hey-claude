@@ -578,12 +578,13 @@ Anticipation and release, then the pen is handed over.
 ### Drivers (exactly one active)
 | Tier | Driver | Used by |
 |---|---|---|
-| 60 | `FrameAnimation` | woke, voice states, thinking, speaking, unsettled springs, live one-shots |
-| 30 | `FrameAnimation` with a 33 ms accumulator gate | loading, thinking after 30 s, battery saver, software backend |
+| live (`island.fps`) | vsync-locked tick: every n-th vsync (auto: 60 Hz → 60, 144 → 72, 120 → 60; ~30 on battery / software) | woke, voice states, thinking, speaking, unsettled springs, live one-shots |
+| 30 | `Timer` (33 ms) | loading, thinking after 30 s |
 | 15 / 10 / 8 / 2 | `Timer` (66 / 100 / 125 / 500 ms) writing phases directly | input idle / tasks / ready / paused |
 | 0 | nothing | off, calm idle, holds |
 
-- The engine is a single JS integrator inside the `FrameAnimation`. It does semi-implicit Euler for springs (`v += (−k(x−t) − 2ζ√k·v)·h; x += v·h`), the audio followers, tweens, the one-shot pool and the thread generator.
+- The live tick (Island.qml): a `FrameAnimation` would draw every vsync (144/s on a 144 Hz panel) and a free 13 ms `Timer` judders (on 144 Hz: 2-vsync frames with a 1-vsync one every ~7). So after each live frame is presented (`frameSwapped`) the next tick is timed into the vsync interval before its target vsync, and the engine's clock for it sits on the vsync grid: frames come every n vsyncs exactly and motion advances by exactly what the screen shows. Measured on the 144 Hz panel: 85 % of frames on cadence with the timer, 99.9-100 % with the lock (`tools/island_lab.py`).
+- The engine is a single JS integrator inside the live tick. It does semi-implicit Euler for springs (`v += (−k(x−t) − 2ζ√k·v)·h; x += v·h`), the audio followers, tweens, the one-shot pool and the thread generator.
 - `running = !settled || liveState`. `settled` means every |x − t| < ε and |v| < 10ε, with no one-shot alive.
 - **Rest invariant:** in ready, off and paused there is **no** running `Animation`, `Behavior` or `FrameAnimation`, and no `layer.enabled`. Idle breath values are pure functions of the timer phase, applied as shader uniforms or transforms (scale and opacity), never as Shape geometry.
 

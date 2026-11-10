@@ -1097,6 +1097,84 @@ def test_a_long_answer_is_never_cut_and_the_followup_is_quiet_over_a_card():
     _spin(600)
 
 
+def test_island_fps_resolves_to_a_whole_fraction_of_the_refresh():
+    from heyclaude.island_qml import resolve_live_fps, FPS_CHOICES
+    from heyclaude import config
+    assert config.defaults()["island"]["fps"] == "auto" and "auto" in FPS_CHOICES
+    assert config.needs_restart(["island.fps"]) == []                                  # applied live
+    # auto: every vsync below 100 Hz, else the divisor nearest 50-100 fps
+    assert resolve_live_fps("auto", 60) == (1, 60.0) and resolve_live_fps("auto", 75)[0] == 1
+    assert resolve_live_fps("auto", 144)[0] == 2 and resolve_live_fps("auto", 120) == (2, 60.0)
+    assert resolve_live_fps("auto", 240) == (4, 60.0) and resolve_live_fps("auto", 165)[0] == 3
+    # 30 / 60: the nearest whole fraction (never a rate that judders)
+    assert resolve_live_fps("60", 60) == (1, 60.0) and resolve_live_fps(60, 144)[0] == 2
+    assert resolve_live_fps("30", 60) == (2, 30.0) and resolve_live_fps("30", 144)[0] == 5
+    assert resolve_live_fps("30fps", 120) == (4, 30.0)
+    # native: every refresh
+    assert resolve_live_fps("native", 144)[0] == 1 and resolve_live_fps("native", 60) == (1, 60.0)
+    # battery / software win over any setting
+    for s in ("auto", "60", "native", 144):
+        div, fps = resolve_live_fps(s, 144, capped=True)
+        assert div == 5 and fps < 31, (s, div, fps)
+    assert resolve_live_fps("native", 60, capped=True) == (2, 30.0)
+    assert resolve_live_fps("30", 60, capped=True) == (2, 30.0)
+    # nonsense falls back to auto; a missing / absurd refresh to 60 Hz
+    assert resolve_live_fps("fast", 144)[0] == 2 and resolve_live_fps(None, 0) == (1, 60.0)
+    assert resolve_live_fps("0", 60) == (1, 60.0) and resolve_live_fps("auto", "x") == (1, 60.0)
+
+
+def test_island_fps_applies_live_and_rest_stays_at_zero():
+    isl = _island()
+    b = isl.bridge_
+    b.listening.emit(True, 0.0)
+    saved = dict(isl.cfg)
+    try:
+        assert isl.model._software and isl.model.liveDiv >= 1
+        hz = isl.model.refreshHz
+        assert 20 <= hz <= 1000
+        # software path: capped at ~30 whatever the setting
+        for s in ("native", "60", "30", "auto"):
+            isl.cfg["fps"] = s
+            isl.apply_config()
+            assert isl.model.liveDiv == max(1, round(hz / 30)) and isl.live_fps <= 31, (s, isl.model.liveDiv)
+        isl.model._software = False                       # as on the GPU path, mains power
+        isl._battery = False
+        isl.cfg["fps"] = "native"
+        isl.apply_config()
+        assert isl.model.liveDiv == 1 and _v(isl.call("restCheck"))["liveDiv"] == 1
+        isl.cfg["fps"] = "30"
+        isl.apply_config()
+        assert isl.model.liveDiv == max(1, round(hz / 30)) and _v(isl.call("restCheck"))["liveDiv"] == isl.model.liveDiv
+        isl._battery = True                               # battery wins over native
+        isl.cfg["fps"] = "native"
+        isl.apply_fps()
+        assert isl.model.liveDiv == max(1, round(hz / 30))
+        isl._battery = False
+        isl.apply_fps()
+        assert isl.model.liveDiv == 1
+        # a live state ticks on the locked driver; back at rest it stops (no timer in calm)
+        b.state.emit("speaking", "Hello there.")
+        _spin(600)
+        rc = _v(isl.call("restCheck"))
+        assert rc["live"] and not rc["timer"], rc
+        b.state.emit("idle", "")
+        _spin(1600)
+        rc = _v(isl.call("restCheck"))
+        assert not rc["live"] and rc["interval"] >= 100, rc
+        isl._send("setMotion", ["calm"])
+        _spin(1500)
+        rc = _v(isl.call("restCheck"))
+        assert not rc["live"] and not rc["timer"], rc                                   # 0 fps at idle
+        isl._send("setMotion", ["full"])
+    finally:
+        isl.cfg.clear()
+        isl.cfg.update(saved)
+        isl.model._software = True
+        isl._battery = None
+        isl.apply_config()
+        _spin(300)
+
+
 def test_the_speaking_wave_fills_the_head_up_to_the_controls():
     """Regression: in a turn (every voice request) the answer goes to the row under the head, and
     the speaking wave stopped at x 208 of a 440+ px pill: half the head looked empty. It runs to

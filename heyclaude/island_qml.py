@@ -182,6 +182,36 @@ def resolve_motion(setting: str | None) -> str:
         return "full"
 
 
+FPS_CHOICES = ("auto", "30", "60", "native")
+CAPPED_FPS = 30                 # on battery, or the software renderer
+
+
+def resolve_live_fps(setting, hz: float, capped: bool = False) -> tuple[int, float]:
+    """island.fps -> (vsync divisor, frames per second) for the live tier.
+
+    The island draws on every `div`-th vsync, so its frames stay evenly paced (a rate that is
+    not a whole fraction of the refresh judders). auto: every vsync below 100 Hz, else the
+    divisor closest to 50-100 fps (144 Hz -> 72, 120 -> 60, 240 -> 60); 30 / 60 (or any number):
+    the nearest whole fraction of the refresh (60 on 144 Hz -> 72); native: every vsync.
+    `capped` (battery, software renderer) holds it at ~30, whatever the setting."""
+    try:
+        hz = float(hz)
+    except (TypeError, ValueError):
+        hz = 60.0
+    if not 20 <= hz <= 1000:
+        hz = 60.0
+    s = str(setting if setting is not None else "auto").strip().lower().removesuffix("fps").strip()
+    if s in ("native", "max", "display"):
+        div = 1
+    elif s.replace(".", "", 1).isdigit() and float(s) > 0:
+        div = max(1, round(hz / float(s)))
+    else:                                          # auto, and anything unknown
+        div = max(1, int(hz // 50))
+    if capped:
+        div = max(div, round(hz / CAPPED_FPS))
+    return div, hz / div
+
+
 def task_rows(rows: list[dict]) -> list[dict]:
     out = []
     for r in rows[-5:]:
@@ -288,6 +318,8 @@ class IslandModel(QObject):
         self._software = False
         self._usage_on = True
         self._scale = 1.0
+        self._refresh_hz = 60.0
+        self._live_div = 1
         self._char_url = ""
         self._char_man: dict = {}
         self._char_budgets: dict = {}
@@ -331,6 +363,10 @@ class IslandModel(QObject):
         return self._scale
 
     uiScale = Property(float, _get_scale, notify=configChanged)
+
+    # the live tier's pacing (Island.qml's driver): the display's refresh and the vsync divisor
+    refreshHz = Property(float, lambda self: self._refresh_hz, notify=configChanged)
+    liveDiv = Property(int, lambda self: self._live_div, notify=configChanged)
 
     def _get_usage(self):
         return self._usage
@@ -552,6 +588,9 @@ class QmlIsland(QObject):
             raise RuntimeError(f"island QML failed to load: {errs}")
         self.root = self.view.rootObject()
         self.view.resize(round(WIN_W * self.scale), round(WIN_H * self.scale))
+        self._battery = None
+        self._fps_screen = None
+        self.view.screenChanged.connect(lambda _s: self.apply_fps())
         self.apply_config()
         self.view.sceneGraphError.connect(lambda err, msg: print(f"[island] scene graph error: {msg}"))
 
@@ -584,7 +623,6 @@ class QmlIsland(QObject):
         self._env_timer = QTimer(self, interval=5000, timeout=self._check_env)
         self._env_timer.start()
         self._suspended = False
-        self._battery = None
         self._check_env()
         if show:
             self.show()
@@ -620,7 +658,32 @@ class QmlIsland(QObject):
         self.model._usage_on = bool(self.cfg.get("usage_pill", True))
         self.model.usageChanged.emit()
         self._send("setUsageRow", [self.model._usage_on and bool(self.model._usage)])
+        self.apply_fps()
         self.apply_character()
+
+    def apply_fps(self):
+        """island.fps on this window's screen, ~30 on battery / the software renderer (live: the
+        QML driver re-times its next tick from the new divisor)."""
+        s = self.view.screen() or self._screen()
+        if s is not self._fps_screen:              # follow a refresh change (a mode switch, a dock)
+            if self._fps_screen is not None:
+                try:
+                    self._fps_screen.refreshRateChanged.disconnect(self._on_refresh)
+                except (RuntimeError, TypeError):
+                    pass
+            self._fps_screen = s
+            if s is not None:
+                s.refreshRateChanged.connect(self._on_refresh)
+        hz = s.refreshRate() if s is not None else 60.0
+        div, fps = resolve_live_fps(self.cfg.get("fps", "auto"), hz, bool(self._battery) or self.model._software)
+        m = self.model
+        if (div, round(hz, 3)) != (m._live_div, round(m._refresh_hz, 3)):
+            m._live_div, m._refresh_hz = div, float(hz if 20 <= hz <= 1000 else 60.0)
+            m.configChanged.emit()
+        self.live_fps = fps
+
+    def _on_refresh(self, _hz):
+        self.apply_fps()
 
     # -- M6: the character -------------------------------------------------------------
     def apply_character(self, pack: str | None = None):
@@ -811,7 +874,7 @@ class QmlIsland(QObject):
             self._send("suspend", [susp])
         if batt != self._battery:
             self._battery = batt
-            self._send("setLiveCap", [30 if (batt or self.model._software) else 60])
+            self.apply_fps()
 
     # -- inputs from the assistant --------------------------------------------------
     def set_state(self, mode: str, text: str = ""):

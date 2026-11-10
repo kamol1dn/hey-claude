@@ -158,7 +158,7 @@ dictate:
   # Clean-up by Claude (on your subscription, via the claude CLI): off | as_said
   # (punctuation only) | natural (drops um/uh, false starts) | polished. Adds
   # a second or two. cleanup_apps sets it per app, by exe name.
-  cleanup: off
+  cleanup: "off"                 # quoted: bare off is YAML for false
   cleanup_apps: {}               # e.g. {outlook.exe: polished, windowsterminal.exe: as_said}
   restore_delay_s: 0.3           # wait before putting your clipboard back (slow apps read it late)
   min_speech_ms: 150             # less speech than this pastes nothing (no "Thank you." from silence)

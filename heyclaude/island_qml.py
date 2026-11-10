@@ -27,6 +27,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QTimer, QUrl, Property, Qt, S
 from PySide6.QtGui import QCursor, QGuiApplication, QImage, QRegion
 from PySide6.QtQuick import QQuickImageProvider, QQuickView, QQuickWindow, QSGRendererInterface
 
+from . import characters as CH
 from .config import ROOT
 
 QML_DIR = ROOT / "ui" / "island"
@@ -273,6 +274,9 @@ class IslandModel(QObject):
     toolsChanged = Signal("QVariantList")
     usageChanged = Signal()
     configChanged = Signal()
+    characterChanged = Signal()                  # M6: the pack (url, manifest, budgets)
+    characterStateChanged = Signal()
+    charCmd = Signal(str, "QVariantList")        # M6: play / interrupt an antic, suspend
 
     def __init__(self, owner: "QmlIsland"):
         super().__init__()
@@ -283,8 +287,25 @@ class IslandModel(QObject):
         self._software = False
         self._usage_on = True
         self._scale = 1.0
+        self._char_url = ""
+        self._char_man: dict = {}
+        self._char_budgets: dict = {}
+        self._char_state = "idle"
+        self._char_mood = "neutral"
+        self._char_count = 0
 
     # properties -------------------------------------------------------------
+    characterUrl = Property(str, lambda self: self._char_url, notify=characterChanged)
+    characterManifest = Property("QVariantMap", lambda self: self._char_man, notify=characterChanged)
+    characterBudgets = Property("QVariantMap", lambda self: self._char_budgets, notify=characterChanged)
+    characterState = Property(str, lambda self: self._char_state, notify=characterStateChanged)
+    characterMood = Property(str, lambda self: self._char_mood, notify=characterStateChanged)
+    characterCount = Property(int, lambda self: self._char_count, notify=characterStateChanged)
+
+    @Slot(str, bool)
+    def characterAnticDone(self, aid, caught):
+        self.o.char.antic_done(aid, caught)
+
     def _get_band(self):
         return self._band
 
@@ -349,6 +370,8 @@ class IslandModel(QObject):
     @Slot(bool)
     def hover(self, on):
         self.o.hovering = on
+        if on:
+            self.o.char.pointer()
 
     @Slot()
     def activate(self):
@@ -486,6 +509,12 @@ class QmlIsland(QObject):
         self.diff_windows: dict = {}             # title -> DiffWindow (kept so they aren't collected)
 
         self.model = IslandModel(self)
+        # M6: the character (heyclaude/characters.py drives it; ui/CharacterHost.qml draws it)
+        self.char = CH.Driver(send=self._char_send, later=lambda ms, fn: QTimer.singleShot(ms, fn))
+        self._input_watch = CH.InputWatch()
+        self._char_timer = QTimer(self, interval=1000, timeout=self._char_tick)
+        self._char_id = None
+        self.companion = None                     # the desktop companion, when island.character.where wants it
         self.model._usage_on = bool(cfg.get("usage_pill", True))
         if software is None:
             software = str(cfg.get("renderer", "auto")).lower() == "software"
@@ -506,6 +535,7 @@ class QmlIsland(QObject):
         self.view.setResizeMode(QQuickView.SizeRootObjectToView)
         self.art = _ArtProvider()
         self.view.engine().addImageProvider("island", self.art)
+        self.view.engine().addImportPath(str(CH.KIT_IMPORT_DIR))
         self.view.rootContext().setContextProperty("model", self.model)
         self.view.statusChanged.connect(self._status)
         self.view.setSource(QUrl.fromLocalFile(str(QML_DIR / "Island.qml")))
@@ -536,7 +566,8 @@ class QmlIsland(QObject):
                            ("usage", self.set_usage), ("approval", self.show_approval),
                            ("approval_withdrawn", self.withdraw_approval), ("session_event", self.session_event),
                            ("mismatch", self.voice_mismatch), ("turn", self.start_turn), ("spoken", self.spoken),
-                           ("widget_clear", self.clear_timer_widget), ("sessions", self.set_sessions)):
+                           ("widget_clear", self.clear_timer_widget), ("sessions", self.set_sessions),
+                           ("mood", self.set_mood)):
             sig = getattr(bridge, name, None)
             if sig is not None:
                 sig.connect(slot)
@@ -581,6 +612,104 @@ class QmlIsland(QObject):
         self.model._usage_on = bool(self.cfg.get("usage_pill", True))
         self.model.usageChanged.emit()
         self._send("setUsageRow", [self.model._usage_on and bool(self.model._usage)])
+        self.apply_character()
+
+    # -- M6: the character -------------------------------------------------------------
+    def apply_character(self, pack: str | None = None):
+        """Load island.character.pack (or `pack`, Settings' live preview) into the pill."""
+        cc = self.cfg.get("character") or {}
+        pid = pack if pack is not None else str(cc.get("pack", CH.NONE) or CH.NONE)
+        where = str(cc.get("where", "island"))
+        man = CH.registry().get(pid) if pid != CH.NONE else None
+        if pid != CH.NONE and man is None:
+            print(f"[character] no pack {pid!r}; showing the ember")
+        in_pill = man is not None and where in ("island", "both")
+        m = self.model
+        if pid != self._char_id or (in_pill != bool(m._char_url)):
+            self._char_id = pid
+            m._char_url = QUrl.fromLocalFile(man["qml"]).toString() if in_pill else ""
+            m._char_man = {"bounds": man["bounds"], "desktop_bounds": man["desktop_bounds"],
+                           "oneshot": man.get("oneshot", {})} if man else {}
+            from . import states as _S
+            m._char_budgets = dict(_S.load().get("budgets", {}))
+            m.characterChanged.emit()
+        antics = str(cc.get("antics", "normal"))
+        on_desk = man is not None and where in ("desktop", "both")
+        # with a companion on the desktop the antics play there (more room); the pill stays calm
+        self.char.configure(man if in_pill else None, frequency="off" if on_desk else antics,
+                            disabled=cc.get("antics_off") or [], where="pill")
+        if on_desk:
+            try:
+                if self.companion is None:
+                    from .companion import Companion
+                    self.companion = Companion(self)
+                self.companion.configure(man, size=int(cc.get("desktop_size", 120) or 120), frequency=antics,
+                                         disabled=cc.get("antics_off") or [])
+                self.companion.set_reduced(getattr(self, "motion", "full") != "full")
+                self.companion.driver.set_mode(self.mode)
+            except Exception as e:
+                print(f"[character] desktop companion failed: {e}")
+        elif self.companion is not None:
+            self.companion.configure(None)
+        if in_pill or on_desk:
+            self.char.set_mode(self.mode)
+            if not self._char_timer.isActive():
+                self._char_timer.start()
+        else:
+            self._char_timer.stop()
+
+    def _char_send(self, fn: str, args: list):
+        if fn == "state":
+            self.model._char_state = args[0]
+            self.model._char_mood = self.char.mood
+            self.model._char_count = self.char.tasks
+            self.model.characterStateChanged.emit()
+        else:
+            self.model.charCmd.emit(fn, args)
+
+    def _char_tick(self):
+        now = time.time()
+        idle, typing = self._input_watch.poll(now)
+        try:
+            from .winsys import battery_saver
+            saver = battery_saver()
+        except Exception:
+            saver = False
+        hidden = (bool(self.cfg.get("hide_when_idle", False)) and not self.hovering) or not self.view.isVisible()
+        wx, wt = getattr(self, "_weather_seen", ("", 0.0))
+        ctx = CH.context_now(user_idle_s=idle, typing=typing, fullscreen=self._suspended,
+                             reduced_motion=getattr(self, "motion", "full") != "full", battery_saver=saver,
+                             hidden=hidden, weather=wx if now - wt < 7200 else "")
+        self.char.tick(ctx)
+        if self.companion is not None and self.companion.man is not None:
+            hidden_d = not self.companion.view.isVisible()
+            self.companion.set_running(not self._suspended)
+            self.companion.driver.tick(CH.context_now(user_idle_s=idle, typing=typing, fullscreen=self._suspended,
+                                                      reduced_motion=ctx.reduced_motion, battery_saver=saver,
+                                                      hidden=hidden_d, weather=ctx.weather))
+
+    def _chars(self):
+        """The drivers to tell about a mode or an event: the pill's, and the companion's."""
+        out = [self.char]
+        if self.companion is not None and self.companion.man is not None:
+            out.append(self.companion.driver)
+        return out
+
+    def set_mood(self, mood: str):
+        """M6: the answer's mood. The character shows it as it finishes speaking."""
+        for d in self._chars():
+            d.set_mood(mood)
+
+    def preview_character(self, pack):
+        """Settings' gallery: show a pack now, unsaved (None = back to the saved one)."""
+        self.apply_character(None if pack is None else str(pack))
+
+    def play_antic(self, aid: str) -> bool:
+        """Settings' "play now"."""
+        ok = self.char.play_now(aid)
+        if self.companion is not None and self.companion.man is not None:
+            ok = self.companion.driver.play_now(aid) or ok
+        return ok
 
     _place = apply_config           # island.Island's name for it (__main__ calls it on Settings changes)
 
@@ -690,6 +819,10 @@ class QmlIsland(QObject):
             self.model.answerShown.emit(text)          # it stays on the panel after it's been spoken
         shown = self._shown_mode(mode)
         self.island_state = shown
+        for d in self._chars():
+            d.set_mode(shown, paused=mode == "off" and self.paused_until > time.time())
+        if self.companion is not None and mode != prev:
+            self.companion.levels(0.0, 0.0)
         for fn, args in route(shown, text, self._route_ctx()):
             self._send(fn, args)
             if fn == "go":
@@ -719,6 +852,8 @@ class QmlIsland(QObject):
         if shown == self.island_state:
             return
         self.island_state = shown
+        for d in self._chars():
+            d.set_mode(shown)
         if self.input_open or self.engine_state not in ("ready", "off", "paused"):
             return
         for fn, args in route(shown, self.text, self._route_ctx()):
@@ -763,14 +898,26 @@ class QmlIsland(QObject):
 
     def push_level(self, v: float):
         self._send("pushLevel", [float(v)])
+        if self.companion is not None:
+            self.companion.levels(level=v if self.mode in ("listening", "holding", "followup", "dictating") else 0.0)
 
     def push_tts(self, v: float):
         self._send("pushTts", [float(v)])
+        if self.companion is not None:
+            self.companion.levels(amplitude=v if self.mode == "speaking" else 0.0)
 
     def set_tasks(self, rows: list):
         before = {r["id"]: r["status"] for r in self.task_rows}
         self.task_rows = list(rows)
         self._send("setTasks", [self._rows()])
+        running = sum(1 for r in rows if r.get("status") == "running")
+        for d in self._chars():
+            if any(before.get(r["id"]) == "running" and r.get("status") == "done" for r in rows):
+                d.event("done")
+            elif any(before.get(r["id"]) == "running" and r.get("status") == "failed" for r in rows):
+                d.event("error")
+            if running != d.tasks:
+                d.set_mode(self.island_state, tasks=running)
         if any(before.get(r["id"]) != r["status"] for r in rows):
             self._send("popList", [6000])
         for r in rows:
@@ -866,12 +1013,16 @@ class QmlIsland(QObject):
     def _wake_hit(self, t: float):
         self.last_wake_t = t
         self.wake_listening = True
+        for d in self._chars():
+            d.event("woke")
         if not self.input_open:
             self._send("go", ["woke", {}])
             self.engine_state = "listening"
         self._update_not_me()
 
     def voice_mismatch(self, *_):
+        for d in self._chars():
+            d.event("voice_mismatch")
         self._send("go", ["mismatch", {}])
         self.engine_state = "ready"
 
@@ -1037,6 +1188,9 @@ class QmlIsland(QObject):
             return
         self.widget = w
         self.model.widgetShown.emit(w)
+        if w.get("widget") == "weather":            # M6: weather-conditioned antics read the last forecast shown
+            icon = str((w.get("data") or {}).get("icon", ""))
+            self._weather_seen = (CH.ICON_WEATHER.get(icon, ""), time.time())
 
     def clear_widget(self):
         self.widget = None
@@ -1225,6 +1379,9 @@ class QmlIsland(QObject):
         return ret
 
     def close(self):
+        self._char_timer.stop()
+        if self.companion is not None:
+            self.companion.close()
         self._env_timer.stop()
         self._focus_timer.stop()
         self.view.close()

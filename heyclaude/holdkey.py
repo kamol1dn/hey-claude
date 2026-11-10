@@ -132,6 +132,64 @@ _kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 _kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
 
+LLKHF_INJECTED = 0x10
+
+
+class LowLevelHook:
+    """A keyboard hook on its own thread that stays installed (M4d's dictation
+    key). `on_key(vk, is_down, injected) -> bool` runs on the hook thread for
+    every key event and must be quick (Windows drops a hook that stalls);
+    return True to swallow that event, which dictation does only for its own
+    keys while it's dictating."""
+
+    def __init__(self, on_key: Callable[[int, bool, bool], bool]):
+        self.on_key = on_key
+        self._hook = None
+        self._proc = HOOKPROC(self._hook_proc)
+        self._ready = threading.Event()
+        self._tid = 0
+        self._thread = threading.Thread(target=self._run, name="keyhook", daemon=True)
+        self._thread.start()
+        if not self._ready.wait(3):
+            raise RuntimeError("keyboard hook thread did not start")
+
+    def _hook_proc(self, n_code, w_param, l_param):
+        try:
+            if n_code == 0 and w_param in (WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP):
+                kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                if self.on_key(int(kb.vkCode), w_param in (WM_KEYDOWN, WM_SYSKEYDOWN),
+                               bool(kb.flags & LLKHF_INJECTED)):
+                    return 1
+        except Exception:
+            log.exception("keyboard hook callback failed")
+        return _user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+    def _run(self):
+        msg = wintypes.MSG()
+        self._tid = _kernel32.GetCurrentThreadId()
+        _user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_NOREMOVE)
+        self._hook = _user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc, _kernel32.GetModuleHandleW(None), 0)
+        if not self._hook:
+            log.warning("keyboard hook: SetWindowsHookEx failed (%s)", ctypes.get_last_error())
+        self._ready.set()
+        try:
+            while _user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                pass
+        finally:
+            if self._hook:
+                _user32.UnhookWindowsHookEx(self._hook)
+                self._hook = None
+
+    def close(self):
+        if self._thread.is_alive():
+            _user32.PostThreadMessageW(self._tid, WM_QUIT, 0, 0)
+            self._thread.join(3)
+
+
+def key_down_now(vks) -> bool:
+    return any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in vks)
+
+
 class HoldKey:
     """Watches the hold key while armed. on_change(held) runs on the hook thread."""
 

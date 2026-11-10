@@ -477,6 +477,8 @@ class VoiceEngine:
             if self.engine == "sapi":
                 return "sapi"
             return f"sapi ({'kokoro' if self.engine == 'kokoro' else self.engine}: {_short_reason(self.kokoro_failed or '')})"
+        if self.unloaded:
+            return "kokoro unloaded (lean)"
         dev = "gpu" if self.choice == "gpu" and self.gpu is not None else "cpu"
         return f"kokoro {dev}" + (f" ({self.reason})" if self.reason and dev == "cpu" else "")
 

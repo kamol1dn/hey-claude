@@ -89,13 +89,23 @@ class Recorder:
         return [e for e in self.events if e["t"] >= t0 and (t1 is None or e["t"] <= t1)]
 
     def _hook_bridge(self, b):
-        def on(name, fn):
+        from PySide6.QtCore import Qt
+
+        def on(name, fn, direct=False):
             sig = getattr(b, name, None)
             if sig is not None:
-                sig.connect(fn)
+                if direct:
+                    sig.connect(fn, Qt.DirectConnection)
+                else:
+                    sig.connect(fn)
         on("state", lambda m, t: self.add("state", mode=m, text=str(t)[:300]))
+        # A turn is stamped when it's emitted, not when the GUI thread gets to it: an announcement
+        # (a timer ended) emits it from its own thread right before its audio starts, and on a slow
+        # machine (CI's software-rendered grabs) the queued copy landed after that audio, so the
+        # announcement was counted into the previous turn (dead air + idle mid-turn on main's CI).
         on("turn", lambda d: self.add("turn", question=str((d or {}).get("question", ""))[:300],
-                                      **({"announcement": True} if (d or {}).get("announcement") else {})))
+                                      **({"announcement": True} if (d or {}).get("announcement") else {})),
+           direct=True)
         on("spoken", lambda t, s: self.add("spoken", text=str(t)[:300], secs=float(s)))
         on("widget", lambda d: self.add("widget", widget=str((d or {}).get("widget", ""))))
         on("tool", lambda d: self.add("tool", name=str((d or {}).get("name", "")), phase=str((d or {}).get("phase", ""))))

@@ -817,6 +817,34 @@ events, with an fps readout. `--shots DIR` saves a png of every state and
 widget, and `--measure` runs the acceptance measurements. Neither touches a
 running hey-claude.
 
+### Characters (M6)
+
+**Settings → Character** puts a little character in the island where the ember
+is: **Echo** (a pixel bat), **Cinder** (a living coal), **Wren** (a folded-paper
+bird), **Tycho** (a one-eyed orrery) or **Hum** (the island's own face). Pick one
+and the island switches at once; a live preview has a button per state. It can
+also sit on the desktop as a companion above the taskbar (`island.character.where`:
+`island`, `desktop` or `both`).
+
+- It follows the assistant: listening to your level, talking with the voice,
+  thinking, working while tasks run, a little celebration when one finishes, a
+  wince on an error. An answer can carry a mood (`MOOD happy`, never spoken) that
+  it shows as it finishes.
+- **Idle antics:** when nothing has happened for a while it does small things on
+  its own (Echo hangs upside down, Wren goes fishing, Tycho watches a comet…), a
+  dozen each. Settings: off / rare / normal / lively, a checkbox and a ▶ preview
+  per antic. Never while you type, in a full-screen app or game, in calm motion,
+  on battery saver, or while the island is hidden; the wake word, the hotkey, a
+  task or the pointer ends one at once with a short "caught!".
+- **Sleep:** drowsy after ~15 min without you, asleep after ~30 (the wake word
+  still works), and a stretch when you come back.
+- At rest it draws at the island's 8 fps (0 in calm motion), 30 fps for an antic.
+
+Packs are plug-ins: `characters/<id>/` (by PR) or `state/characters/<id>/`
+(local). [characters/README.md](characters/README.md) explains the interface,
+the antics and the CI checks; `tools/character_lab.py` cycles every state, plays
+the antics, measures fps and runs the checks.
+
 ## Conversations and sessions
 
 - **One conversation across all tiers.** hey-claude keeps a rolling
@@ -1004,6 +1032,48 @@ slower of the two (turbo: ~5-6 s, mostly hidden while you speak).
 
 The Claude desktop app's own voice is out of scope: it runs on a private
 Anthropic service with no public API.
+
+## Dictate anywhere (M4d)
+
+Hold **Right Alt** (`dictate.key`), speak, let go: the words are typed where
+the cursor is, in any app: Notepad, a browser text box, a terminal, Word.
+
+- **Double tap** the key for hands-free: it keeps listening until the next
+  tap. **Esc** cancels. Pressing another key while you hold it (AltGr+e,
+  Alt+Tab) makes it a shortcut: nothing is dictated and the key goes through.
+  The key is never swallowed outside dictation (a lone Alt would open a
+  window's menu bar, so a masking key is sent, as AutoHotkey does).
+- It **pastes through the clipboard** and then puts your clipboard back,
+  marked so Windows' clipboard history and cloud clipboard skip both. It
+  never types into a password field (UI Automation's `IsPassword`).
+  **Win+Alt+V** (`dictate.paste_again_hotkey`) pastes the last dictation
+  again, e.g. after it skipped a password field or the window lost focus.
+- It uses whichever speech backend is active (M4c), so lean mode, Windows
+  and cloud work here too; the wake word is ignored while you dictate.
+- **Personal dictionary** (Settings → Dictation, or `dictionary:` in
+  config.yaml), shared with the assistant's own speech-to-text:
+  - *words*: names and terms Whisper should spell your way (eClass,
+    Phoenix, classmates' names), passed as its initial prompt;
+  - *replacements*: `hey cloud => hey Claude`, whole words, any case;
+  - *snippets* (dictation only): a short spoken phrase becomes saved text
+    ("my email" → your address).
+  - `stt.languages: [en, ru, uz]` limits language detection to those
+    (needs a multilingual model).
+  `tools\dictionary_eval.py` measures it: on sentences spoken by three Kokoro
+  voices, turbo spelled 27 of 36 dictionary words right on its own and 35 of
+  36 with the dictionary. (Whisper drops a word from the start of a sentence
+  when it looks like the prompt's vocabulary, e.g. a leading "Hey Claude",
+  so keep greetings out of `words`.)
+- **Clean-up by Claude** (`dictate.cleanup`: off, as_said, natural,
+  polished; per app with `dictate.cleanup_apps`): one `claude -p` call on
+  your subscription. Off by default: it adds a second or two.
+- The island shows *dictating* with the level meter. Local stats only
+  (`state\dictation.json`: words, time saved), shown in Settings.
+
+Speed (release → text in the window) is logged per dictation (`[dictate]
+release_to_text_ms=…`). Turbo on the GPU transcribes a 5 s sentence in about
+0.25-0.3 s; the paste itself is ~35 ms (the clipboard is restored 0.3 s
+later, 0.6 s in terminals, which read it late).
 
 ## Measured latency
 

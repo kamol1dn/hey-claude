@@ -222,6 +222,27 @@ class Speech:
                          float(need), float(self.scfg.get("auto_min_ram_mb") or RAM_DEFAULT_MB),
                          self._windows_good(), self._cloud_ok())
 
+    def effective(self, kind: str = "stt") -> str:
+        """The backend that will actually run: the chosen one, or the first in the
+        fallback order that's available (no key -> local stays loaded)."""
+        first = self.resolve(kind)[0]
+        if kind == "tts":
+            if self.voice is None:
+                return first
+            first = self.voice.tts_name(first)
+        for n in order(first, self.scfg.get("fallback_order")):
+            if kind == "tts" and self.voice is not None:
+                n = self.voice.tts_name(n)
+            if n == "local":
+                return n
+            try:
+                b = self.backend(n) if kind == "stt" else self.voice._backend(n)
+                if b.available()[0]:
+                    return n
+            except Exception:
+                continue
+        return "local"
+
     # -- the island's labels -----------------------------------------------------------------
     @property
     def active(self) -> str:
@@ -413,7 +434,7 @@ class Speech:
             if changed or failed:
                 self._label_changed()
             self.touch()
-            return text
+            return self.fix(text)
         why = "; ".join(f"{n}: {w}" for n, w in failed)
         self.note(f"speech-to-text failed ({why})")
         return ""
@@ -424,7 +445,16 @@ class Speech:
         b = self.backend(name)
         if not b.probe_ok:
             return ""
-        return b.transcribe(audio, prompt=self.prompt(), languages=self.languages())
+        return self.fix(b.transcribe(audio, prompt=self.prompt(), languages=self.languages()))
+
+    def fix(self, text: str) -> str:
+        """The dictionary's replacements ("hey cloud" -> "hey Claude"); snippets are dictation's."""
+        from .. import dictionary
+        try:
+            return dictionary.apply(text, self.cfg.get("dictionary"), snippets=False)
+        except Exception as e:
+            print(f"[speech] dictionary: {e}")
+            return text
 
     # -- switching and memory -----------------------------------------------------------------
     def set_backend(self, name: str, kind: str | None = None):
@@ -445,7 +475,7 @@ class Speech:
         apply it now."""
         name = self.chosen("stt")
         self.last_used = None
-        stt_now, tts_now = self.resolve("stt")[0], self.resolve("tts")[0]
+        stt_now, tts_now = self.effective("stt"), self.effective("tts")
         if self.voice is not None:
             self.voice.switched()
         if stt_now != "local" and tts_now != "local":
@@ -709,7 +739,12 @@ class VoiceRouter:
         name = self.current_name
         if name == "local" and self.local is not None:
             return self.local.label
-        if name == "sapi" or self.current is None:
+        if self.current is None:                      # switched: the next reply picks
+            nxt = self.tts_name(self.speech.resolve("tts")[0])
+            if nxt == "local" and self.local is not None:
+                return self.local.label
+            return f"{nxt}: next reply"
+        if name == "sapi":
             why = "; ".join(f"{n}: {w}" for n, w in self._failed.items())
             return "sapi" + (f" ({why})" if why else "")
         return _join(name, self.current.label)

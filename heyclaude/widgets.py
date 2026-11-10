@@ -29,6 +29,8 @@ SCHEMA_FILE = ROOT / "ui" / "widgets.schema.json"
 WIDGETS_DIR = ROOT / "widgets"
 API_MAJOR = "1"
 PREFIX = "WIDGET"
+MOOD_PREFIX = "MOOD"           # M6: `MOOD happy` (characters.MOODS), the character's mood for this answer
+MOODS = ("neutral", "happy", "confused", "sorry", "excited")
 DEFAULT_TTL = 12.0
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"}
 # Never launched from a card; shown in Explorer instead.
@@ -410,6 +412,7 @@ class WidgetFilter:
     def __init__(self):
         self.spec: dict | None = None
         self.raw: str | None = None
+        self.mood: str | None = None    # M6: from a `MOOD happy` line
         self._line = ""             # the current line, while it might be a widget line
         self._at_start = True       # at the start of a line
         self._holding = False
@@ -432,9 +435,12 @@ class WidgetFilter:
                         out.append(self._line)
                         self._line = ""
                     continue
-                if len(head) <= len(PREFIX) and PREFIX.startswith(head):
-                    continue                        # could still become "WIDGET "
+                if any(len(head) <= len(p) and p.startswith(head) for p in (PREFIX, MOOD_PREFIX)):
+                    continue                        # could still become "WIDGET " or "MOOD "
                 if head.startswith(PREFIX) and head[len(PREFIX)] in " :{":
+                    self._holding = True
+                    continue
+                if head.startswith(MOOD_PREFIX) and head[len(MOOD_PREFIX)] in " :":
                     self._holding = True
                     continue
                 out.append(self._line)
@@ -457,6 +463,10 @@ class WidgetFilter:
 
     def _take(self, line: str):
         s = line.strip().strip("`*").strip()
+        if s.startswith(MOOD_PREFIX):
+            m = s[len(MOOD_PREFIX):].lstrip(" :").strip().strip("`*.").lower()
+            self.mood = m if m in MOODS else None
+            return
         s = s[len(PREFIX):].lstrip(" :")
         s = s.strip("`").strip()
         if s.startswith("json"):

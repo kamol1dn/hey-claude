@@ -660,7 +660,7 @@ def test_task_spawn_uses_the_stripped_env():
     import inspect
     from heyclaude import tasks as TK
     src = inspect.getsource(TK.TaskManager.spawn)
-    assert "env=child_env()" in src
+    assert "env=child_env(task=tid)" in src      # M7: the hooks link the session to the task
 
 
 def test_api_key_from_env_or_file(tmp_path):

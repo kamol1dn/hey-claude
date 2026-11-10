@@ -173,7 +173,7 @@ class TaskManager:
             self.command(prompt + ("\n\n" + context if context else ""), name=prompt), cwd=path,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-            errors="replace", bufsize=1, env=child_env(), creationflags=NO_WINDOW,
+            errors="replace", bufsize=1, env=child_env(task=tid), creationflags=NO_WINDOW,
         )
         self.procs[tid] = proc
         threading.Thread(target=self._pump, args=(t, proc), daemon=True).start()

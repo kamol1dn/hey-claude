@@ -39,6 +39,7 @@ LIVE = (
     "conversation.",                 # read per request (save: the agent's next lookup)
     "island.",
     "instant.",                      # M10: read on every request (the classifier's threshold too)
+    "hooks.approvals", "hooks.approval_timeout_s", "hooks.voice_approvals", "hooks.done_flash",  # M7: per request
     "app.",                          # hotkey re-registered, autostart toggled, guard re-read
     "speech.",                       # M4c: backend switch applied at once; the rest read per request
     "dictate.",                      # M4d: the key is re-hooked; the rest read per dictation

@@ -93,7 +93,32 @@ def route(mode: str, text: str, ctx: dict) -> list[tuple[str, list]]:
         return [("go", ["speaking", {"text": text or ""}])]
     if mode == "error":
         return [("go", ["error", {"text": text or "something went wrong"}])]
+    if mode == "approval_needed":
+        # M7: a card waits for a click. The theme shows approval_needed, or the state its
+        # fallback chain reaches (Ember & Thread: confused -> idle, so the resting state it
+        # was in: ready, or off / paused when listening is off; the card itself says it).
+        from .states import mode_for
+        shown = mode_for("approval_needed", ctx.get("implements") or theme_implements())
+        rest = ctx.get("rest") if ctx.get("rest") in ("idle", "off") else "idle"
+        if shown in ("idle", "off", "approval_needed"):
+            return route(rest, text, ctx)
+        return route(shown, text, ctx)
     return [("go", ["thinking", {"text": text or mode}])]
+
+
+_IMPLEMENTS: list | None = None
+
+
+def theme_implements() -> list:
+    """The states the QML island's theme (Ember & Thread) draws itself."""
+    global _IMPLEMENTS
+    if _IMPLEMENTS is None:
+        try:
+            from .states import load_theme
+            _IMPLEMENTS = list(load_theme("ember-thread")["implements"])
+        except Exception:
+            _IMPLEMENTS = ["idle", "off", "listening", "thinking", "talking"]
+    return _IMPLEMENTS
 
 
 SCALE_MIN, SCALE_MAX = 0.8, 2.0
@@ -166,6 +191,53 @@ def task_rows(rows: list[dict]) -> list[dict]:
                     "status": "running" if st in ("starting", "running") else st,
                     "right": str(right or st or ""), "elapsed": str(r.get("elapsed", ""))})
     return out
+
+
+SESSION_STATUS = {"working": "running", "waiting": "waiting", "done": "done", "error": "failed", "idle": "idle"}
+SESSION_ACTIONS = ("diff", "jump", "desktop", "dismiss")
+
+
+def session_label(s: dict) -> str:
+    """What a watched session is called on the island: its title, else its folder."""
+    return str(s.get("title") or s.get("project") or "session").strip() or "session"
+
+
+def session_rows(sessions: list[dict]) -> list[dict]:
+    """SessionHub snapshot rows (newest activity first) -> hover-list rows (newest last).
+
+    name = the title or project, right = what it does now (the ticker line; the
+    final line once done), elapsed = "+N −M"; plus the session's id, diff count and
+    desktop flag for the row's actions."""
+    out = []
+    for s in reversed(sessions or []):
+        sid = str(s.get("id") or "")
+        if not sid:
+            continue
+        st = str(s.get("status") or "idle")
+        status = SESSION_STATUS.get(st, "idle")
+        right = s.get("activity") or ""
+        if st == "done":
+            right = s.get("last") or right or "finished"
+        elif st == "waiting" and not right:
+            right = "waiting for you"
+        plus, minus = int(s.get("plus") or 0), int(s.get("minus") or 0)
+        out.append({"id": f"s:{sid}", "kind": "session", "sid": sid, "name": session_label(s),
+                    "status": status, "right": " ".join(str(right).split())[:200],
+                    "elapsed": f"+{plus} \u2212{minus}" if (plus or minus) else "",
+                    "plus": plus, "minus": minus, "diffs": int(s.get("diffs") or 0), "desktop": bool(s.get("desktop"))})
+    return out
+
+
+def merged_rows(tasks: list[dict], sessions: list[dict], cap: int = 5) -> list[dict]:
+    """hey-claude's own tasks and the watched sessions in one hover list (at most `cap`
+    rows; sessions keep at least 2 places, tasks the rest)."""
+    t = task_rows(tasks)
+    s = session_rows(sessions)
+    keep_s = min(len(s), max(2, cap - len(t)))
+    s = s[len(s) - keep_s:] if keep_s else []
+    room = cap - len(s)
+    t = t[len(t) - room:] if room > 0 and t else []
+    return t + s
 
 
 # ----------------------------------------------------------------- QML side
@@ -325,6 +397,14 @@ class IslandModel(QObject):
     def openTask(self, i):
         self.o._open_task(i)
 
+    @Slot(str)
+    def openRow(self, row_id):
+        self.o._open_row(row_id)
+
+    @Slot(str, str)
+    def sessionAction(self, sid, action):
+        self.o._session_action(sid, action)
+
     @Slot("QVariantList")
     def filesDropped(self, urls):
         self.o._files_dropped([str(u) for u in urls])
@@ -355,6 +435,10 @@ class IslandModel(QObject):
     def approvalDecided(self, ap_id, action):
         self.o._approval_decided(ap_id, action)
 
+    @Slot(str, "QVariantMap")
+    def approvalAnswered(self, ap_id, answers):
+        self.o._approval_answered(ap_id, answers)
+
     @Slot(str, str, "QVariant")
     def widgetAction(self, wid, action, payload):
         self.o._widget_action(wid, action, payload)
@@ -381,7 +465,9 @@ class QmlIsland(QObject):
     # new in M5
     files_dropped = Signal(list)                 # local paths
     widget_action = Signal(str, str, object)     # widget id, action, payload
-    approval_decided = Signal(str, str)          # M7: approval id, action id
+    approval_decided = Signal(str, str)          # M7: approval id, action: allow | deny | always | pass
+    approval_answered = Signal(str, dict)        # M7: approval id, {question text: label | [labels]}
+    session_action = Signal(str, str)            # M7: session id, action: diff | jump | desktop | dismiss
 
     NOT_ME_S = NOT_ME_S
 
@@ -418,6 +504,9 @@ class QmlIsland(QObject):
         self.widget: dict | None = None
         self.approvals: dict[str, dict] = {}
         self.tools: dict[str, dict] = {}
+        self.sessions: list[dict] = []           # M7: SessionHub's snapshot (Bridge.sessions)
+        self.island_state = "loading"            # the mode shown: the assistant's, or approval_needed while a card waits
+        self.diff_windows: dict = {}             # title -> DiffWindow (kept so they aren't collected)
 
         self.model = IslandModel(self)
         # M6: the character (heyclaude/characters.py drives it; ui/CharacterHost.qml draws it)
@@ -477,7 +566,8 @@ class QmlIsland(QObject):
                            ("usage", self.set_usage), ("approval", self.show_approval),
                            ("approval_withdrawn", self.withdraw_approval), ("session_event", self.session_event),
                            ("mismatch", self.voice_mismatch), ("turn", self.start_turn), ("spoken", self.spoken),
-                           ("widget_clear", self.clear_timer_widget), ("mood", self.set_mood)):
+                           ("widget_clear", self.clear_timer_widget), ("sessions", self.set_sessions),
+                           ("mood", self.set_mood)):
             sig = getattr(bridge, name, None)
             if sig is not None:
                 sig.connect(slot)
@@ -661,7 +751,7 @@ class QmlIsland(QObject):
         if self.stt_label:
             self._send("setBadge", [stt_short(self.stt_label), 0])
         self._send("setWakeLabel", [self._wake_label])
-        self._send("setTasks", [task_rows(self.task_rows)])
+        self._send("setTasks", [self._rows()])
         self._send("setUsageRow", [self.model._usage_on and bool(self.model._usage)])
         self.set_state(self.mode, self.text)
 
@@ -727,13 +817,13 @@ class QmlIsland(QObject):
             text = self._status_line(text)
         elif mode == "speaking" and self.question and text:
             self.model.answerShown.emit(text)          # it stays on the panel after it's been spoken
-        ctx = {"engine": self.engine_state, "paused_until": self.paused_until, "paused_since": self.paused_since,
-               "now": time.time(), "input": self.input_open}
+        shown = self._shown_mode(mode)
+        self.island_state = shown
         for d in self._chars():
-            d.set_mode(mode, paused=mode == "off" and self.paused_until > time.time())
+            d.set_mode(shown, paused=mode == "off" and self.paused_until > time.time())
         if self.companion is not None and mode != prev:
             self.companion.levels(0.0, 0.0)
-        for fn, args in route(mode, text, ctx):
+        for fn, args in route(shown, text, self._route_ctx()):
             self._send(fn, args)
             if fn == "go":
                 self.engine_state = "listening" if args[0] == "woke" else args[0]
@@ -746,6 +836,32 @@ class QmlIsland(QObject):
         snap = os.environ.get("HEYCLAUDE_SNAP")
         if snap:
             QTimer.singleShot(450, lambda m=mode: self.grab().save(os.path.join(snap, f"{time.strftime('%H%M%S')}-{m}.png")))
+
+    def _route_ctx(self) -> dict:
+        return {"engine": self.engine_state, "paused_until": self.paused_until, "paused_since": self.paused_since,
+                "now": time.time(), "input": self.input_open, "rest": self.mode}
+
+    def _shown_mode(self, mode: str) -> str:
+        """M7: while an approval card waits, a resting island shows approval_needed."""
+        return "approval_needed" if self.approvals and mode in ("idle", "off") else mode
+
+    def _approvals_changed(self):
+        """The first card came / the last one went: approval_needed in or out (resting only;
+        a voice state keeps going, and the card waits under it)."""
+        shown = self._shown_mode(self.mode)
+        if shown == self.island_state:
+            return
+        self.island_state = shown
+        for d in self._chars():
+            d.set_mode(shown)
+        if self.input_open or self.engine_state not in ("ready", "off", "paused"):
+            return
+        for fn, args in route(shown, self.text, self._route_ctx()):
+            if fn == "go" and args[0] == self.engine_state:
+                continue                       # already there (Ember: approval_needed falls back to rest)
+            self._send(fn, args)
+            if fn == "go":
+                self.engine_state = args[0]
 
     # -- one request = one open panel (M5 turn continuity) -----------------------------
     question = ""
@@ -793,7 +909,7 @@ class QmlIsland(QObject):
     def set_tasks(self, rows: list):
         before = {r["id"]: r["status"] for r in self.task_rows}
         self.task_rows = list(rows)
-        self._send("setTasks", [task_rows(rows)])
+        self._send("setTasks", [self._rows()])
         running = sum(1 for r in rows if r.get("status") == "running")
         for d in self._chars():
             if any(before.get(r["id"]) == "running" and r.get("status") == "done" for r in rows):
@@ -801,13 +917,63 @@ class QmlIsland(QObject):
             elif any(before.get(r["id"]) == "running" and r.get("status") == "failed" for r in rows):
                 d.event("error")
             if running != d.tasks:
-                d.set_mode(self.mode, tasks=running)
+                d.set_mode(self.island_state, tasks=running)
         if any(before.get(r["id"]) != r["status"] for r in rows):
             self._send("popList", [6000])
         for r in rows:
             lw = self.log_windows.get(r["id"])
             if lw:
                 lw.update_task(r)
+
+    def _rows(self) -> list[dict]:
+        return merged_rows(self.task_rows, self.sessions)
+
+    # -- M7: watched Claude Code sessions -----------------------------------------------
+    def set_sessions(self, sessions: list):
+        """SessionHub's snapshot: they join the hover list and the satellites (working =
+        running). The list pops up for a new session or one that now waits, finished or
+        failed; working <-> idle churn doesn't."""
+        before = {str(s.get("id")): s.get("status") for s in self.sessions}
+        self.sessions = [dict(s) for s in (sessions or []) if isinstance(s, dict) and s.get("id")]
+        self._send("setTasks", [self._rows()])
+        for s in self.sessions:
+            old, new = before.get(str(s["id"])), s.get("status")
+            if old is None or (old != new and new in ("waiting", "done", "error")):
+                self._send("popList", [6000])
+                break
+
+    def find_session(self, sid: str) -> dict | None:
+        for s in self.sessions:
+            if str(s.get("id")) == sid:
+                return s
+        return None
+
+    def _session_action(self, sid: str, action: str):
+        if action not in SESSION_ACTIONS or not sid:
+            return
+        print(f"[sessions] {action} {sid[:8]}")
+        if action == "dismiss":                    # gone at once; the hub's next snapshot agrees
+            self.sessions = [s for s in self.sessions if str(s.get("id")) != sid]
+            self._send("setTasks", [self._rows()])
+        self.session_action.emit(sid, action)
+
+    def open_diff(self, title: str, diffs: list):
+        """A session's edits in a window (hookrelay/diffview.py); one window per title."""
+        from .hookrelay.diffview import DiffWindow
+        w = self.diff_windows.get(title)
+        if w is not None:
+            try:
+                w.set_diffs(diffs)
+            except RuntimeError:                   # its C++ side is gone (closed)
+                w = None
+        if w is None:
+            w = DiffWindow(title, diffs)
+            self.diff_windows[title] = w
+            w.destroyed.connect(lambda *_, t=title: self.diff_windows.pop(t, None))
+        w.show()
+        w.raise_()
+        w.activateWindow()
+        return w
 
     def set_stt(self, label: str):
         old = self.stt_label
@@ -1097,17 +1263,37 @@ class QmlIsland(QObject):
                 req.setdefault("service", d.get("service", ""))
         self.approvals[req["id"]] = req
         self.model.approvalShown.emit(_qml_safe(req))
+        self._approvals_changed()
 
     def withdraw_approval(self, ap_id: str):
         if self.approvals.pop(ap_id, None) is not None:
             self.model.approvalCleared.emit(ap_id)
+            self._approvals_changed()
+
+    APPROVAL_ACTIONS = ("allow", "deny", "always", "pass")
 
     def _approval_decided(self, ap_id: str, action: str):
-        if self.approvals.pop(ap_id, None) is None:
+        if action not in self.APPROVAL_ACTIONS or ap_id not in self.approvals:
             return
+        self.approvals.pop(ap_id, None)
         self.model.approvalCleared.emit(ap_id)          # however it was answered, the card goes
         print(f"[approval] {ap_id}: {action}")
         self.approval_decided.emit(ap_id, action)
+        self._approvals_changed()
+
+    def _approval_answered(self, ap_id: str, answers):
+        """A question card's Submit: {question text: label | [labels]} (the relay validates it again)."""
+        if ap_id not in self.approvals:
+            return
+        ans = {}
+        for k, v in dict(_v(answers) or {}).items():
+            v = _v(v)
+            ans[str(k)] = [str(x) for x in v] if isinstance(v, (list, tuple)) else str(v)
+        self.approvals.pop(ap_id, None)
+        self.model.approvalCleared.emit(ap_id)
+        print(f"[approval] {ap_id}: answered {len(ans)} question(s)")
+        self.approval_answered.emit(ap_id, ans)
+        self._approvals_changed()
 
     def session_event(self, ev: dict):
         """{"session", "kind": tool | tool_done | idle | done | error | started, "tool"?, "text"?}"""
@@ -1117,11 +1303,33 @@ class QmlIsland(QObject):
             self.tool_event({"id": sid, "name": ev["tool"], "phase": "start", "input": ev.get("input") or {}})
         elif kind in ("tool_done", "idle", "done", "error"):
             self.tool_event({"id": sid, "phase": "end"})
-        if kind in ("done", "error") and self.mode in ("idle", "off"):
-            label = ev.get("text") or f"{ev.get('session', 'session')} {'finished' if kind == 'done' else 'stopped'}"
-            self.flash(label, 3.0)
+        if kind == "done":
+            # the one-shot "check" with "done · <title>" at rest (a tint only in a voice state)
+            self._send("sessionDone", [self._event_label(ev)])
+        elif kind == "error":
+            label = self._event_label(ev)
+            text = " ".join(str(ev.get("text") or "").split())
+            msg = f"{label}: {text}" if text else f"{label} stopped"
+            if (self.mode in ("idle", "off") and not self.input_open and not self.approvals
+                    and self.engine_state in ("ready", "off", "error")):
+                self._send("go", ["error", {"text": msg}])   # the flinch; it settles back to rest by itself
+                self.engine_state = "error"
+            elif self.mode == "idle":
+                self.flash(msg, 3.0)
+
+    def _event_label(self, ev: dict) -> str:
+        if ev.get("title"):
+            return str(ev["title"])
+        s = self.find_session(str(ev.get("session") or ""))
+        return session_label(s) if s else (str(ev.get("session") or "session")[:8] or "session")
 
     # -- tasks: log windows, menu ----------------------------------------------------------
+    def _open_row(self, row_id: str):
+        for r in self.task_rows:
+            if str(r.get("id")) == row_id:
+                self.open_log(r)
+                return
+
     def _open_task(self, i: int):
         rows = self.task_rows[-5:]
         if 0 <= i < len(rows):
@@ -1177,6 +1385,10 @@ class QmlIsland(QObject):
         self._env_timer.stop()
         self._focus_timer.stop()
         self.view.close()
+
+
+def _v(x):
+    return x.toVariant() if hasattr(x, "toVariant") else x
 
 
 def _qml_safe(v):

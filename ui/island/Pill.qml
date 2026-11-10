@@ -9,6 +9,7 @@ Rectangle {
     property bool accent: false
     property bool enabled_: true
     property string tip: ""
+    readonly property bool hovered: ma.containsMouse
     signal tapped()
     width: w; height: 24; radius: 12
     color: !enabled_ ? Qt.rgba(1, 1, 1, 0.05)

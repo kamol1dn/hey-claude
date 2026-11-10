@@ -460,13 +460,21 @@ Item {
         // ---- hover task list + plan usage ------------------------------------------
         Item {
             id: listLayer
+            objectName: "listLayer"
             visible: o.listGeom === true
             x: 0; y: o.head + 6; width: o.w; height: o.h - o.head - 6
             clip: true
+            // M7: the session row whose actions are showing (a click on the row toggles them)
+            property string openSid: ""
+            onVisibleChanged: if (!visible) openSid = ""
             Repeater {
                 model: o.rows ? o.rows.length : 0
                 Item {
+                    id: rowItem
                     readonly property var r: o.rows[index] || ({ name: "", status: "", right: "", elapsed: "", a: 0, dy: 0, b: 0.5 })
+                    readonly property bool sess: r.kind === "session"
+                    readonly property bool acts: sess && listLayer.openSid !== "" && listLayer.openSid === r.sid
+                    objectName: "row:" + (r.id || "")
                     y: index * 30; width: listLayer.width; height: 30
                     opacity: r.a
                     Rectangle { visible: index > 0; x: 14; width: parent.width - 28; height: 1; color: Qt.rgba(1, 1, 1, 0.05) }
@@ -475,21 +483,62 @@ Item {
                         Rectangle { visible: r.status === "running"; x: 18 - width / 2; y: 15 - height / 2
                             width: 2 * (2.5 + 0.5 * r.b); height: width; radius: width / 2
                             color: Qt.rgba((184 + (217 - 184) * r.b) / 255, (102 + (119 - 102) * r.b) / 255, (76 + (87 - 76) * r.b) / 255, 1) }
+                        // a session waiting for the user: a hollow warm ring; idle: a small ash dot
+                        Rectangle { visible: r.status === "waiting"; x: 18 - 3.5; y: 15 - 3.5; width: 7; height: 7; radius: 3.5
+                            color: "transparent"; border.width: 1.3; border.color: root.cHot }
+                        Rectangle { visible: r.status === "idle"; x: 18 - 2; y: 15 - 2; width: 4; height: 4; radius: 2; color: "#5C5652" }
                         Shape {
-                            visible: r.status !== "running"
+                            visible: r.status !== "running" && r.status !== "waiting" && r.status !== "idle"
                             ShapePath { strokeColor: r.status === "done" ? root.cOk : (r.status === "failed" ? root.cBad : root.cDim)
                                 strokeWidth: 1.5; capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin; fillColor: "transparent"
                                 PathPolyline { path: r.status === "done" ? [Qt.point(14.5, 15), Qt.point(17, 17.5), Qt.point(22, 12.5)]
                                                                          : [Qt.point(15, 12), Qt.point(21, 18)] } }
                         }
-                        Text { x: 34; width: Math.max(40, parent.width - 34 - 160); y: 15 - height / 2; text: r.name; color: root.cFg
+                        // a hey-claude task: name | what it does | elapsed
+                        Text { visible: !rowItem.sess; x: 34; width: Math.max(40, parent.width - 34 - 160); y: 15 - height / 2; text: r.name; color: root.cFg
                             font.family: root.family; font.pointSize: 9; elide: Text.ElideRight }
-                        Text { x: parent.width - 150; width: 100; y: 15 - height / 2; text: r.right; color: root.cDim
+                        Text { visible: !rowItem.sess; x: parent.width - 150; width: 100; y: 15 - height / 2; text: r.right; color: root.cDim
                             font.family: root.family; font.pointSize: 9; elide: Text.ElideRight }
-                        Text { x: parent.width - 14 - width; y: 15 - height / 2; text: r.elapsed; color: root.cDim
+                        Text { visible: !rowItem.sess; x: parent.width - 14 - width; y: 15 - height / 2; text: r.elapsed; color: root.cDim
                             font.family: root.family; font.pointSize: 9 }
+                        // a watched Claude Code session: "title · what it does" | +N −M (or its actions)
+                        Text {
+                            id: sessText
+                            objectName: "sessionText"
+                            visible: rowItem.sess
+                            x: 34; y: 15 - height / 2
+                            width: Math.max(40, parent.width - 34 - 14 - (rowItem.acts ? sessActs.width + 10 : counts.width + 12))
+                            textFormat: Text.StyledText; elide: Text.ElideRight; maximumLineCount: 1
+                            font.family: root.family; font.pointSize: 9
+                            text: root.escapeHtml(r.name || "") + (r.right ? "<font color=\"#9A9A9A\"> · " + root.escapeHtml(r.right) + "</font>" : "")
+                            color: root.cFg
+                        }
+                        Text {
+                            id: counts
+                            objectName: "sessionCounts"
+                            visible: rowItem.sess && !rowItem.acts
+                            x: parent.width - 14 - width; y: 15 - height / 2
+                            textFormat: Text.StyledText; font.family: root.family; font.pointSize: 9
+                            text: (r.plus || r.minus) ? "<font color=\"#6CCB7A\">+" + (r.plus || 0) + "</font> <font color=\"#E5646A\">−" + (r.minus || 0) + "</font>" : ""
+                        }
                     }
-                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (model) model.openTask(index) }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: root.rowTapped(rowItem.r)
+                    }
+                    Row {
+                        id: sessActs
+                        objectName: "sessionActions"
+                        visible: rowItem.acts
+                        spacing: 6
+                        x: parent.width - 14 - width; y: 3
+                        Pill { visible: (rowItem.r.diffs || 0) > 0; objectName: "act:diff"; label: "Diff"; w: 46; accent: true
+                            onTapped: root.sessionAct(rowItem.r.sid, "diff") }
+                        Pill { objectName: "act:jump"; label: "Jump"; w: 48; primary: true; onTapped: root.sessionAct(rowItem.r.sid, "jump") }
+                        Pill { visible: !rowItem.r.desktop; objectName: "act:desktop"; label: "To desktop"; w: 74
+                            onTapped: root.sessionAct(rowItem.r.sid, "desktop") }
+                        Pill { objectName: "act:dismiss"; label: "Dismiss"; w: 58; onTapped: root.sessionAct(rowItem.r.sid, "dismiss") }
+                    }
                 }
             }
             UsageRow {
@@ -645,6 +694,53 @@ Item {
         }
         if ((o.notme || 0) > 0.5 && x >= o.w - 14 - 62 - 3 && x <= o.w - 14 + 3 && Math.abs(y - Math.min(o.head, 40) / 2) <= 14) return "notme"
         return null
+    }
+
+    // -- hover list rows (M7: watched sessions next to hey-claude's own tasks) ----------------
+    // Called from here, not from inside the delegates: in a Repeater delegate `model` is the
+    // delegate's own model object, not the island's.
+    function rowTapped(r) {
+        if (!r) return
+        if (r.kind === "session") {
+            listLayer.openSid = listLayer.openSid === r.sid ? "" : r.sid
+            if (listLayer.openSid) { E.popList(8000); kick() }          // the list stays while you pick
+            return
+        }
+        if (model) model.openRow(String(r.id))
+    }
+    function sessionAct(sid, action) {
+        listLayer.openSid = ""
+        if (model) model.sessionAction(sid, action)
+    }
+    function rowsInfo() {
+        return { open: listLayer.openSid, geom: !!o.listGeom, rows: (o.rows || []).map(function (r) {
+            return { id: r.id, kind: r.kind, sid: r.sid, name: r.name, right: r.right, status: r.status, plus: r.plus, minus: r.minus,
+                     diffs: r.diffs, desktop: r.desktop } }),
+            tasks: E.TASKS.map(function (t) { return { id: t.id, kind: t.kind, status: t.status, name: t.name } }),
+            label: E.readyMain() }
+    }
+
+    // tests: a card's function (toggle / submit / payload) or property; an item's rect in window pixels
+    function cardDo(id, fn, args) {
+        var c = extras.card(id)
+        if (!c) return null
+        var f = c[fn]
+        return typeof f === "function" ? f.apply(c, args || []) : f
+    }
+    function findNamed(item, name) {
+        if (!item) return null
+        if (item.objectName === name && item.visible) return item
+        var kids = item.children || []
+        for (var i = 0; i < kids.length; i++) { var r = findNamed(kids[i], name); if (r) return r }
+        if (item.contentItem && item.contentItem !== item) return findNamed(item.contentItem, name)
+        return null
+    }
+    function itemRect(name, inCard) {
+        var it = findNamed(inCard ? extras.card(inCard) : root, name)
+        if (!it) return null
+        var p = it.mapToItem(root, 0, 0)
+        return { x: p.x * uiScale, y: p.y * uiScale, w: it.width * uiScale, h: it.height * uiScale,
+                 enabled: it.enabled_ === undefined ? true : it.enabled_ }
     }
 
     function extraChanged() { E.setExtra(extras.contentHeight, extras.contentHeight > 0 ? extras.minWidth : 0, false); kick() }

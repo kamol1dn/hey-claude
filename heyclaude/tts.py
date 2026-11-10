@@ -482,6 +482,12 @@ class Player:
         self.idle_close_s, self.device = idle_close_s, device
         self._chunks: list[list] = []            # [samples, pos, far, far_pos, rate]
         self._lock = threading.Lock()
+        # Opening, replacing and closing the stream happen under this one lock. begin()
+        # opens it on its own thread while the synth thread's play() may open it too: with
+        # M10's cached acks both land within milliseconds, and two OutputStreams were
+        # built for one player; the overwritten one kept PortAudio calling into a stream
+        # Python then freed (the live re-check's native crashes right after an ack).
+        self._open_lock = threading.RLock()
         self._stream = None
         self._rate = None
         self._idle_since = time.monotonic()
@@ -502,17 +508,18 @@ class Player:
 
     def _open(self, rate):
         import sounddevice as sd
-        with self._lock:
-            if self._stream is not None and self._rate == rate:
+        with self._open_lock:
+            with self._lock:
+                if self._stream is not None and self._rate == rate:
+                    self._idle_since = time.monotonic()
+                    return
+            self.close()
+            s = sd.OutputStream(samplerate=rate, channels=1, dtype="float32", callback=self._cb,
+                                latency="low", device=self.device)
+            s.start()
+            with self._lock:
+                self._stream, self._rate = s, rate
                 self._idle_since = time.monotonic()
-                return
-        self.close()
-        s = sd.OutputStream(samplerate=rate, channels=1, dtype="float32", callback=self._cb,
-                            latency="low", device=self.device)
-        s.start()
-        with self._lock:
-            self._stream, self._rate = s, rate
-            self._idle_since = time.monotonic()
 
     def play(self, samples: np.ndarray, rate: int, tag=None):
         """Queue audio. `tag` (the sentence) is handed to on_chunk when it starts playing."""
@@ -594,21 +601,26 @@ class Player:
     def _close_when_idle(self):
         while True:
             time.sleep(0.5)
-            with self._lock:
-                idle = self._stream is not None and not self._chunks and \
-                    time.monotonic() - self._idle_since > self.idle_close_s
-            if idle:
-                self.close()
+            if self._idle():
+                with self._open_lock:
+                    if self._idle():                # still idle: nothing was queued meanwhile
+                        self.close()
+
+    def _idle(self) -> bool:
+        with self._lock:
+            return self._stream is not None and not self._chunks and \
+                time.monotonic() - self._idle_since > self.idle_close_s
 
     def close(self):
-        with self._lock:
-            s, self._stream, self._rate = self._stream, None, None
-        if s is not None:
-            try:
-                s.stop()
-                s.close()
-            except Exception:
-                pass
+        with self._open_lock:
+            with self._lock:
+                s, self._stream, self._rate = self._stream, None, None
+            if s is not None:
+                try:
+                    s.stop()
+                    s.close()
+                except Exception:
+                    pass
 
 
 class Speaker:

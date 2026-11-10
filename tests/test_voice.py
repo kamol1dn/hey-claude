@@ -321,6 +321,47 @@ def test_end_of_turn_silence_window():
     assert e.needed_ms("What time is it?") == 700
 
 
+def test_player_opens_one_stream_when_prepare_and_play_race():
+    """begin() opens the output stream on its own thread while a cached ack's play()
+    opens it at once from the synth thread. Both used to build an OutputStream; the
+    overwritten one was never closed and PortAudio kept calling into it after Python
+    freed it (the native crashes of the live re-check)."""
+    import threading
+    import types
+    from unittest import mock
+    made, closed = [], []
+
+    class FakeStream:
+        def __init__(self, **kw):
+            time.sleep(0.05)                    # opening a real stream takes ~50-100 ms
+            made.append(self)
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            closed.append(self)
+
+    fake = types.SimpleNamespace(OutputStream=FakeStream)
+    with mock.patch.dict(sys.modules, {"sounddevice": fake}):
+        p = T.Player(far_tap=None, idle_close_s=999)
+        go = threading.Barrier(2)
+        th = [threading.Thread(target=lambda: (go.wait(), p.prepare(24000))),
+              threading.Thread(target=lambda: (go.wait(), p.play(np.zeros(240, np.float32), 24000)))]
+        for t in th:
+            t.start()
+        for t in th:
+            t.join()
+        assert len(made) == 1 and not closed and p._stream is made[0], (len(made), len(closed))
+        p.play(np.zeros(240, np.float32), 16000)          # a new rate replaces it: the old one is closed
+        assert len(made) == 2 and closed == [made[0]] and p._stream is made[1]
+        p.close()
+        assert closed == made and p._stream is None
+
+
 def test_end_of_turn_instant_commands_and_bare_task_starts():
     """A pause transcript that is a parsed instant command ends the turn at once; a task
     start with no task yet waits the long silence even though Whisper ended it with a stop."""

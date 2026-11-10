@@ -1,0 +1,120 @@
+{
+ "id": "system",
+ "name": "System",
+ "api": "1.0",
+ "description": "this PC's battery, CPU and GPU load, VRAM and RAM, and the devices hey-claude's speech and voice run on",
+ "title": "System",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": false,
+ "ttl_s": 14,
+ "glyph": "chip",
+ "triggers": {
+  "tools": [
+   "mcp__info__system_status"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "battery": {
+   "percent": 72,
+   "charging": true,
+   "plugged": true,
+   "note": "charging"
+  },
+  "cpu": {
+   "percent": 23,
+   "label": "Ryzen 9 7940HS",
+   "sub": "8 cores"
+  },
+  "gpu": {
+   "percent": 41,
+   "label": "RTX 4060 Laptop",
+   "sub": "52 °C"
+  },
+  "vram": {
+   "used": 3.7,
+   "total": 8.0
+  },
+  "ram": {
+   "used": 20.8,
+   "total": 39.2
+  },
+  "devices": [
+   {
+    "name": "stt",
+    "value": "gpu (turbo)",
+    "gpu": true
+   },
+   {
+    "name": "voice",
+    "value": "kokoro gpu",
+    "gpu": true
+   }
+  ]
+ },
+ "schema": {
+  "type": "object",
+  "properties": {
+   "battery": {
+    "type": "object",
+    "required": ["percent"],
+    "properties": {
+     "percent": {"type": "number", "minimum": 0, "maximum": 100},
+     "charging": {"type": "boolean"},
+     "plugged": {"type": "boolean"},
+     "note": {"type": "string", "maxLength": 40}
+    }
+   },
+   "cpu": {
+    "type": "object",
+    "required": ["percent"],
+    "properties": {
+     "percent": {"type": "number", "minimum": 0, "maximum": 100},
+     "label": {"type": "string", "maxLength": 32},
+     "sub": {"type": "string", "maxLength": 20}
+    }
+   },
+   "gpu": {
+    "type": "object",
+    "required": ["percent"],
+    "properties": {
+     "percent": {"type": "number", "minimum": 0, "maximum": 100},
+     "label": {"type": "string", "maxLength": 32},
+     "sub": {"type": "string", "maxLength": 20}
+    }
+   },
+   "vram": {
+    "type": "object",
+    "required": ["used", "total"],
+    "properties": {
+     "used": {"type": "number", "minimum": 0},
+     "total": {"type": "number", "minimum": 0.1}
+    }
+   },
+   "ram": {
+    "type": "object",
+    "required": ["used", "total"],
+    "properties": {
+     "used": {"type": "number", "minimum": 0},
+     "total": {"type": "number", "minimum": 0.1}
+    }
+   },
+   "devices": {
+    "type": "array",
+    "maxItems": 3,
+    "items": {
+     "type": "object",
+     "required": ["name", "value"],
+     "properties": {
+      "name": {"type": "string", "maxLength": 12},
+      "value": {"type": "string", "maxLength": 32},
+      "gpu": {"type": "boolean"}
+     }
+    }
+   }
+  }
+ }
+}

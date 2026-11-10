@@ -790,6 +790,39 @@ line: white is you, terracotta is Claude).
     `weather.mcp.agent: true`.
   - `weather.location` in the config is your home place. `weather.local_route:
     false` sends weather questions to the agent again.
+- **More cards (M5b widget packs).** Each comes from a tool's result (never from
+  the model's own numbers), has its own small entry animation, and rests at the
+  island's idle frame rate:
+  - **Now playing** (what's playing, from M9's media tool): the cover (the
+    player's real art, or a made one), progress, and previous / play-pause /
+    next buttons that act on the player.
+  - **Clipboard / screenshot** (private): the text (code with line numbers, a
+    link with Open), or the screenshot's thumbnail.
+  - **System**: battery, CPU and GPU load, VRAM and RAM, and hey-claude's own
+    devices ("stt gpu (turbo)").
+  - **Timers** ("what timers do I have", "how long left on the tea timer"): every
+    running timer with a live countdown, from the instant-command timers.
+  - **Timetable** (private): the next class, room and time left over a day ribbon,
+    from your own timetable data (`info.timetable`, read-only).
+  - **Deadlines** (private): a countdown list from your own notes file
+    (`info.deadlines`).
+  - **Conversions and maths, with the working shown**: units, currency
+    (keyless rates, cached) and a safe calculator.
+  - **Dictionary and translation** (en / ru / uz).
+  - **Directions and places**: an OpenStreetMap snippet with the route drawn on,
+    time and distance (Nominatim + OSRM, cached, © OpenStreetMap contributors).
+  - **News and sports headlines** from the agent's web search.
+  - **Email digest** (private): unread count and top senders from the Gmail
+    connector.
+  - **Weather: "how sure is this?"** compares seven forecast models (Open-Meteo,
+    keyless) and adds an agreement chip with one dot per model.
+
+  The data tools are hey-claude's own read-only MCP server `info`
+  (`heyclaude/mcp_info/`, one module per tool family, served to the tool agent
+  automatically; `info.enabled: false` turns it off). A widget can carry its own
+  `adapter.py` that turns a tool's result into its card. `tools/widget_shot.py`
+  renders any card on the real island offscreen; `tests/test_widget_packs.py`
+  checks every pack against the idle frame budget.
 - **Drop a file** on the island to ask about it: the talk-or-type field opens
   with the file attached, and the tool agent gets its path.
 - **Hide when idle** (`island.hide_when_idle`): nothing on screen at rest. It

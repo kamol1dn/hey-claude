@@ -187,6 +187,12 @@ def from_tool(tool: str, args: dict | None, result, raw: str | None = None) -> d
         how = trig.get("data", "result")
         if how == "result":
             data = result if isinstance(result, dict) else None
+        elif how == "adapter":                         # M5b: widgets/<id>/adapter.py, adapt(args, result, raw)
+            try:
+                data = _plugin_adapter(man)(args or {}, result, raw or "")
+            except Exception as e:
+                print(f"[widget] {wid} adapter: {e}")
+                data = None
         elif how in ADAPTERS:
             try:
                 data = ADAPTERS[how](args or {}, result, raw or "")
@@ -329,6 +335,26 @@ def _weather(args: dict, result, raw: str) -> dict | None:
     from .weather_mcp import widget_from_tool
     return widget_from_tool(args, result, raw)
 
+
+_PLUGIN_ADAPTERS: dict[str, object] = {}
+
+
+def _plugin_adapter(man: dict):
+    """A widget's own adapter.py (M5b): `adapt(args, result, raw) -> data or None`."""
+    path = Path(man["dir"]) / "adapter.py"
+    key = str(path)
+    if key not in _PLUGIN_ADAPTERS:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(f"heyclaude_widget_{man['id']}", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _PLUGIN_ADAPTERS[key] = mod.adapt
+    return _PLUGIN_ADAPTERS[key]
+
+
+# What the app knows that a card may show (M5b): island_qml keeps it current
+# ("stt": "gpu (turbo)", "voice": "kokoro gpu"); adapters read it, never write it.
+APP_STATE: dict[str, str] = {}
 
 ADAPTERS = {"telegram_dialogs": _telegram_dialogs, "telegram_messages": _telegram_messages, "weather": _weather}
 

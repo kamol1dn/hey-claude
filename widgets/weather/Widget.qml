@@ -10,6 +10,10 @@ import "../../ui/island"
 //   alert   a banner in the severity's colour, the issuing service credited
 //   nowcast "rain in N minutes" with the next 2 hours as 15-minute bars
 //   air     AQI (a coloured dot), UV, pollen; with sunrise/sunset and the moon's phase
+//   agreement  "how sure is this?" (only when asked): the forecast models' highs and lows as
+//           dots on a small temperature scale, coloured by how well they agree; the dots slide
+//           out from the middle and settle, then the spread band grows between them. A lone
+//           outlier is drawn hollow and named. It takes the hours' place.
 // The days fill what's left of the card's height (at least one).
 Item {
     id: w
@@ -21,9 +25,10 @@ Item {
     readonly property real minWidth: 440
     property bool holds: false
     readonly property var d: data_ || ({})
-    readonly property var hours: d.hourly || []
     readonly property var alert: d.alert || null
     readonly property var nowc: d.nowcast && d.nowcast.steps && d.nowcast.steps.length ? d.nowcast : null
+    readonly property var agree: d.agreement && d.agreement.models && d.agreement.models.length >= 2 ? d.agreement : null
+    readonly property var hours: agree ? [] : (d.hourly || [])    // asked about a day: the days matter, not the hours
     readonly property var air: d.air || null
     readonly property var sun: d.sun || null
     readonly property var moon: d.moon || null
@@ -31,7 +36,8 @@ Item {
                                      || sun !== null || moon !== null
     // the rows, top to bottom
     readonly property real yAlert: 58
-    readonly property real yHours: yAlert + (alert ? 32 : 0)
+    readonly property real yAgree: yAlert + (alert ? 32 : 0)
+    readonly property real yHours: yAgree + (agree ? 54 : 0)
     readonly property real yNow: yHours + (hours.length ? 62 : 0)
     readonly property real yStrip: yNow + (nowc ? 30 : 0)
     readonly property real yDays: yStrip + (hasStrip ? 26 : 0)
@@ -51,6 +57,7 @@ Item {
         return s === "extreme" ? "#E5646A" : s === "severe" ? "#E8954A" : s === "moderate" ? "#E8C35A"
              : s === "minor" ? "#8FB6D8" : "#9A9A9A"
     }
+    function agreeColor(level) { return level === "high" ? "#6CCB7A" : level === "low" ? "#E5646A" : "#D97757" }
     function aqiColor(c) {
         return ({ green: "#6CCB7A", yellow: "#E8C35A", orange: "#E8954A", red: "#E5646A", purple: "#B48EDB",
                   maroon: "#A0525A" })[c] || "#9A9A9A"
@@ -122,6 +129,135 @@ Item {
                 width: Math.min(implicitWidth, parent.width * 0.48); elide: Text.ElideRight
                 text: w.alert ? [w.alert.source || "", w.alert.until ? "until " + w.alert.until : ""].filter(function (s) { return s }).join(" · ") : ""
                 color: "#9A9A9A"; font.family: "Segoe UI Variable Text"; font.pointSize: 8
+            }
+        }
+    }
+    // "how sure is this?": each model's high (upper lane) and low (lower lane) on one scale
+    Rise {
+        visible: w.agree !== null
+        i: 2; reduced: w.reduced
+        y: w.yAgree + 2
+        Item {
+            id: chip
+            objectName: "weatherAgreement"
+            width: w.width; height: 48
+            readonly property var a: w.agree || ({ models: [], level: "medium" })
+            readonly property var ms: a.models || []
+            readonly property color tint: w.agreeColor(a.level)
+            readonly property var his: ms.map(function (m) { return m.high })
+            readonly property var los: ms.map(function (m) { return m.low })
+            readonly property real tmin: ms.length ? Math.min.apply(null, los.concat(his)) : 0
+            readonly property real tmax: ms.length ? Math.max.apply(null, his.concat(los)) : 1
+            readonly property real x0: 30
+            readonly property real x1: width - 64
+            function px(t) { return x0 + 6 + (t - tmin) / Math.max(1, tmax - tmin) * (x1 - x0 - 12) }
+            function mid(xs) { var s = xs.slice().sort(function (p, q) { return p - q }); return s.length ? s[Math.floor(s.length / 2)] : 0 }
+            function range(xs) {
+                var lo = Math.round(Math.min.apply(null, xs)), hi = Math.round(Math.max.apply(null, xs))
+                return lo === hi ? lo + "°" : lo + "–" + hi + "°"
+            }
+            readonly property real laneHi: 29
+            readonly property real laneLo: 40
+            // the entry: dots slide out from the lane's middle one by one, then the spread band grows
+            property real band: w.reduced ? 1 : 0
+            Rectangle {                                         // a quiet panel, washed in the verdict's colour
+                anchors.fill: parent; radius: 9
+                color: Qt.rgba(1, 1, 1, 0.035)
+                border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.05)
+                Rectangle {
+                    anchors.fill: parent; radius: 9; opacity: 0.11
+                    gradient: Gradient { orientation: Gradient.Horizontal
+                        GradientStop { position: 0; color: chip.tint } GradientStop { position: 0.55; color: "transparent" } }
+                }
+            }
+            Rectangle { x: 11; y: 9; width: 7; height: 7; radius: 3.5; color: chip.tint }
+            Text {
+                id: head
+                x: 25; y: 5
+                text: chip.a.head || ""
+                color: "#F2F2F2"; font.family: "Segoe UI Variable Text"; font.pointSize: 9; font.weight: Font.DemiBold
+            }
+            Text {
+                x: head.x + head.implicitWidth + 8; y: 6
+                width: Math.max(0, side.x - x - 10); elide: Text.ElideRight
+                text: chip.a.detail || ""
+                color: "#9A9A9A"; font.family: "Segoe UI Variable Text"; font.pointSize: 8; font.features: { "tnum": 1 }
+            }
+            Text {
+                id: side
+                anchors.right: parent.right; anchors.rightMargin: 10; y: 6
+                text: [chip.a.day || "", chip.a.odd ? chip.a.odd.name + " runs " + chip.a.odd.side
+                                                    : chip.ms.length + " models"].filter(function (s) { return s }).join(" · ")
+                color: "#9A9A9A"; font.family: "Segoe UI Variable Text"; font.pointSize: 8
+            }
+            Repeater {                                          // the two lanes: H/L, a hairline, the spread band
+                model: 2
+                Item {
+                    readonly property var vals: index === 0 ? chip.his : chip.los
+                    // the band spans the models that agree: a named outlier sits outside it on its own
+                    readonly property var core: chip.ms.filter(function (m) { return !chip.a.odd || m.name !== chip.a.odd.name })
+                                                       .map(function (m) { return index === 0 ? m.high : m.low })
+                    readonly property real cy: index === 0 ? chip.laneHi : chip.laneLo
+                    Text { x: 12; y: parent.cy - height / 2; text: index === 0 ? "H" : "L"; color: "#6f6a66"
+                        font.family: "Segoe UI Variable Text"; font.pointSize: 7 }
+                    Rectangle { x: chip.x0; y: parent.cy; width: chip.x1 - chip.x0; height: 1; color: Qt.rgba(1, 1, 1, 0.07) }
+                    Rectangle {
+                        readonly property real a0: chip.px(Math.min.apply(null, parent.core))
+                        readonly property real a1: chip.px(Math.max.apply(null, parent.core))
+                        readonly property real m: chip.px(chip.mid(parent.vals))
+                        x: m + (a0 - 4 - m) * chip.band; width: Math.max(0, (a1 - a0 + 8) * chip.band)
+                        y: parent.cy - 3.5 + 0.5; height: 8; radius: 4
+                        color: chip.tint; opacity: 0.24
+                    }
+                    Text {
+                        x: chip.width - 10 - implicitWidth; y: parent.cy - height / 2 + 0.5
+                        text: parent.vals.length ? chip.range(parent.vals) : ""
+                        opacity: chip.band
+                        color: index === 0 ? "#F2F2F2" : "#9A9A9A"
+                        font.family: "Segoe UI Variable Text"; font.pointSize: 7.5; font.features: { "tnum": 1 }
+                    }
+                }
+            }
+            Repeater {                                          // one dot per model in each lane
+                model: chip.ms
+                Item {
+                    id: md
+                    readonly property var mm: modelData
+                    readonly property bool odd: !!(chip.a.odd && chip.a.odd.name === mm.name)
+                    property real t: w.reduced ? 1 : 0          // 0 at the lane's middle, 1 in place
+                    property real seen: w.reduced ? 1 : 0
+                    Component.onCompleted: if (!w.reduced) slide.start()
+                    SequentialAnimation {
+                        id: slide
+                        PauseAnimation { duration: 2 * 45 + 260 + index * 55 }
+                        ParallelAnimation {
+                            NumberAnimation { target: md; property: "seen"; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { target: md; property: "t"; to: 1; duration: 560; easing.type: Easing.OutBack; easing.overshoot: 1.25 }
+                        }
+                    }
+                    Repeater {
+                        model: 2
+                        Rectangle {
+                            readonly property real v: index === 0 ? md.mm.high : md.mm.low
+                            readonly property real home: chip.px(v)
+                            readonly property real from: chip.px(chip.mid(index === 0 ? chip.his : chip.los))
+                            width: 7; height: 7; radius: 3.5
+                            x: from + (home - from) * md.t - 3.5
+                            y: (index === 0 ? chip.laneHi : chip.laneLo) - 3
+                            opacity: md.seen
+                            scale: 0.5 + 0.5 * md.seen
+                            color: md.odd ? "#171513" : chip.tint
+                            border.width: md.odd ? 1.5 : 1
+                            border.color: md.odd ? chip.tint : Qt.rgba(0.08, 0.08, 0.08, 0.9)
+                        }
+                    }
+                }
+            }
+            Component.onCompleted: if (!w.reduced) grow.start()
+            SequentialAnimation {
+                id: grow
+                PauseAnimation { duration: 2 * 45 + 260 + Math.max(0, chip.ms.length - 1) * 55 + 300 }
+                NumberAnimation { target: chip; property: "band"; to: 1; duration: 360; easing.type: Easing.OutCubic }
             }
         }
     }

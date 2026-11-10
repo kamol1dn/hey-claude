@@ -453,6 +453,30 @@ weather:
                           # Costs ~4k tokens of tool descriptions per agent turn and a second node process.
     env: {}               # extra environment for weather-mcp, e.g. {GOOGLE_POLLEN_API_KEY: ...} (its README)
 
+# M5b: hey-claude's own read-only data tools for the tool agent (heyclaude/mcp_info), each with an island card.
+info:
+  enabled: true
+  home: ""                # "from here" for directions: a place or "lat, lon" (empty = weather.location)
+  units: metric           # distances on the directions card: metric or imperial
+  convert:
+    rates_ttl_h: 6        # how long exchange rates are cached (0.25-48 h)
+  translate:
+    email: ""             # optional: an email for MyMemory raises its free quota (~5k -> ~50k chars a day)
+  # Your class timetable (the timetable card). Read-only: nothing is copied.
+  timetable:
+    path: ""              # the timetable project folder or one data file (clean_timetables.py, read as data and
+                          # never run; or .json). Empty = not set up.
+    group: ""             # your group code as the data spells it (e.g. SE-23-01); optional if the data has one group
+    drop: []              # subject codes you don't take, e.g. [CS101]
+    extra: []             # your own classes: [{day: Tue, start: "16:00", end: "17:30", title: Study group, room: Library}]
+    tz: ""                # IANA zone, e.g. Asia/Tashkent; empty = this PC's clock
+  # Your deadlines (the deadlines card), from your own notes file.
+  deadlines:
+    path: ""              # a .md/.txt with lines like "- 2026-11-14 18:00 Physics lab report" ([x] or ~~struck~~ = done),
+                          # or a .json/.yaml list of {due, title, done}. Empty = not set up.
+    default_time: "23:59" # the time for a deadline written without one
+    overdue_h: 48         # how long an overdue item stays on the list
+
 island:
   screen: primary        # primary, or a screen index
   top_margin: auto        # px, or auto = centred in a bar docked at the top of the screen (else 8)

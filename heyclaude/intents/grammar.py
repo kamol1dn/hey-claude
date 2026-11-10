@@ -462,6 +462,34 @@ def _timer_status(m, ctx):
     explicit = "timer" in m.group(0) or "countdown" in m.group(0)
     if not explicit and not ctx.has_timers:
         return None                                    # "how much time is left" with no timer: not ours
+    lbl = _label(_g(m, "l") or _g(m, "l2"))            # "how long left on the tea timer"
+    if lbl is None:
+        return None
+    return {"label": lbl} if lbl else {}
+
+
+# M5b: "what timers do I have" (the reminders card). Reminders and alarms are only timers
+# for now, so "list my reminders" is ours only while a timer runs (else it's Claude's: a
+# calendar or To Do question).
+_LIST_N = (r"(?P<noun>timers|countdowns|reminders|alarms|(?:timers|reminders|alarms) and (?:timers|reminders|alarms))")
+
+
+@rule("timer.list",
+      r"(?:what|which)\s+" + _LIST_N + r"\s+(?:do i have|have i got|have i set|did i set|are there|are (?:still )?"
+      r"(?:running|on|set|active|going|left|ticking))(?:\s+(?:running|going|set|on|still|left|at the moment|today))?",
+      r"(?:list|show|show me|tell me|read|read me|read out|give me|check|go through|run through)\s+(?:all\s+)?(?:of\s+)?"
+      r"(?:(?:my|the|our)\s+)?(?:(?:running|active|current)\s+)?" + _LIST_N,
+      r"(?:do|have)\s+i\s+(?:have|got|set)\s+(?:any|some)\s+" + _LIST_N +
+      r"(?:\s+(?:running|set|going|on|left|active))?",
+      r"(?:are|is)\s+there\s+(?:any\s+)?(?P<noun>timers?|countdowns?|reminders?|alarms?)\s+(?:running|set|going|on|active|left)",
+      r"what\s+(?:are|is)\s+(?:all\s+)?(?:my|the)\s+(?:(?:running|active|current)\s+)?" + _LIST_N,
+      r"how\s+many\s+" + _LIST_N + r"\s+(?:do i have|are there|are (?:running|set|going|on))"
+      r"(?:\s+(?:running|going|set|on))?",
+      r"(?:all\s+)?my\s+(?:running\s+)?" + _LIST_N)
+def _timer_list(m, ctx):
+    noun = _g(m, "noun")
+    if "timer" not in noun and "countdown" not in noun and not ctx.has_timers:
+        return None
     return {}
 
 

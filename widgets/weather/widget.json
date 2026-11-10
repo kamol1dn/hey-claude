@@ -2,7 +2,7 @@
  "id": "weather",
  "name": "Weather",
  "api": "1.0",
- "description": "current weather, a short forecast, and any alert, air quality, rain nowcast, sun and moon",
+ "description": "current weather, a short forecast, and any alert, air quality, rain nowcast, sun and moon; asked how sure it is, the forecast models' agreement",
  "title": "Weather · {location}",
  "size": {
   "width": 440,
@@ -392,6 +392,97 @@
      },
      "waxing": {
       "type": "boolean"
+     }
+    }
+   },
+   "agreement": {
+    "type": "object",
+    "required": [
+     "level",
+     "head",
+     "models"
+    ],
+    "properties": {
+     "level": {
+      "type": "string",
+      "enum": [
+       "high",
+       "medium",
+       "low"
+      ]
+     },
+     "head": {
+      "type": "string",
+      "maxLength": 24
+     },
+     "detail": {
+      "type": "string",
+      "maxLength": 48
+     },
+     "text": {
+      "type": "string",
+      "maxLength": 72
+     },
+     "day": {
+      "type": "string",
+      "maxLength": 12
+     },
+     "date": {
+      "type": "string",
+      "maxLength": 10
+     },
+     "models": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+       "type": "object",
+       "required": [
+        "name",
+        "high",
+        "low"
+       ],
+       "properties": {
+        "name": {
+         "type": "string",
+         "maxLength": 16
+        },
+        "high": {
+         "type": "number"
+        },
+        "low": {
+         "type": "number"
+        },
+        "pop": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 100
+        },
+        "rain": {
+         "type": "number",
+         "minimum": 0
+        }
+       }
+      }
+     },
+     "odd": {
+      "type": "object",
+      "required": [
+       "name",
+       "side"
+      ],
+      "properties": {
+       "name": {
+        "type": "string",
+        "maxLength": 16
+       },
+       "side": {
+        "type": "string",
+        "enum": [
+         "cold",
+         "warm"
+        ]
+       }
+      }
      }
     }
    }

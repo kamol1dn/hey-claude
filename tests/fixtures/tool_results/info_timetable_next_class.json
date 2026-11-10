@@ -1,0 +1,16 @@
+{
+ "note": "next_class() run for real on a synthetic timetable (invented group, subjects and rooms in the inha_timetable format), a Tuesday 13:52: a class in 8 minutes, one after it",
+ "tool": "mcp__info__next_class",
+ "args": {},
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"label\": \"Today\", \"day\": \"Tue\", \"day_name\": \"Tuesday\", \"date\": \"2026-11-10\", \"group\": \"QRS-25-03\", \"classes\": [{\"start\": \"09:00\", \"end\": \"10:30\", \"title\": \"Linear Algebra\", \"code\": \"LIN\", \"room\": \"A108\", \"state\": \"done\"}, {\"start\": \"10:45\", \"end\": \"12:15\", \"title\": \"Applied Optics\", \"code\": \"OPT\", \"room\": \"B204\", \"state\": \"done\"}, {\"start\": \"14:00\", \"end\": \"15:30\", \"title\": \"Data Structures II\", \"code\": \"DSA2\", \"room\": \"C312 Lab\", \"state\": \"next\"}, {\"start\": \"15:45\", \"end\": \"17:15\", \"title\": \"Academic English 3\", \"code\": \"ENG3\", \"room\": \"A215\", \"state\": \"later\"}], \"focus\": 2, \"focus_state\": \"next\", \"focus_in_s\": 460, \"now\": \"13:52\", \"now_min\": 832.33, \"text\": \"Next: Data Structures II in C312 Lab at 14:00 (in 8 min). Then Academic English 3 at 15:45 (A215).\"}"
+  }
+ ],
+ "expect": {
+  "widget": "timetable",
+  "title": "Timetable · Today",
+  "icon": true
+ }
+}

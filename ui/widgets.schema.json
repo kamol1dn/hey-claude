@@ -29,7 +29,7 @@
       "private": {"type": "boolean", "description": "personal content (messages): fades 4 s after the island rests"},
       "ttl_s": {"type": "number"},
       "triggers": {"type": "object", "description": "tools whose result becomes this widget, shown without the model writing it. tools: full names (mcp__weather__get_weather) or the tool's own name (telegram_list_dialogs, on whatever server). data: \"result\" (the result JSON is the data) or an adapter in heyclaude/widgets.py ADAPTERS (reads JSON or the tool's markdown)",
-                   "properties": {"tools": {"type": "array", "items": {"type": "string"}}, "data": {"type": "string", "enum": ["result", "telegram_dialogs", "telegram_messages"]}}},
+                   "properties": {"tools": {"type": "array", "items": {"type": "string"}}, "data": {"type": "string", "enum": ["result", "adapter", "telegram_dialogs", "telegram_messages", "weather"]}}},
       "schema": {"type": "object", "description": "JSON Schema of `data` (the subset widgets.validate understands)"},
       "example": {"type": "object", "description": "sample data: the prompt shows it, and tests render it"}
     }

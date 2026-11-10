@@ -1,0 +1,89 @@
+{
+ "id": "convert",
+ "name": "Convert",
+ "api": "1.0",
+ "description": "a calculation, unit conversion or currency conversion: the answer big, the working line by line, the rate's source and date",
+ "title": "{heading}",
+ "size": {
+  "width": 420,
+  "max_height": 230
+ },
+ "private": false,
+ "ttl_s": 14,
+ "glyph": "calc",
+ "triggers": {
+  "tools": [
+   "mcp__info__calculate",
+   "mcp__info__convert_units",
+   "mcp__info__convert_currency"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "kind": "currency",
+  "heading": "Currency · USD → UZS",
+  "result": "1,195,228",
+  "unit": "UZS",
+  "steps": [
+   "100 USD × 11,952.28 UZS/USD",
+   "= 1,195,228 UZS"
+  ],
+  "note": "1 USD = 11,952.28 UZS",
+  "source": "open.er-api.com",
+  "date": "2026-11-10"
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "kind",
+   "heading",
+   "result",
+   "steps"
+  ],
+  "properties": {
+   "kind": {
+    "type": "string",
+    "enum": [
+     "calc",
+     "units",
+     "currency"
+    ]
+   },
+   "heading": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "result": {
+    "type": "string",
+    "maxLength": 32
+   },
+   "unit": {
+    "type": "string",
+    "maxLength": 12
+   },
+   "steps": {
+    "type": "array",
+    "maxItems": 5,
+    "items": {
+     "type": "string",
+     "maxLength": 80
+    }
+   },
+   "note": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "source": {
+    "type": "string",
+    "maxLength": 40
+   },
+   "date": {
+    "type": "string",
+    "maxLength": 12
+   },
+   "stale": {
+    "type": "boolean"
+   }
+  }
+ }
+}

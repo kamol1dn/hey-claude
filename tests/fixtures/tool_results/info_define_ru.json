@@ -1,0 +1,19 @@
+{
+ "note": "the info server's define: English Wiktionary's REST definitions and IPA (CC BY-SA; recorded 2026-11-10)",
+ "tool": "mcp__info__define",
+ "args": {
+  "word": "книга",
+  "lang": "ru"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"word\": \"книга\",\n  \"lang\": \"ru\",\n  \"phonetic\": \"[ˈknʲiɡə]\",\n  \"meanings\": [\n    {\n      \"pos\": \"noun\",\n      \"senses\": [\n        {\n          \"definition\": \"book\",\n          \"example\": \"Он преподнёс ей кни́гу.\",\n          \"example_translation\": \"He presented a book to her. / He presented her with a book.\"\n        }\n      ]\n    }\n  ],\n  \"source\": \"Wiktionary\",\n  \"url\": \"https://en.wiktionary.org/wiki/%D0%BA%D0%BD%D0%B8%D0%B3%D0%B0#Russian\",\n  \"language\": \"Russian\"\n}"
+  }
+ ],
+ "expect": {
+  "widget": "define",
+  "title": "Dictionary · Russian",
+  "icon": true
+ }
+}

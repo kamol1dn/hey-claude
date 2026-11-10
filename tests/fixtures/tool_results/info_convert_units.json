@@ -1,0 +1,20 @@
+{
+ "note": "the info server's convert_units (recorded 2026-11-10)",
+ "tool": "mcp__info__convert_units",
+ "args": {
+  "value": 72,
+  "from_unit": "°F",
+  "to_unit": "°C"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"kind\": \"units\",\n  \"category\": \"temperature\",\n  \"value\": 72,\n  \"from\": \"°F\",\n  \"to\": \"°C\",\n  \"result\": 22.222222,\n  \"result_text\": \"22.2\",\n  \"steps\": [\n    \"(72 °F − 32) × 5/9\",\n    \"= 40 × 5/9\",\n    \"= 22.2 °C\"\n  ],\n  \"note\": \"32 °F = 0 °C\"\n}"
+  }
+ ],
+ "expect": {
+  "widget": "convert",
+  "title": "Temperature · °F → °C",
+  "icon": true
+ }
+}

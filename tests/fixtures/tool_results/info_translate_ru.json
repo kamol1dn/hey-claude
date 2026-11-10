@@ -1,0 +1,20 @@
+{
+ "note": "the info server's translate: MyMemory, Russian -> Uzbek (recorded 2026-11-10)",
+ "tool": "mcp__info__translate",
+ "args": {
+  "text": "Где находится ближайшая станция метро?",
+  "to": "uz",
+  "from_": "ru"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"text\": \"Где находится ближайшая станция метро?\",\n  \"translation\": \"Eng yaqin metro bekati qayerda?\",\n  \"from\": \"ru\",\n  \"to\": \"uz\",\n  \"from_name\": \"Russian\",\n  \"to_name\": \"Uzbek\",\n  \"detected\": false,\n  \"match\": 0.85,\n  \"source\": \"MyMemory\"\n}"
+  }
+ ],
+ "expect": {
+  "widget": "translate",
+  "title": "Translate · Russian → Uzbek",
+  "icon": true
+ }
+}

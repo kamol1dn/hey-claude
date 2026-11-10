@@ -1,0 +1,16 @@
+{
+ "note": "get_clipboard's live result shape with a made-up Python snippet",
+ "tool": "mcp__windows__get_clipboard",
+ "args": {},
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"text\": \"def rolling_mean(values, window=3):\\n    \\\"\\\"\\\"The mean of each run of `window` values.\\\"\\\"\\\"\\n    if window < 1:\\n        raise ValueError(\\\"window must be at least 1\\\")\\n    out = []\\n    for i in range(len(values) - window + 1):\\n        out.append(sum(values[i:i + window]) / window)\\n    return out\\n\", \"chars\": 289}"
+  }
+ ],
+ "expect": {
+  "widget": "clipboard",
+  "title": "Clipboard",
+  "icon": true
+ }
+}

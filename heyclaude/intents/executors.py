@@ -8,6 +8,7 @@ app launch, lock and the local clock.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -15,6 +16,7 @@ from . import learn
 from .slots import say_duration
 
 PREFIX = "mcp__windows__"
+LIST_TOOL = "intents__list_timers"     # M5b: the reminders card's trigger (widgets/reminders)
 NEVER = {"request_power_action", "perform_power_action", "close_window", "set_clipboard", "set_wallpaper",
          "set_default_output_device", "set_night_light"}
 
@@ -29,6 +31,14 @@ class Outcome:
     always_say: bool = False         # an answer or an error: spoken even with instant.ack: silent
     error: bool = False
     clear_timer_card: bool = False
+
+
+def _say_left(secs: float) -> str:
+    """Seconds left as spoken: whole minutes from two minutes up."""
+    left = int(round(secs))
+    if left >= 120:
+        left = int(round(left / 60.0)) * 60
+    return say_duration(max(1, left))
 
 
 def _cap(s: str) -> str:
@@ -166,14 +176,43 @@ class Executor:
         run = self.timers.running() if self.timers is not None else []
         if not run:
             return Outcome(say="There's no timer running.", always_say=True)
+        want = (s.get("label") or "").strip().lower()
+        pick = [t for t in run if t.label.lower() == want] if want else run
+        if not pick:
+            return Outcome(say=f"There's no {s['label']} timer.", always_say=True)
         now = self.timers.clock()
         parts = []
-        for t in sorted(run, key=lambda t: t.ends)[:3]:
-            left = int(round(t.left(now)))
-            if left >= 120:
-                left = int(round(left / 60.0)) * 60
-            parts.append(f"{say_duration(left)} left" + (f" on the {t.label} timer" if t.label and len(run) > 1 else ""))
-        return Outcome(say=_cap("; ".join(parts)) + ".", always_say=True)
+        for t in sorted(pick, key=lambda t: t.ends)[:3]:
+            named = t.label and (len(run) > 1 or want)
+            parts.append(f"{_say_left(t.left(now))} left" + (f" on the {t.label} timer" if named else ""))
+        # more than one running: the reminders card too (one timer: its own card is up)
+        snap = self.timers.snapshot() if len(run) > 1 else None
+        card = self._timer_card(want, snap) if snap else None
+        return Outcome(say=_cap("; ".join(parts)) + ".", always_say=True, widget=card, result=snap)
+
+    def _timer_list(self, s):
+        """"what timers do I have": the running timers, soonest first, as the reminders card
+        (made from the scheduler's snapshot, the same way a tool result makes a card)."""
+        run = self.timers.running() if self.timers is not None else []
+        if not run:
+            return Outcome(say="There's no timer running.", always_say=True)
+        snap = self.timers.snapshot()
+        first = snap["timers"][0]
+        left = _say_left(first["left_s"])
+        if len(run) == 1:
+            say = f"Just the {first['label']} timer, {left} left." if first["label"] else f"Just one timer, {left} left."
+        elif first["label"]:
+            say = f"{len(run)} timers. The {first['label']} timer ends first, in {left}."
+        else:
+            say = f"{len(run)} timers. The next one ends in {left}."
+        return Outcome(say=say, always_say=True, result=snap, widget=self._timer_card("", snap))
+
+    def _timer_card(self, focus: str, snap: dict | None = None) -> dict | None:
+        """The reminders card from the timers' snapshot, through the widget's own adapter
+        (widgets/reminders/adapter.py), the same path a tool result takes."""
+        from ..widgets import from_tool
+        snap = snap or self.timers.snapshot()
+        return from_tool(LIST_TOOL, {"label": focus} if focus else {}, snap, json.dumps(snap))
 
     # -- apps, Settings, lock -----------------------------------------------------------------
     def _app_open(self, s):

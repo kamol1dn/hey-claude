@@ -1,0 +1,52 @@
+{
+ "id": "deadlines",
+ "name": "Deadlines",
+ "api": "1.0",
+ "description": "the user's deadlines from their own notes: a countdown list, soonest first",
+ "title": "Deadlines · {window}",
+ "glyph": "hourglass",
+ "size": {
+  "width": 420,
+  "max_height": 262
+ },
+ "private": true,
+ "ttl_s": 14,
+ "triggers": {
+  "tools": ["mcp__info__deadlines"],
+  "data": "adapter"
+ },
+ "example": {
+  "window": "next 14 days",
+  "days": 14,
+  "items": [
+   {"title": "Signals problem set 6", "when": "tomorrow 09:00", "left_s": 68860, "urgency": "bad"},
+   {"title": "Optics lab report", "when": "Thu 18:00", "left_s": 187660, "urgency": "soon"},
+   {"title": "Essay outline: renewable grids", "when": "Sat 23:59", "left_s": 382000, "urgency": "later"},
+   {"title": "Chemistry lab defence", "when": "Wed 18 Nov 10:30", "left_s": 679060, "urgency": "later"}
+  ],
+  "more": 0
+ },
+ "schema": {
+  "type": "object",
+  "required": ["window", "items"],
+  "properties": {
+   "window": {"type": "string", "maxLength": 24},
+   "days": {"type": "number", "minimum": 1, "maximum": 366},
+   "items": {
+    "type": "array",
+    "maxItems": 6,
+    "items": {
+     "type": "object",
+     "required": ["title", "left_s", "urgency"],
+     "properties": {
+      "title": {"type": "string", "maxLength": 80},
+      "when": {"type": "string", "maxLength": 30},
+      "left_s": {"type": "number", "minimum": -31622400, "maximum": 31622400},
+      "urgency": {"type": "string", "enum": ["overdue", "bad", "soon", "later"]}
+     }
+    }
+   },
+   "more": {"type": "integer", "minimum": 0, "maximum": 999}
+  }
+ }
+}

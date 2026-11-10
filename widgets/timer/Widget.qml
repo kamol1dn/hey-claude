@@ -37,7 +37,10 @@ Item {
     }
     readonly property real frac: cancelled ? 0 : remain / total
     property real shownFrac: frac
-    Behavior on shownFrac { enabled: !w.reduced; NumberAnimation { duration: 450; easing.type: Easing.OutCubic } }
+    // glides only for a real jump (+1 min, a short timer's tick); the regular 1 s tick of a long
+    // timer moves the ring about a pixel, so it just steps (no 60 fps glide every second at rest)
+    Behavior on shownFrac { enabled: !w.reduced && Math.abs(w.frac - w.shownFrac) > 0.05
+        NumberAnimation { duration: 450; easing.type: Easing.OutCubic } }
 
     Rise {
         i: 0; reduced: w.reduced

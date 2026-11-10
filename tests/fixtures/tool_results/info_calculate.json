@@ -1,0 +1,18 @@
+{
+ "note": "the info server's calculate (recorded 2026-11-10)",
+ "tool": "mcp__info__calculate",
+ "args": {
+  "expression": "15% of 240"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"kind\": \"calc\",\n  \"expression\": \"15% of 240\",\n  \"result\": 36,\n  \"result_text\": \"36\",\n  \"steps\": [\n    \"15% of 240\",\n    \"= 0.15 × 240\",\n    \"= 36\"\n  ]\n}"
+  }
+ ],
+ "expect": {
+  "widget": "convert",
+  "title": "Maths",
+  "icon": true
+ }
+}

@@ -11,8 +11,16 @@
 "_hours" (the next 24 h with rain chances), "_days" (with sunrise, sunset, UV
 and rain chance) and the place's "_date"/"_time"; the card never sees them.
 
+`agreement("Tashkent", day=1)` -> "how sure is this?" (M5b): the same day from
+several forecast models (ECMWF, GFS, ICON, GEM, Meteo-France, UKMO, JMA) in
+one call to Open-Meteo's keyless multi-model forecast, compared: how far apart
+their highs, lows and rain chances are -> high / medium / low agreement, a
+lone outlier named, and a sentence to say. Only when asked (the local weather
+route's "how sure is that?", or get_weather(agreement=true)).
+
 Places are looked up with Open-Meteo's geocoding API. Answers are cached for
-10 minutes per place, so asking again doesn't hit the network. The tool agent
+10 minutes per place (the multi-model answer too), so asking again doesn't
+hit the network; nothing polls. The tool agent
 reaches it through heyclaude.mcp_weather (`mcp__weather__get_weather`), and
 the island shows the card from the tool result: the model never makes up the
 numbers.
@@ -65,8 +73,9 @@ def describe(code, is_day: bool = True) -> tuple[str, str]:
     return c[0], c[1] if is_day else c[2]
 
 
-def geocode(place: str, fetch=_get) -> dict:
+def geocode(place: str, fetch=None) -> dict:
     """{"name", "lat", "lon", "label"} for a place name."""
+    fetch = fetch or _get                  # looked up when called, so a test can stand in for the network
     place = (place or "").strip()
     if not place:
         raise WeatherError("no place given (set weather.location in Settings, or say a city)")
@@ -87,9 +96,10 @@ def geocode(place: str, fetch=_get) -> dict:
 
 
 def forecast(place: str = "", *, lat: float | None = None, lon: float | None = None, unit: str = "C",
-             now: float | None = None, fetch=_get, days: int = 3, detail: bool = False) -> dict:
+             now: float | None = None, fetch=None, days: int = 3, detail: bool = False) -> dict:
     """Current conditions, the next 6 hours and 3 days, as the weather widget's data
     (`days` up to 16 are fetched for `detail`; the card shows 3)."""
+    fetch = fetch or _get
     unit = "F" if str(unit).upper().startswith("F") else "C"
     if lat is None or lon is None:
         g = geocode(place, fetch)
@@ -187,3 +197,184 @@ def _extra(r: dict, cur: dict, hourly: dict, daily: dict, start: int) -> dict:
         ds.append({k: v for k, v in x.items() if v not in (None, "")})
     now_s = str(cur.get("time") or "")
     return {"_hours": hrs, "_days": ds, "_date": now_s[:10], "_time": now_s[11:16]}
+
+
+# ------------------------------------------------------------------ "how sure is this?": the models compared
+# Open-Meteo model ids -> the names on the card (all global; a model that doesn't
+# reach a day answers null there and is left out of that day)
+MODELS = [("ecmwf_ifs025", "ECMWF"), ("gfs_seamless", "GFS"), ("icon_seamless", "ICON"), ("gem_seamless", "GEM"),
+          ("meteofrance_seamless", "Météo-France"), ("ukmo_seamless", "UKMO"), ("jma_seamless", "JMA")]
+SPOKEN = {"ECMWF": "the European model", "GFS": "the American model", "ICON": "the German model",
+          "GEM": "the Canadian model", "Météo-France": "Météo-France", "UKMO": "the Met Office model",
+          "JMA": "the Japanese model"}
+MODEL_DAYS = 7
+_MM_VARS = ("temperature_2m_max", "temperature_2m_min", "precipitation_probability_max", "precipitation_sum")
+# a spread (max - min across the models, °C) up to the first number is "agree", up to the
+# second "mostly agree"; every model's lows wander more than its highs, so lows get more room
+_LIMITS = {"high": (2.0, 4.0), "low": (3.0, 6.0), "pop": (30, 55)}
+LEVELS = ("low", "medium", "high")            # index = the agreement class 0..2
+_LONG_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+_mm_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+def models_forecast(place: str = "", *, lat: float | None = None, lon: float | None = None, unit: str = "C",
+                    now: float | None = None, fetch=None, timeout: float = 6.0) -> dict:
+    """Open-Meteo's daily forecast from every model in MODELS (7 days) as it answers:
+    {"daily": {"time": [...], "temperature_2m_max_ecmwf_ifs025": [...], ...}}. Cached 10 min."""
+    fetch = fetch or _get
+    unit = "F" if str(unit).upper().startswith("F") else "C"
+    if lat is None or lon is None:
+        g = geocode(place, fetch)
+        lat, lon = g["lat"], g["lon"]
+    key = (round(float(lat), 3), round(float(lon), 3), unit)
+    t = now if now is not None else time.time()
+    hit = _mm_cache.get(key)
+    if hit and t - hit[0] < TTL_S:
+        return hit[1]
+    p = {"latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": MODEL_DAYS,
+         "daily": ",".join(_MM_VARS), "models": ",".join(m for m, _ in MODELS)}
+    if unit == "F":
+        p["temperature_unit"] = "fahrenheit"
+    r = fetch(FORECAST_URL, p, timeout=timeout)
+    if not isinstance(r, dict) or not (r.get("daily") or {}).get("time"):
+        why = r.get("reason", "an empty answer") if isinstance(r, dict) else "a bad answer"
+        raise WeatherError(f"no multi-model forecast ({why})")
+    _mm_cache[key] = (t, r)
+    return r
+
+
+def agreement(place: str = "", *, lat: float | None = None, lon: float | None = None, day: int = 0,
+              unit: str = "C", now: float | None = None, fetch=None, timeout: float = 6.0) -> dict | None:
+    """How well the forecast models agree on `day` (0 today ... 6): the card's `agreement`
+    data plus "summary", a sentence to say. None when fewer than two models reach that day."""
+    r = models_forecast(place, lat=lat, lon=lon, unit=unit, now=now, fetch=fetch, timeout=timeout)
+    return compare(r, day, unit)
+
+
+def _median(xs: list[float]) -> float:
+    s = sorted(xs)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def _class(rng: float, lim: tuple) -> int:
+    return 2 if rng <= lim[0] else 1 if rng <= lim[1] else 0
+
+
+def _spread(vals: list[float], lim: tuple) -> dict:
+    """{"range", "cls", "odd", "trim_cls", "dev"}: with five or more models, one far from
+    the rest (leaving it out lifts the class) is the odd one out; `dev` is how far, in limits."""
+    rng = max(vals) - min(vals)
+    out = {"range": rng, "cls": _class(rng, lim), "odd": None, "trim_cls": None, "dev": 0.0}
+    if len(vals) >= 5:
+        med = _median(vals)
+        i = max(range(len(vals)), key=lambda k: abs(vals[k] - med))
+        rest = vals[:i] + vals[i + 1:]
+        tc = _class(max(rest) - min(rest), lim)
+        if tc > out["cls"]:
+            out.update(odd=i, trim_cls=tc, dev=(vals[i] - _median(rest)) / lim[0])
+    return out
+
+
+def _say_deg(x: float) -> str:
+    v = int(round(x))
+    return f"minus {-v}" if v < 0 else str(v)
+
+
+def compare(r: dict, day: int = 0, unit: str = "C") -> dict | None:
+    """A multi-model answer (models_forecast) -> the agreement on one day:
+    {"level": high|medium|low, "head": "Models mostly agree", "detail": "±2° · rain 70–90%",
+     "text": the two together, "day": "Tomorrow", "date", "models": [{"name", "high", "low",
+     "pop"?, "rain"?}, ...], "odd"?: {"name", "side": cold|warm}, "summary": a sentence to say}."""
+    unit = "F" if str(unit).upper().startswith("F") else "C"
+    daily = r.get("daily") or {}
+    times = daily.get("time") or []
+    day = max(0, int(day))
+    if day >= len(times):
+        return None
+
+    def at(var, model):
+        v = daily.get(f"{var}_{model}") or []
+        return v[day] if day < len(v) else None
+    models = []
+    for key, name in MODELS:
+        hi, lo = at("temperature_2m_max", key), at("temperature_2m_min", key)
+        if hi is None or lo is None:
+            continue
+        m = {"name": name, "high": round(float(hi), 1), "low": round(float(lo), 1)}
+        pop, rain = at("precipitation_probability_max", key), at("precipitation_sum", key)
+        if pop is not None:
+            m["pop"] = int(round(float(pop)))
+        if rain is not None:
+            m["rain"] = round(float(rain), 1)
+        models.append(m)
+    if len(models) < 2:
+        return None
+    k = 1.8 if unit == "F" else 1.0
+    his, los = [m["high"] for m in models], [m["low"] for m in models]
+    sh = _spread(his, (_LIMITS["high"][0] * k, _LIMITS["high"][1] * k))
+    sl = _spread(los, (_LIMITS["low"][0] * k, _LIMITS["low"][1] * k))
+    # temperature: a lone outlier is named and lifts the others' agreement one step at most
+    odd = None
+    for s in (sh, sl):
+        s["eff"] = s["cls"] if s["odd"] is None else min(s["trim_cls"], s["cls"] + 1)
+        if s["odd"] is not None and (odd is None or abs(s["dev"]) > abs(odd[1])):
+            odd = (s["odd"], s["dev"])
+    t_cls = min(sh["eff"], sl["eff"])
+    # rain: the models' chances (not every model gives one), else wet/dry votes from the amounts
+    pops = [m["pop"] for m in models if "pop" in m]
+    sums = [m["rain"] for m in models if "rain" in m]
+    dry = all(p <= 15 for p in pops) and all(x < 0.5 for x in sums)
+    if dry:
+        r_cls, rain_txt, med_pop = 2, "dry", 0.0
+    elif pops:
+        a, b = min(pops), max(pops)
+        r_cls = 2 if a >= 70 or b <= 30 else _class(b - a, _LIMITS["pop"])     # all likely / all unlikely
+        rain_txt = f"rain {a}%" if a == b else f"rain {a}–{b}%"
+        med_pop = _median(pops)
+    else:
+        wet = sum(1 for x in sums if x >= 1.0)
+        dissent = min(wet, len(sums) - wet)
+        r_cls = 2 if dissent == 0 else 1 if dissent == 1 else 0
+        rain_txt = f"rain {min(sums):.0f}–{max(sums):.0f} mm"
+        med_pop = 100.0 * wet / max(1, len(sums))
+    level = min(t_cls, r_cls)
+    head = ("Models disagree", "Models mostly agree", "Models agree")[level]
+
+    def pm(rng):
+        return max(1, int(round(rng / 2)))
+    lows_worse = sl["eff"] < sh["eff"]
+    temp_txt = f"highs ±{pm(sh['range'])}°, lows ±{pm(sl['range'])}°" if lows_worse else f"±{pm(sh['range'])}°"
+    try:
+        wday = time.strptime(times[day], "%Y-%m-%d").tm_wday
+    except ValueError:
+        wday = None
+    day_label = "Today" if day == 0 else "Tomorrow" if day == 1 else DAYS[wday] if wday is not None else times[day][-5:]
+    out = {"level": LEVELS[level], "head": head, "detail": f"{temp_txt} · {rain_txt}",
+           "text": f"{head} · {temp_txt}, {rain_txt}", "day": day_label, "date": times[day], "models": models}
+    if odd is not None:
+        out["odd"] = {"name": models[odd[0]]["name"], "side": "cold" if odd[1] < 0 else "warm"}
+    # the sentence to say
+    lead = ("The models disagree", "The models mostly agree", "The models agree")[level]
+    when = "" if day == 0 else " about tomorrow" if day == 1 else \
+        (f" about {_LONG_DAYS[wday]}" if wday is not None else f" about {times[day]}")
+    a, b = min(his), max(his)
+    temps = f"{_say_deg(a)} degrees" if int(round(a)) == int(round(b)) else f"{_say_deg(a)} to {_say_deg(b)} degrees"
+    if lows_worse:
+        temps = f"highs of {temps}, but lows anywhere from {_say_deg(min(los))} to {_say_deg(max(los))}"
+    if r_cls == 0:
+        rain_say = ", and they're split on rain"
+    elif dry:
+        rain_say = ", and dry"
+    elif med_pop >= 70:
+        rain_say = ", rain likely"
+    elif med_pop >= 35:
+        rain_say = ", a chance of rain"
+    else:
+        rain_say = ", mostly dry"
+    say = f"{lead}{when}: {temps}{rain_say}."
+    if odd is not None:
+        who = SPOKEN.get(out["odd"]["name"], out["odd"]["name"])
+        say += f" {who[:1].upper() + who[1:]} runs {'colder' if odd[1] < 0 else 'warmer'} than the rest."
+    out["summary"] = say
+    return out

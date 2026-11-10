@@ -1,0 +1,16 @@
+{
+ "note": "M9's get_clipboard, recorded live 2026-11-10 (it held a link); the link is made up",
+ "tool": "mcp__windows__get_clipboard",
+ "args": {},
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"text\": \"https://example.org/notes/paper-lanterns\", \"chars\": 40}"
+  }
+ ],
+ "expect": {
+  "widget": "clipboard",
+  "title": "Clipboard",
+  "icon": true
+ }
+}

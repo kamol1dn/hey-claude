@@ -30,6 +30,11 @@ Fair use: weather-mcp caches upstream answers itself (forecasts 2 h, alerts
 5 min); ours keeps a place's bundle for `weather.mcp.cache_s` (300 s). Nothing
 polls in the background, except an optional home refresh no more often than
 every 30 min (`weather.mcp.refresh_min`, off by default).
+
+"How sure is that?" (a query with `sure`): the asked day from several forecast
+models, compared (heyclaude/weather.agreement, Open-Meteo's multi-model
+forecast, one call, cached 10 min), fetched alongside the rest; the card gets
+its model-agreement chip and the summary says how well they agree.
 """
 from __future__ import annotations
 
@@ -48,6 +53,8 @@ TOOLS = ("get_weather_summary", "get_forecast", "get_current_conditions", "get_a
          "search_location")
 DEFAULTS = {"enabled": True, "package": PACKAGE, "tools": list(TOOLS), "timeout_s": 2.0, "fallback": True,
             "agent": False, "cache_s": 300, "prefetch": True, "refresh_min": 0, "command": None, "env": {}}
+
+AGREEMENT_TIMEOUT_S = 5.0                   # "how sure is that?": asked for, so worth waiting a little for
 
 _INHERIT = ("PATH", "PATHEXT", "SYSTEMROOT", "SystemRoot", "SYSTEMDRIVE", "COMSPEC", "WINDIR", "TEMP", "TMP",
             "APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "HOME", "ProgramFiles",
@@ -205,12 +212,21 @@ class WeatherService:
             return None, "Which place? Say a city, or set your home place in Settings under weather."
         unit = unit_of(self.cfg)
         facts, label = None, place
+        sure = None
+        if q.sure:                                      # "how sure is that?": the models, alongside the rest
+            sure = {}
+            th = threading.Thread(target=lambda: sure.update(ag=self._agreement(place, q)), daemon=True,
+                                  name="weather-agreement")
+            th.start()
         try:
             facts, label = self._facts(place, q)
         except Exception as e:
             print(f"[weather] {place}: {type(e).__name__}: {e}")
         if not facts:
             return None, f"I couldn't get the weather for {place.split(',')[0]} just now."
+        if sure is not None:
+            th.join(AGREEMENT_TIMEOUT_S + 1.0)
+            facts = dict(facts, agreement=sure.get("ag"))
         self.last = q
         try:
             data = C.card(facts, q, label)
@@ -239,6 +255,27 @@ class WeatherService:
         if not m.get("fallback", True) and self.client is not None:
             return None, place
         return self._builtin(place, q)
+
+    def _agreement(self, place: str, q: WeatherQuery) -> dict | None:
+        """The forecast models compared for the asked day (heyclaude/weather.agreement:
+        Open-Meteo's keyless multi-model forecast, cached 10 min), or None."""
+        from .. import weather as WX
+        t = time.perf_counter()
+        try:
+            with self._lock:
+                hit = self._places.get(place.lower())
+            if hit:
+                lat, lon = hit[0], hit[1]
+            else:
+                g = WX.geocode(place)
+                lat, lon = g["lat"], g["lon"]
+            day = max(0, min(WX.MODEL_DAYS - 1, C._target_index({}, q)))
+            return WX.agreement(lat=lat, lon=lon, day=day, unit=unit_of(self.cfg), timeout=AGREEMENT_TIMEOUT_S)
+        except Exception as e:
+            print(f"[weather] models for {place}: {type(e).__name__}: {e}"[:300])
+            return None
+        finally:
+            self.timing["agreement_s"] = round(time.perf_counter() - t, 3)
 
     def _builtin(self, place: str, q: WeatherQuery) -> tuple[dict | None, str]:
         from .. import weather as WX

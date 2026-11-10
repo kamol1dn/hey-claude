@@ -1,0 +1,19 @@
+{
+ "note": "a real Claude Code WebSearch tool_result (stream-json, haiku tool agent, 2026-11-10): sports results. Public headlines only.",
+ "tool": "WebSearch",
+ "args": {
+  "query": "Premier League results this weekend",
+  "mode": "standard"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "Web search results for query: \"Premier League results this weekend\"\n\nLinks: [{\"title\":\"Football Web Pages\",\"url\":\"https://www.footballwebpages.co.uk/premier-league/fixtures-results/november\"},{\"title\":\"English Premier League results & fixtures (Matchday 10)\",\"url\":\"https://english.ahram.org.eg/News/581763.aspx\"},{\"title\":\"Football Web Pages\",\"url\":\"https://www.footballwebpages.co.uk/premier-league/20261107\"},{\"title\":\"Football Web Pages\",\"url\":\"https://www.footballwebpages.co.uk/premier-league/20261128\"},{\"title\":\"Football Web Pages\",\"url\":\"https://www.footballwebpages.co.uk/premier-league/20261121\"},{\"title\":\"Football Web Pages\",\"url\":\"https://www.footballwebpages.co.uk/premier-league/20261129\"},{\"title\":\"Football Web Pages\",\"url\":\"https://www.footballwebpages.co.uk/premier-league/20261108\"},{\"title\":\"Football Web Pages\",\"url\":\"https://www.footballwebpages.co.uk/premier-league/20261122\"},{\"title\":\"English Premier League results & scorers (11th matchday)\",\"url\":\"https://english.ahram.org.eg/News/556374.aspx\"},{\"title\":\"Premier League Results\",\"url\":\"https://www.tntsports.co.uk/football/premier-league-results_sto7006970/story.shtml\"},{\"title\":\"All 380 fixtures for 2026/27 Premier League season\",\"url\":\"https://www.premierleague.com/en/news/4675097/all-380-fixtures-for-202627-premier-league-season\"},{\"title\":\"Stats Centre\",\"url\":\"https://www.sportsmole.co.uk/football/premier-league/results.html\"},{\"title\":\"Premier League Opening Weekend: 2026/27 EPL Scores And Early Table Shakeups\",\"url\":\"https://bolao.belgo.com.br/epl-scores-60wg.html\"},{\"title\":\"EPL · month · live feed\",\"url\":\"https://www.sportbusy.com/premier-league-schedule-november-2026/\"},{\"title\":\"Premier League Matchday 11 Review\",\"url\":\"https://www.sofascore.com/news/?p=82013\"},{\"title\":\"Consent Preferences Spurs Odyssey Premier League Review of 2025-26 Season - Matchday 11\",\"url\":\"https://spursodyssey.com/review2526/rev11.html\"},{\"title\":\"The Premier League: Match weekend eleven results & standings\",\"url\":\"https://mancitysquare.com/the-premier-league-match-weekend-eleven-results-standings-01k9q40k5wxk\"}]\n\nI found only partial results for the weekend of November 7–8, 2026, so I can't give you a full scoreboard.\n\n- **Confirmed results:** Ahram Online's Matchday 10 report lists Everton 3-1 Coventry City on Friday, November 6, and Leeds United 1-0 Tottenham Hotspur on Saturday, November 7 (Leeds United 1-0 Tottenham Hotspur, scorer N. Okafor 79').\n- **Scheduled fixtures:** Football Web Pages lists Arsenal v Hull City and Fulham v Newcastle United on Saturday, Nightwood Forest v Manchester City on Saturday evening, and Sunday's games including Crystal Palace v Liverpool, Manchester United v Aston Villa, and Sunderland v Chelsea. The listing doesn't include final scores for those matches.\n- **Not usable:** Some search results were from 2025 or earlier seasons, so I've left them out.\n\nFor the remaining scores, check the Premier League's official site or a live-scores service. Note that the Nottingham Forest v Manchester City listing above is from the source as written.\n\n\nREMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks."
+  }
+ ],
+ "expect": {
+  "widget": "news",
+  "title": "Sports · Premier League",
+  "icon": true
+ }
+}

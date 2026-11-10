@@ -1,0 +1,18 @@
+{
+ "note": "deadlines() run for real on a synthetic notes file (invented items in the documented markdown format)",
+ "tool": "mcp__info__deadlines",
+ "args": {
+  "days": 14
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"now\": \"2026-11-10 13:52:20\", \"days\": 14, \"window\": \"next 14 days\", \"count\": 5, \"overdue\": 1, \"more\": 0, \"items\": [{\"title\": \"Library book return\", \"due\": \"2026-11-10 08:00\", \"when\": \"today 08:00\", \"left_s\": -21140, \"left\": \"5 h 52 min ago\", \"urgency\": \"overdue\"}, {\"title\": \"Signals problem set 6\", \"due\": \"2026-11-11 09:00\", \"when\": \"tomorrow 09:00\", \"left_s\": 68860, \"left\": \"in 19 h\", \"urgency\": \"bad\"}, {\"title\": \"Optics lab report\", \"due\": \"2026-11-12 18:00\", \"when\": \"Thu 18:00\", \"left_s\": 187660, \"left\": \"in 2 days\", \"urgency\": \"soon\"}, {\"title\": \"Essay outline: renewable grids\", \"due\": \"2026-11-14 23:59\", \"when\": \"Sat 23:59\", \"left_s\": 382000, \"left\": \"in 4 days\", \"urgency\": \"later\"}, {\"title\": \"Chemistry lab defence\", \"due\": \"2026-11-18 10:30\", \"when\": \"Wed 18 Nov 10:30\", \"left_s\": 679060, \"left\": \"in 8 days\", \"urgency\": \"later\"}, {\"title\": \"Data structures project milestone\", \"due\": \"2026-11-21 23:00\", \"when\": \"Sat 21 Nov 23:00\", \"left_s\": 983260, \"left\": \"in 11 days\", \"urgency\": \"later\"}], \"text\": \"5 deadlines in the next 14 days and 1 overdue. Soonest: Library book return, was due today 08:00 (5 h 52 min ago).\"}"
+  }
+ ],
+ "expect": {
+  "widget": "deadlines",
+  "title": "Deadlines · next 14 days",
+  "icon": true
+ }
+}

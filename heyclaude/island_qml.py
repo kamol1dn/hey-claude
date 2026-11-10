@@ -267,6 +267,7 @@ class IslandModel(QObject):
     effectArt = Signal(str, str)
     widgetShown = Signal("QVariantMap")
     widgetCleared = Signal()
+    widgetUpdate = Signal(str, "QVariantMap")    # M5b: a card's new data (the now-playing card after a button)
     questionShown = Signal(str)
     answerShown = Signal(str)
     approvalShown = Signal("QVariantMap")
@@ -468,6 +469,10 @@ class QmlIsland(QObject):
     approval_decided = Signal(str, str)          # M7: approval id, action: allow | deny | always | pass
     approval_answered = Signal(str, dict)        # M7: approval id, {question text: label | [labels]}
     session_action = Signal(str, str)            # M7: session id, action: diff | jump | desktop | dismiss
+    # M5b, the now-playing card: results from its worker threads, back on the UI thread
+    _np_art = Signal(str, object)                # card id, cover bytes
+    _np_update = Signal(str, "QVariantMap")      # card id, new data
+    _np_error = Signal(str)                      # what to flash
 
     NOT_ME_S = NOT_ME_S
 
@@ -509,6 +514,9 @@ class QmlIsland(QObject):
         self.diff_windows: dict = {}             # title -> DiffWindow (kept so they aren't collected)
 
         self.model = IslandModel(self)
+        self._np_art.connect(self._set_now_playing_art)
+        self._np_update.connect(self._update_now_playing)
+        self._np_error.connect(lambda t: self.flash(t, 3.0))
         # M6: the character (heyclaude/characters.py drives it; ui/CharacterHost.qml draws it)
         self.char = CH.Driver(send=self._char_send, later=lambda ms, fn: QTimer.singleShot(ms, fn))
         self._input_watch = CH.InputWatch()
@@ -976,11 +984,15 @@ class QmlIsland(QObject):
         return w
 
     def set_stt(self, label: str):
+        from .widgets import APP_STATE
+        APP_STATE["stt"] = label
         old = self.stt_label
         self.stt_label = label
         self._send("setBadge", [stt_short(label), badge_dir(old, label)])
 
     def set_voice(self, label: str):
+        from .widgets import APP_STATE
+        APP_STATE["voice"] = label
         self.voice_label = label
 
     def set_wake_label(self, label: str):
@@ -1188,6 +1200,8 @@ class QmlIsland(QObject):
             return
         self.widget = w
         self.model.widgetShown.emit(w)
+        if w.get("widget") == "now_playing":        # M5b: the player's own cover, read here (never sent to the model)
+            self._now_playing_art(w["id"], (w.get("data") or {}).get("title", ""))
         if w.get("widget") == "weather":            # M6: weather-conditioned antics read the last forecast shown
             icon = str((w.get("data") or {}).get("icon", ""))
             self._weather_seen = (CH.ICON_WEATHER.get(icon, ""), time.time())
@@ -1212,7 +1226,88 @@ class QmlIsland(QObject):
                             f"(show it again as a telegram_draft card, don't send it): {t}")
         elif action == "send":
             self.flash("sending needs approvals (coming in M7)", 3.0)
+        elif action == "media" and w.get("widget") == "now_playing" and w.get("id") == wid:
+            self._media_from_card(wid, str(payload or ""))
         self.widget_action.emit(wid, action, payload)
+
+    # -- M5b: the now-playing card's cover and buttons ------------------------------------
+    # The buttons run M9's media_control in-process on the one COM thread (as M10's instant
+    # commands and "undo that" do), then re-read now_playing and send the card its new
+    # data. A click is the user's own act, so there's no effect row or undo for it.
+    def _now_playing_art(self, wid: str, title: str):
+        if QGuiApplication.platformName() == "offscreen":
+            return                                  # renders and tests: the made cover, never this PC's
+        import threading
+
+        def go():
+            try:
+                from .mcp_windows import media
+                from .mcp_windows._util import com_call
+                art = com_call(media.album_art, title)      # only while that track is still the one playing
+            except Exception as e:
+                print(f"[widget] no album art: {e}")
+                return
+            if art:
+                self._np_art.emit(wid, bytes(art))
+        threading.Thread(target=go, daemon=True, name="np-art").start()
+
+    def _set_now_playing_art(self, wid: str, data):
+        img = QImage()
+        if not data or not img.loadFromData(bytes(data)):
+            return
+        from PySide6.QtGui import QPainter, QPainterPath
+        n = 160                                     # the 76 px cover at up to 2x, corners rounded here
+        img = img.scaled(n, n, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        img = img.copy((img.width() - n) // 2, (img.height() - n) // 2, n, n)
+        out = QImage(n, n, QImage.Format_ARGB32_Premultiplied)
+        out.fill(Qt.transparent)
+        p = QPainter(out)
+        p.setRenderHint(QPainter.Antialiasing)
+        clip = QPainterPath()
+        clip.addRoundedRect(0, 0, n, n, n * 10 / 76, n * 10 / 76)
+        p.setClipPath(clip)
+        p.drawImage(0, 0, img)
+        p.end()
+        self._np_art_n = getattr(self, "_np_art_n", 0) + 1
+        self.art.images[f"art-np-{wid}"] = out
+        self.model.effectArt.emit(f"np-{wid}", f"image://island/art-np-{wid}?{self._np_art_n}")
+
+    def _media_from_card(self, wid: str, act: str):
+        import json
+        import threading
+        if act not in ("previous", "next", "play_pause", "play", "pause"):
+            return
+
+        def go():
+            from .mcp_windows import registry
+            from .mcp_windows._util import ToolError, com_call
+            try:
+                com_call(registry.call, "media_control", {"action": act})
+            except ToolError as e:
+                self._np_error.emit(str(e))
+            except Exception as e:
+                print(f"[widget] media {act}: {e}")
+                self._np_error.emit("the player didn't answer")
+            try:
+                now = com_call(registry.call, "now_playing", {})
+            except Exception as e:
+                print(f"[widget] now_playing: {e}")
+                return
+            from .widgets import from_tool
+            spec = from_tool("mcp__windows__now_playing", {}, now, json.dumps(now))
+            if spec is not None and spec.get("widget") == "now_playing":
+                self._np_update.emit(wid, spec["data"])
+        threading.Thread(target=go, daemon=True, name="np-media").start()
+
+    def _update_now_playing(self, wid: str, data: dict):
+        w = self.widget or {}
+        if w.get("id") != wid:
+            return                                  # the card has gone (or another replaced it)
+        old = (w.get("data") or {}).get("title")
+        w["data"] = dict(data)
+        self.model.widgetUpdate.emit(wid, data)
+        if data.get("title") != old:
+            self._now_playing_art(wid, data.get("title", ""))
 
     def _open_url(self, url: str):
         from .widgets import safe_open

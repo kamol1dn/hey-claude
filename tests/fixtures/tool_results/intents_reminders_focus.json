@@ -1,0 +1,18 @@
+{
+ "note": "a real Timers.snapshot() from a test process (four timers set by voice phrasing, read 7 s later): \"how long left on the pasta timer\"",
+ "tool": "intents__list_timers",
+ "args": {
+  "label": "pasta"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"now\": 1794275201.123, \"timers\": [{\"id\": 2, \"label\": \"\", \"kind\": \"timer\", \"seconds\": 90, \"left_s\": 83.0, \"ends_at\": 1794275284.092}, {\"id\": 1, \"label\": \"tea\", \"kind\": \"timer\", \"seconds\": 240, \"left_s\": 233.0, \"ends_at\": 1794275434.09}, {\"id\": 3, \"label\": \"pasta\", \"kind\": \"timer\", \"seconds\": 600, \"left_s\": 593.0, \"ends_at\": 1794275794.093}, {\"id\": 4, \"label\": \"laundry\", \"kind\": \"timer\", \"seconds\": 2700, \"left_s\": 2693.0, \"ends_at\": 1794277894.094}]}"
+  }
+ ],
+ "expect": {
+  "widget": "reminders",
+  "title": "Timers · 4 running",
+  "icon": true
+ }
+}

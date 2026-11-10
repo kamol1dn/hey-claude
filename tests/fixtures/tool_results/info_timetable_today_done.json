@@ -1,0 +1,18 @@
+{
+ "note": "timetable_today() on the synthetic timetable, Tuesday 18:20: the day is over, tomorrow's first class",
+ "tool": "mcp__info__timetable_today",
+ "args": {
+  "day": "today"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\"label\": \"Today\", \"day\": \"Tue\", \"day_name\": \"Tuesday\", \"date\": \"2026-11-10\", \"group\": \"QRS-25-03\", \"classes\": [{\"start\": \"09:00\", \"end\": \"10:30\", \"title\": \"Linear Algebra\", \"code\": \"LIN\", \"room\": \"A108\", \"state\": \"done\"}, {\"start\": \"10:45\", \"end\": \"12:15\", \"title\": \"Applied Optics\", \"code\": \"OPT\", \"room\": \"B204\", \"state\": \"done\"}, {\"start\": \"14:00\", \"end\": \"15:30\", \"title\": \"Data Structures II\", \"code\": \"DSA2\", \"room\": \"C312 Lab\", \"state\": \"done\"}, {\"start\": \"15:45\", \"end\": \"17:15\", \"title\": \"Academic English 3\", \"code\": \"ENG3\", \"room\": \"A215\", \"state\": \"done\"}], \"focus\": -1, \"focus_state\": \"none\", \"focus_in_s\": 0, \"now\": \"18:20\", \"now_min\": 1100.0, \"after\": {\"label\": \"Tomorrow\", \"start\": \"10:45\", \"title\": \"Signals and Systems\", \"in_s\": 59100, \"room\": \"B110\"}, \"text\": \"Classes are over today: 4 classes. Next class: Signals and Systems in B110, tomorrow at 10:45.\"}"
+  }
+ ],
+ "expect": {
+  "widget": "timetable",
+  "title": "Timetable · Today",
+  "icon": true
+ }
+}

@@ -106,3 +106,33 @@ def encode(bgra: bytes, w: int, h: int, max_width: int = 1280, fmt: str = "jpeg"
 def screenshot_bytes(monitor: int | None = 0, max_width: int = 1280) -> tuple[bytes, int, int]:
     data, w, h = _os_capture(monitor)
     return encode(data, w, h, max_width), w, h
+
+
+# M5b: the island's screenshot card. The agent gets the image itself; hey-claude only
+# sees the tool's text, so the MCP server leaves a small copy here (one file, replaced
+# every time, in the git-ignored state/ folder) and the card's adapter reads and
+# deletes it (widgets/clipboard/adapter.py).
+PREVIEW_WIDTH = 560
+
+
+def preview_dir():
+    from ..config import STATE_DIR
+    return STATE_DIR / "screen"
+
+
+def save_preview(jpeg: bytes, max_width: int = PREVIEW_WIDTH) -> str:
+    """A small copy of a screenshot for the island's card; its path, or "" if it can't."""
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QImage
+        img = QImage.fromData(jpeg)
+        if img.isNull():
+            return ""
+        if img.width() > max_width:
+            img = img.scaledToWidth(max_width, Qt.SmoothTransformation)
+        d = preview_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / "preview.jpg"
+        return str(path) if img.save(str(path), "JPG", 82) else ""
+    except Exception:
+        return ""

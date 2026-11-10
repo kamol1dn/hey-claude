@@ -1,0 +1,309 @@
+{
+ "id": "directions",
+ "name": "Directions and places",
+ "api": "1.0",
+ "description": "a route (travel time, distance, a small map) or a place on a map, from OpenStreetMap",
+ "title": "{title}",
+ "size": {
+  "width": 440,
+  "max_height": 236
+ },
+ "private": false,
+ "ttl_s": 20,
+ "glyph": "pin",
+ "triggers": {
+  "tools": [
+   "mcp__info__directions",
+   "mcp__info__place"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "kind": "route",
+  "title": "Directions · Louvre Museum",
+  "mode": "walking",
+  "how": "on foot",
+  "origin": "Eiffel Tower",
+  "dest": "Louvre Museum",
+  "duration": "50 min",
+  "distance": "3.8 km",
+  "arrive": "15:20",
+  "map": "sample_map.png",
+  "route": [
+   [
+    0.0991,
+    0.6498
+   ],
+   [
+    0.1289,
+    0.5678
+   ],
+   [
+    0.1309,
+    0.5729
+   ],
+   [
+    0.1425,
+    0.5404
+   ],
+   [
+    0.1479,
+    0.5546
+   ],
+   [
+    0.1506,
+    0.5396
+   ],
+   [
+    0.2016,
+    0.4971
+   ],
+   [
+    0.2083,
+    0.4139
+   ],
+   [
+    0.2164,
+    0.4083
+   ],
+   [
+    0.218,
+    0.3969
+   ],
+   [
+    0.2365,
+    0.3829
+   ],
+   [
+    0.4108,
+    0.387
+   ],
+   [
+    0.4369,
+    0.3932
+   ],
+   [
+    0.4401,
+    0.3862
+   ],
+   [
+    0.446,
+    0.3865
+   ],
+   [
+    0.4482,
+    0.3934
+   ],
+   [
+    0.4775,
+    0.3958
+   ],
+   [
+    0.5471,
+    0.4165
+   ],
+   [
+    0.5502,
+    0.4177
+   ],
+   [
+    0.5495,
+    0.4262
+   ],
+   [
+    0.5689,
+    0.4318
+   ],
+   [
+    0.5729,
+    0.4282
+   ],
+   [
+    0.5797,
+    0.3905
+   ],
+   [
+    0.5832,
+    0.4058
+   ],
+   [
+    0.5881,
+    0.3961
+   ],
+   [
+    0.6562,
+    0.4776
+   ],
+   [
+    0.6658,
+    0.4459
+   ],
+   [
+    0.6751,
+    0.4434
+   ],
+   [
+    0.6787,
+    0.4322
+   ],
+   [
+    0.7209,
+    0.4851
+   ],
+   [
+    0.7223,
+    0.4772
+   ],
+   [
+    0.7267,
+    0.4793
+   ],
+   [
+    0.7534,
+    0.5141
+   ],
+   [
+    0.7557,
+    0.5123
+   ],
+   [
+    0.7678,
+    0.438
+   ],
+   [
+    0.7746,
+    0.4353
+   ],
+   [
+    0.7762,
+    0.4227
+   ],
+   [
+    0.8201,
+    0.4589
+   ],
+   [
+    0.8318,
+    0.3981
+   ],
+   [
+    0.8513,
+    0.4166
+   ],
+   [
+    0.8611,
+    0.3502
+   ],
+   [
+    0.9063,
+    0.3968
+   ]
+  ],
+  "pins": [
+   [
+    0.0857,
+    0.6153
+   ],
+   [
+    0.9143,
+    0.391
+   ]
+  ],
+  "attribution": "© OpenStreetMap"
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "kind",
+   "title"
+  ],
+  "properties": {
+   "kind": {
+    "type": "string",
+    "enum": [
+     "route",
+     "place"
+    ]
+   },
+   "title": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "mode": {
+    "type": "string",
+    "enum": [
+     "driving",
+     "walking",
+     "cycling"
+    ]
+   },
+   "how": {
+    "type": "string",
+    "maxLength": 12
+   },
+   "origin": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "dest": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "duration": {
+    "type": "string",
+    "maxLength": 20
+   },
+   "distance": {
+    "type": "string",
+    "maxLength": 20
+   },
+   "arrive": {
+    "type": "string",
+    "pattern": "^\\d{1,2}:\\d{2}$"
+   },
+   "name": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "address": {
+    "type": "string",
+    "maxLength": 110
+   },
+   "place_kind": {
+    "type": "string",
+    "maxLength": 24
+   },
+   "map": {
+    "type": "string",
+    "maxLength": 400,
+    "pattern": "^(file:///\\S+/state/maps/map-[0-9a-f]+\\.png|sample_map\\.png)$"
+   },
+   "route": {
+    "type": "array",
+    "maxItems": 200,
+    "items": {
+     "type": "array",
+     "maxItems": 2,
+     "items": {
+      "type": "number"
+     }
+    }
+   },
+   "pins": {
+    "type": "array",
+    "maxItems": 2,
+    "items": {
+     "type": "array",
+     "maxItems": 2,
+     "items": {
+      "type": "number"
+     }
+    }
+   },
+   "attribution": {
+    "type": "string",
+    "maxLength": 40
+   }
+  }
+ }
+}

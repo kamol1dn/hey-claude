@@ -60,6 +60,15 @@ class Timers:
         with self._lock:
             return [t for t in self.items if t.state == "running"]
 
+    def snapshot(self) -> dict:
+        """The running timers, soonest first, as a plain result (M5b): what "what timers do I
+        have" answers from and the reminders card is made of (widgets/reminders)."""
+        now = self.clock()
+        run = sorted(self.running(), key=lambda t: t.ends)
+        return {"now": round(now, 3),
+                "timers": [{"id": t.id, "label": t.label, "kind": "timer", "seconds": t.seconds,
+                            "left_s": round(t.left(now), 1), "ends_at": round(t.ends, 3)} for t in run]}
+
     def cancel(self, label: str | None = None) -> list[LocalTimer]:
         """Cancel the timers with this label (all running ones when no label)."""
         want = (label or "").strip().lower()

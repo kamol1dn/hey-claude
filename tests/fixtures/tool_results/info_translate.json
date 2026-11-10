@@ -1,0 +1,19 @@
+{
+ "note": "the info server's translate: MyMemory, English -> Uzbek (recorded 2026-11-10)",
+ "tool": "mcp__info__translate",
+ "args": {
+  "text": "Good morning, how are you?",
+  "to": "uz"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"text\": \"Good morning, how are you?\",\n  \"translation\": \"Xayrli tong, ishlaringiz qalay?\",\n  \"from\": \"en\",\n  \"to\": \"uz\",\n  \"from_name\": \"English\",\n  \"to_name\": \"Uzbek\",\n  \"detected\": true,\n  \"match\": 0.85,\n  \"source\": \"MyMemory\"\n}"
+  }
+ ],
+ "expect": {
+  "widget": "translate",
+  "title": "Translate · English → Uzbek",
+  "icon": true
+ }
+}

@@ -1,0 +1,18 @@
+{
+ "note": "the info server's calculate, a few steps of working (recorded 2026-11-10)",
+ "tool": "mcp__info__calculate",
+ "args": {
+  "expression": "(3 + 4) * 2^3 - sqrt(16)"
+ },
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"kind\": \"calc\",\n  \"expression\": \"(3 + 4) × 2^3 − √16\",\n  \"result\": 52,\n  \"result_text\": \"52\",\n  \"steps\": [\n    \"(3 + 4) × 2^3 − √16\",\n    \"= 7 × 8 − 4\",\n    \"= 56 − 4\",\n    \"= 52\"\n  ]\n}"
+  }
+ ],
+ "expect": {
+  "widget": "convert",
+  "title": "Maths",
+  "icon": true
+ }
+}

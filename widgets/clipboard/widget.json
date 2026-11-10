@@ -1,0 +1,90 @@
+{
+ "id": "clipboard",
+ "name": "Clipboard and screenshot",
+ "api": "1.0",
+ "description": "what's on the clipboard (the text, monospace when it's code, with its size) or a screenshot's thumbnail",
+ "title": "{heading}",
+ "size": {
+  "width": 400,
+  "max_height": 236
+ },
+ "private": true,
+ "ttl_s": 12,
+ "glyph": "clipboard",
+ "triggers": {
+  "tools": [
+   "mcp__windows__get_clipboard",
+   "mcp__windows__screenshot"
+  ],
+  "data": "adapter"
+ },
+ "example": {
+  "kind": "code",
+  "heading": "Clipboard",
+  "text": "def greet(name):\n    if not name:\n        return \"Hello, stranger\"\n    return f\"Hello, \" + name.title()",
+  "chars": 98,
+  "lines": 4
+ },
+ "schema": {
+  "type": "object",
+  "required": [
+   "kind"
+  ],
+  "properties": {
+   "kind": {
+    "type": "string",
+    "enum": [
+     "text",
+     "code",
+     "link",
+     "image",
+     "files",
+     "empty",
+     "other",
+     "screenshot"
+    ]
+   },
+   "heading": {
+    "type": "string",
+    "maxLength": 60
+   },
+   "text": {
+    "type": "string",
+    "maxLength": 1200
+   },
+   "chars": {
+    "type": "integer",
+    "minimum": 0
+   },
+   "lines": {
+    "type": "integer",
+    "minimum": 0
+   },
+   "more": {
+    "type": "integer",
+    "minimum": 0
+   },
+   "host": {
+    "type": "string",
+    "maxLength": 120
+   },
+   "src": {
+    "type": "string",
+    "maxLength": 600000,
+    "pattern": "^data:image/(jpeg|png);base64,"
+   },
+   "width": {
+    "type": "integer",
+    "minimum": 1
+   },
+   "height": {
+    "type": "integer",
+    "minimum": 1
+   },
+   "monitor": {
+    "type": "integer",
+    "minimum": 0
+   }
+  }
+ }
+}

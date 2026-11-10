@@ -775,7 +775,7 @@ def test_symlinked_settings_are_followed():
         backup = I.apply(I.plan_install(link, PY, relay), record_dir=d)
         assert link.is_symlink()
         assert _ours_count(json.loads(real.read_text(encoding="utf-8")), relay) == len(I.EVENTS)
-        assert backup.parent == real.parent
+        assert backup.parent.samefile(real.parent)  # CI temp paths can be 8.3 short names; realpath expands them
         I.apply(I.plan_uninstall(link, relay, record_dir=d), record_dir=d)
         assert link.is_symlink() and real.read_text(encoding="utf-8") == '{"model": "opus"}\n'
 

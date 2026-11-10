@@ -249,8 +249,15 @@ function respace() {
     });
 }
 function taskRow(r) {
-    return { id: r.id, name: r.name, status: r.status, right: r.right || '', elapsed: r.elapsed || '',
+    var tk = { id: r.id, name: r.name, status: r.status, right: r.right || '', elapsed: r.elapsed || '',
         t0: NOW, orb: 0, a: 0, phase: null, fly: null, ra: 0, rdy: 6, doneAt: null };
+    rowExtras(tk, r);
+    return tk;
+}
+// M7: a watched Claude Code session's row (kind 'session'): its id, lines changed, diffs, desktop flag
+function rowExtras(tk, r) {
+    tk.kind = r.kind || 'task'; tk.sid = r.sid || ''; tk.plus = r.plus || 0; tk.minus = r.minus || 0;
+    tk.diffs = r.diffs || 0; tk.desktop = !!r.desktop;
 }
 // rows: [{id, name, status: running|done|failed|stopped, right, elapsed}] (newest last)
 function setTasks(rows) {
@@ -267,8 +274,10 @@ function setTasks(rows) {
             else { tk.orb = 9; tk.a = 1; tk.doneAt = NOW; }
             if (S.listOpen) { tk.ra = 0; T(tk, 'ra', 1, 200, outCubic); T(tk, 'rdy', 0, 200, outCubic); }
         } else {
-            tk.name = r.name; tk.right = r.right || ''; tk.elapsed = r.elapsed || '';
-            if (tk.status === 'running' && st !== 'running') { tk.status = st; taskDone(tk); }
+            tk.name = r.name; tk.right = r.right || ''; tk.elapsed = r.elapsed || ''; rowExtras(tk, r);
+            // a session's done moment comes from its own event (sessionDone), not from the row
+            if (tk.status === 'running' && st !== 'running' && tk.kind === 'session') { tk.status = st; respace(); }
+            else if (tk.status === 'running' && st !== 'running') { tk.status = st; taskDone(tk); }
             else tk.status = st;
         }
     }
@@ -300,13 +309,37 @@ function taskDone(tk) {
     at(700, function () { ov('done'); tauBack(0.4); }, 'done');
     at(3600, function () { T(O, 'check', 0, 300, inCubic); S.done = null; restLabel(); resize(); }, 'done');
 }
+// M7: a watched session finished (its Stop event): the same check, with no satellite to absorb
+// (the row has usually gone idle by now), "done · <title>" at rest; a tint only in a voice state.
+function sessionDone(name) {
+    NOW = env.now();
+    cancel('done');
+    var rest = isRest(S.state);
+    if (!rest || MOTION === 'off') { ov('done', mixc(C.live, C.ok, 0.6), 0.08, 3); at(600, function () { ov('done'); }, 'done'); return; }
+    if (MOTION === 'calm') {
+        ov('done', C.ok, 0.08, 3); O.check = 0; T(O, 'check', 1, 150, linear); S.done = name; restLabel(); resize();
+        at(800, function () { ov('done'); }, 'done');
+        at(3600, function () { T(O, 'check', 0, 150, linear); S.done = null; restLabel(); resize(); }, 'done');
+        return;
+    }
+    ov('done', C.ok, 0.08, 3); kickR(1.6); GC.to(C.ok, 0.05); kickG(0.22); at(480, function () { GC.to(C.live, 0.25); }, 'done');
+    O.check = 0; T(O, 'check', 1, 240, nib); O.checkW = 1.5;
+    at(60, function () { S.done = name; restLabel(); resize(); }, 'done');
+    at(240, function () { T(O, 'checkW', 2.2, 90, outQuad); at(90, function () { T(O, 'checkW', 1.75, 220, outCubic); }, 'done'); }, 'done');
+    at(460, function () { ov('done'); tauBack(0.4); }, 'done');
+    at(3360, function () { T(O, 'check', 0, 300, inCubic); S.done = null; restLabel(); resize(); }, 'done');
+}
 function tauBack(t) { S.baseTau = t; at(t * 3000, function () { S.baseTau = 0.12; }, 'g'); }
 
 /* ---------------- size / labels per state ---------------- */
 function readyMain() {
     var n = runningN();
     if (NOW < S.flashUntil && S.flash) return S.flash;
-    return n ? (n + ' task' + (n > 1 ? 's' : '') + ' running') : S.wakeLabel;
+    if (!n) return S.wakeLabel;
+    var ns = TASKS.filter(function (t) { return t.status === 'running' && t.kind === 'session'; }).length;
+    if (ns === n) return n + ' session' + (n > 1 ? 's' : '') + ' working';
+    if (!ns) return n + ' task' + (n > 1 ? 's' : '') + ' running';
+    return n + ' running';
 }
 function badgeText() { return S.badge ? ' · ' + S.badge : ''; }
 function restLabel() {
@@ -978,7 +1011,8 @@ function render() {
     var anyRow = S.listGeom; for (var rr = 0; rr < TASKS.length && !anyRow; rr++) anyRow = TASKS[rr].ra > 0.001;
     out.rows = !anyRow ? NO_ROWS : TASKS.slice(0, rowsN()).map(function (tk, k) {
         var bb = MOTION === 'full' ? breath(NOW / 1000 + k * 0.7, 0.5) : 0.5;
-        return { name: tk.name, status: tk.status, right: tk.right, elapsed: tk.elapsed, a: tk.ra, dy: tk.rdy, b: bb };
+        return { id: tk.id, name: tk.name, status: tk.status, right: tk.right, elapsed: tk.elapsed, a: tk.ra, dy: tk.rdy, b: bb,
+            kind: tk.kind, sid: tk.sid, plus: tk.plus, minus: tk.minus, diffs: tk.diffs, desktop: tk.desktop };
     });
     out.usageA = S.usageA || 0;
     out.listGeom = S.listGeom;

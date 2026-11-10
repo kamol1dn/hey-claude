@@ -469,8 +469,70 @@ tab lists only sessions the app created itself (its `local_…` sessions). A
 `%USERPROFILE%\.claude\projects\<folder-slug>\<session id>.jsonl`, where
 `claude --resume <id>` (and the `/resume` picker, under its `voice: …` name)
 finds it. The Code tab didn't list it. The CLI has a `--desktop` flag ("open in
-the Claude Desktop app instead of the terminal, with `--resume <id>`"), which
-may be the bridge, but I haven't tried it here because it opens the app.
+the Claude Desktop app instead of the terminal, with `--resume <id>`"). That
+is the bridge: M7's "move it to the desktop" uses it (see below), and the
+session then appears in the app as `local_<session id>`.
+
+## Watching Claude Code sessions (M7)
+
+hey-claude can follow **every** Claude Code session on this PC: a terminal,
+VS Code, the Claude desktop app, and its own voice tasks. It uses Claude Code
+hooks, so nothing changes until you install them: **Settings → Sessions →
+Install hooks…**. The dialog shows the exact change to your global
+`~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR\settings.json`) and writes
+nothing until you click Install. Your own hooks stay as they are: ours are
+added next to them, and a dated backup is made first. **Uninstall hooks…** puts
+the file back byte for byte (if you edited it since, it removes only our
+entries).
+
+How it works:
+
+- Each hook runs a tiny relay, `%LOCALAPPDATA%\hey-claude\hook\heyclaude-hook.py`
+  (Python stdlib only, started with `-I -S`). It sends the event to hey-claude
+  over a named pipe, `\\.\pipe\hey-claude-<your SID>`. The pipe's DACL lets
+  only your Windows user connect, and each side checks the other's user.
+- If hey-claude isn't running, or anything goes wrong, the relay exits quietly
+  and Claude Code carries on as if there were no hook. It never allows anything
+  on its own.
+- hey-claude's own helper runs (the tool agent, task questions) are marked
+  `HEYCLAUDE_INTERNAL` and never show up. Voice tasks carry `HEYCLAUDE_TASK`,
+  so a task and its session are the same row.
+
+On the island:
+
+- **The ticker** shows what each session is doing: `Runs · pytest -q`,
+  `Edits · island.py +3 −1`, `Searches · def main`. Click a session for its
+  **diff** (the edits it made in the last hour), **Jump** (raises its terminal
+  or VS Code window, or opens it in the desktop app) and **Move to desktop**.
+- A one-shot **"done"** moment plays when a session stops.
+- **Approvals.** When a session needs permission, the island shows **Allow /
+  Deny / Always** (Always is there when Claude Code offers a rule to remember).
+  The island switches to the `approval_needed` state while a card is up.
+  - You can answer by voice: "yes, allow that", "deny", "always allow",
+    "I'll answer in the terminal". **Anything flagged dangerous needs a
+    click**: deleting, force-pushing, `curl … | sh`, writes outside the
+    project or to credentials and settings, MCP tools that send or delete.
+  - With no answer in `hooks.approval_timeout_s` (100 s; at most 108, under
+    the relay's 110 s and the hook's 120 s), the card goes away and the
+    terminal shows its own prompt. A headless task is denied.
+  - If you answer in the terminal first, the card disappears.
+- **Claude's questions** (`AskUserQuestion`) show as choices on the island.
+  Say "the second one" or the option's name, or pick and Submit. "In terminal"
+  leaves it to the terminal.
+
+By voice: "jump to the session", "show me the diff", "move it to the desktop".
+
+**Moving a session to the Claude desktop app** runs
+`claude --desktop --resume <session id>` in its own minimized console (it
+refuses redirected output). The session continues there with its full context,
+under the same id, and the hooks keep following it. It is only handed over
+between turns: if the session is working, it moves when the turn ends. A
+terminal session you hand over is still open in its terminal, so don't type in
+both.
+
+Voice tasks now ask on the island too. A task's tool that isn't in
+`tasks.allowed_tools` pauses the run with a card, and "yes" lets it continue.
+Without the hooks, it is denied as before.
 
 ## Which MCP servers the tool agent sees
 
@@ -1229,6 +1291,10 @@ heyclaude/
   intents/        M10: instant commands without a model: grammar (English, Russian, Uzbek), slots,
                   classifier (numpy), executors over mcp_windows, local timers, "teach it"
   claude_cli.py   finds claude.exe, launch flags
+  hookrelay/      M7: heyclaude_hook.py (the hook relay, stdlib only), pipe.py (the per-user named
+                  pipe), install.py (settings.json merge/uninstall), sessions.py (the session hub:
+                  ticker, approvals, voice answers), diff.py, diffview.py, jump.py (window, handoff)
+  hooks_settings.py M7: Settings → Sessions (install / uninstall the hooks, approval options)
 tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
                   wake_eval.py (wake word hit rate, false wakes per hour, threshold),
                   stage_wake_release.py (stage the shared model as a release asset; publishes nothing),

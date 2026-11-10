@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import collections
 import csv
+import os
 import re
 import threading
 import time
@@ -111,6 +112,10 @@ class Assistant:
         self.instant_exec = None
         self.timers = None
         self._turn_writes: list = []           # Windows write tools the agent ran this turn ("teach it")
+        # M7: watched Claude Code sessions (hook relay -> named pipe -> SessionHub), made in load()
+        self.hub = None
+        self.pipe = None
+        self.on_open_diff = None               # callback(title, diffs), set by __main__ (opens on the GUI thread)
 
     # -- UI helpers -----------------------------------------------------------
     def _wake_label(self, label: str):
@@ -403,6 +408,7 @@ class Assistant:
         self.push_tasks()
         self.set_mode("loading", "loading brain…")
         self.brain = Brain(c)
+        self._setup_hooks()
         try:
             from .undo import UndoStack
             self.undo_stack = UndoStack()
@@ -1155,6 +1161,13 @@ class Assistant:
                 elif kind == "task_resume":
                     tier = "local"
                     task_id = self._resume_task(ev[1])
+                elif kind == "approval":
+                    tier = "local"                 # M7: "yes, allow that" while a card is up
+                    ok, reply = self.hub.voice(ev[1]) if self.hub else (False, "")
+                    self._say(reply or "There's nothing waiting for an answer.")
+                elif kind == "session":
+                    tier = "local"                 # M7: "move it to the desktop", "jump to the session"
+                    self._session_command(ev[1], ev[2])
                 elif kind == "noop":
                     pass
         except Exception as e:
@@ -1369,6 +1382,157 @@ class Assistant:
         print(f"[task {t.id}] resumed in a terminal: {t.resume_cmd}")
         self._say(f"Opening the {t.project} task in a terminal.")
         return t.id
+
+    # -- M7: watched Claude Code sessions --------------------------------------------------
+    def _setup_hooks(self):
+        """The session hub and the named-pipe server the hook relay talks to.
+        Nothing arrives until the hooks are installed (Settings -> Sessions)."""
+        h = self.cfg.setdefault("hooks", {})
+        if not h.get("enabled", True):
+            return
+        from .hookrelay.sessions import SessionHub
+        finder = None
+        try:
+            from .hookrelay.jump import session_window
+            finder = session_window
+        except Exception as e:
+            print(f"[sessions] no window lookup: {e}")
+        self.hub = SessionHub(h, on_sessions=lambda rows: self._ui_emit("sessions", rows),
+                              on_event=self._session_event, on_approval=self._approval_request,
+                              on_withdraw=lambda ap_id: self._ui_emit("approval_withdrawn", ap_id),
+                              window_finder=finder)
+        # a handoff asked for mid-turn runs when the turn ends (off the pipe thread: it may wait for the -p run)
+        self.hub.on_handoff = lambda s: threading.Thread(target=self._handoff, args=(s.id, True), daemon=True).start()
+        self.brain.hub = self.hub
+        if self.simulate or self.mic_factory is not None:
+            return                                   # test runs: the hub only, no pipe
+        try:
+            from .hookrelay.pipe import PipeServer
+            self.pipe = PipeServer(self.hub.handle)
+            if self.pipe.start():
+                self.hub.start()
+                print("[sessions] listening for Claude Code hook events")
+            else:
+                print("[sessions] another hey-claude owns the hook pipe: not watching sessions")
+                self.pipe = None
+        except Exception as e:
+            print(f"[sessions] hook pipe failed: {e}")
+            self.pipe = None
+
+    def close_hooks(self):
+        if self.pipe is not None:
+            self.pipe.stop()
+        if self.hub is not None:
+            self.hub.stop()
+
+    def _session_event(self, ev: dict):
+        if ev.get("kind") == "done" and not (self.cfg.get("hooks") or {}).get("done_flash", True):
+            ev = dict(ev, kind="idle")
+        self._ui_emit("session_event", ev)
+
+    def _approval_request(self, req: dict):
+        print(f"[approval] {req.get('id')}: {req.get('tool')} · {req.get('title')}"
+              + (" (dangerous: click only)" if req.get("dangerous") else ""))
+        self._ui_emit("approval", req)
+
+    def approval_shown(self, ap_id: str):
+        """The island put the card up (GUI thread): the long wait starts."""
+        if self.hub is not None:
+            self.hub.acknowledge(ap_id)
+
+    def approval_clicked(self, ap_id: str, action: str):
+        if self.hub is not None and not self.hub.decide(ap_id, action):
+            print(f"[approval] {ap_id}: {action} came too late")
+
+    def approval_answered(self, ap_id: str, answers: dict):
+        if self.hub is not None and not self.hub.answer(ap_id, dict(answers or {})):
+            print(f"[approval] {ap_id}: the answers came too late")
+
+    def session_action(self, sid: str, action: str):
+        """A click on a session row: diff | jump | desktop | dismiss."""
+        if self.hub is None:
+            return
+        if action == "dismiss":
+            self.hub.dismiss(sid)
+        elif action == "diff":
+            self._open_diff(sid)
+        elif action == "jump":
+            threading.Thread(target=self._jump, args=(sid,), daemon=True).start()
+        elif action == "desktop":
+            threading.Thread(target=self._handoff, args=(sid,), daemon=True).start()
+
+    def _open_diff(self, sid: str) -> bool:
+        s = self.hub.session(sid) if self.hub else None
+        diffs = self.hub.diffs(sid) if s else []
+        if not diffs or self.on_open_diff is None:
+            return False
+        self.on_open_diff(s.label(), diffs)
+        return True
+
+    def _jump(self, sid: str) -> str:
+        from .hookrelay.jump import jump
+        s = self.hub.session(sid) if self.hub else None
+        if s is None:
+            return "none"
+        how = jump({"hwnd": s.hwnd, "cwd": s.cwd, "desktop": s.desktop, "session_id": s.id})
+        print(f"[sessions] jump to {s.label()}: {how}")
+        return how
+
+    def _handoff(self, sid: str, quiet: bool = False) -> str:
+        """Hand a session to the Claude desktop app (`claude --desktop --resume <id>`,
+        in its own minimized console: it refuses redirected output). Only between
+        turns: a working session is handed over when its turn ends."""
+        s = self.hub.session(sid) if self.hub else None
+        if s is None:
+            return "unknown"
+        state = self.hub.request_handoff(sid)
+        if state != "now":
+            if state == "after_turn":
+                print(f"[sessions] {s.label()}: handing over to the desktop app when this turn ends")
+            return state
+        if s.task and self.tasks is not None:
+            p = self.tasks.procs.get(s.task)
+            if p is not None and p.poll() is None:    # the -p run hasn't exited yet: never two writers
+                try:
+                    p.wait(timeout=30)
+                except Exception:
+                    return "busy"
+        try:
+            from .hookrelay.jump import handoff_to_desktop
+            exe = self.tasks.exe if self.tasks is not None else None
+            if not exe:
+                from .claude_cli import find_claude
+                exe = find_claude(self.cfg["claude"].get("exe"))
+            if handoff_to_desktop(exe, s.id, s.cwd or os.path.expanduser("~")) is None:
+                print("[sessions] handoff: claude --desktop didn't start")
+                return "failed"
+        except Exception as e:
+            print(f"[sessions] handoff failed: {e}")
+            return "failed"
+        s.desktop = True
+        print(f"[sessions] {s.label()}: handed to the desktop app (claude --desktop --resume {s.id})")
+        return "now"
+
+    def _session_command(self, action: str, ref: str):
+        s = self.hub.find(ref) if self.hub else None
+        if s is None:
+            self._say("I'm not watching any Claude Code session.")
+            return
+        name = s.title or s.project or "that session"
+        if action == "diff":
+            self._say(f"Here are the changes in {name}." if self._open_diff(s.id) else f"{name} hasn't changed any files.")
+        elif action == "jump":
+            how = self._jump(s.id)
+            self._say({"window": f"Here's {name}.", "desktop": f"Opening {name} in the desktop app.",
+                       "vscode": "I couldn't find its window, so I opened the folder in VS Code."}
+                      .get(how, f"I couldn't find the window for {name}."))
+        elif action == "desktop":
+            st = self._handoff(s.id)
+            self._say({"now": f"Moving {name} to the desktop app.",
+                       "after_turn": f"{name} is still working. I'll move it when this step finishes.",
+                       "already": f"{name} is already in the desktop app.",
+                       "busy": f"{name} is still finishing. Try again in a moment."}
+                      .get(st, f"I couldn't move {name}."))
 
     def _say_status(self):
         run = self.tasks.running()

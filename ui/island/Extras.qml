@@ -28,7 +28,7 @@ Item {
     signal turnCleared()
     readonly property real contentHeight: (effect.ev ? effect.height : 0) + approvals.height + (widget.spec ? widget.height : 0)
         + qrow.height + arow.height
-    readonly property real minWidth: Math.max(effect.ev ? effect.minWidth : 0, approvals.count ? 440 : 0, widget.spec ? widget.minWidth : 0)
+    readonly property real minWidth: Math.max(effect.ev ? effect.minWidth : 0, approvals.count ? 460 : 0, widget.spec ? widget.minWidth : 0)
     // the whole panel goes at once: card, question and answer together
     function clearTurn() { linger.stop(); if (widget.spec) widget.clear(); if (effect.ev && !effect.isConfirm) effect.clear(); question = ""; answer = ""; turnCleared() }
     // At rest: a card keeps the turn up until it goes (then all of it collapses at
@@ -68,12 +68,23 @@ Item {
             Repeater {
                 id: list
                 model: ListModel { id: approvalModel }
-                ApprovalCard {
+                // a permission request (ApprovalCard) or Claude's questions (QuestionCard)
+                Loader {
+                    id: ld
                     width: ex.width
-                    req: JSON.parse(json)
-                    onDecided: function (action) { if (model) model.approvalDecided(apId, action); ex.removeApproval(apId) }
+                    readonly property var r: JSON.parse(json)
+                    readonly property string rid: apId
+                    sourceComponent: r.kind === "question" ? questionComp : approvalComp
+                    onLoaded: {
+                        var id = ld.rid
+                        item.req = ld.r
+                        item.decided.connect(function (action) { ex.decide(id, action) })
+                        if (item.answered) item.answered.connect(function (answers) { ex.answerCard(id, answers) })
+                    }
                 }
             }
+            Component { id: approvalComp; ApprovalCard {} }
+            Component { id: questionComp; QuestionCard {} }
         }
         WidgetCard {
             id: widget
@@ -148,6 +159,13 @@ Item {
         }
     }
 
+    // (here, not in the delegate: there `model` would be the ListModel row)
+    function decide(id, action) { if (model) model.approvalDecided(id, action); removeApproval(id) }
+    function answerCard(id, answers) { if (model) model.approvalAnswered(id, answers); removeApproval(id) }
+    function card(id) {                          // tests: the card item for an approval id
+        for (var i = 0; i < list.count; i++) { var l = list.itemAt(i); if (l && l.rid === id) return l.item }
+        return null
+    }
     function removeApproval(id) {
         for (var i = 0; i < approvalModel.count; i++) if (approvalModel.get(i).apId === id) { approvalModel.remove(i); return }
     }

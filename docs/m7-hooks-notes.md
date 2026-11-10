@@ -16,6 +16,10 @@ keep Coucou's MIT notice on any code that is actually copied.
 - The same user hooks fire inside the desktop session afterwards (SessionStart
   on handoff, then UserPromptSubmit / Stop per turn).
 
+- (2026-11-10) PermissionRequest fires in `claude -p` even with `--permission-prompts none`, and an
+  allow reply is honoured. `claude -p` disables AskUserQuestion. The CLI's AskUserQuestion answers are
+  "question text -> answer string; multi-select answers are comma-separated".
+
 ## Shape
 
 - A **tiny relay** that Claude Code runs as the hook command, plus a
@@ -140,7 +144,10 @@ keep Coucou's MIT notice on any code that is actually copied.
 - Raise it with `ShowWindow` + `AttachThreadInput` + `SetForegroundWindow`
   (the island doesn't take focus, so Windows' foreground lock otherwise
   refuses).
-- Classic conhost windows can't be found this way. Fall back to `code <cwd>`.
+- ~~Classic conhost windows can't be found this way.~~ They can (checked 2026-11-10): the console window
+  is reported under the shell's own pid, and with Windows Terminal as the default terminal the shell
+  owns an untitled PseudoConsoleWindow whose root owner is the WT window. Fall back to `code <cwd>`
+  only when nothing resolves.
 - Desktop-app sessions: `claude://claude.ai/epitaxy/local_<id>` (to verify).
   Otherwise focus a `claude.exe` window, then start the desktop app, then
   `ShellExecute("claude://")`.

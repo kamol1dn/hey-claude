@@ -328,7 +328,7 @@ class _CliChat:
         self.proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE if prompt is None else subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=err, text=True, encoding="utf-8",
-            errors="replace", bufsize=1, env=child_env(), creationflags=NO_WINDOW, cwd=self.cwd,
+            errors="replace", bufsize=1, env=child_env(internal=True), creationflags=NO_WINDOW, cwd=self.cwd,
         )
         self.turns = 0
         self.epoch += 1
@@ -901,9 +901,31 @@ class Brain:
             self.timing["match_ms"] = round(m.match_ms, 2)
         return m
 
+    hub = None                                  # M7: hookrelay.sessions.SessionHub (watched Claude Code sessions)
+
+    def session_route(self, text: str):
+        """M7: a spoken answer to an approval card, or a command about a watched
+        session ("move it to the desktop", "jump to the session", "show me the diff")."""
+        hub = self.hub
+        if hub is None:
+            return None
+        if hub.pending and hub.cfg.get("voice_approvals", True) and hub.voice_applies(text):
+            return ("approval", text)
+        if hub.sessions:
+            from .hookrelay.sessions import session_command
+            cmd = session_command(text)
+            if cmd is not None:
+                return ("session", cmd[0], cmd[1])
+        return None
+
     def handle(self, text: str):
         if self.convo is not None:
             self.convo.expire_if_idle()
+        routed = self.session_route(text)
+        if routed is not None:
+            self.timing["route"] = "local-" + routed[0]
+            yield routed
+            return
         routed = local_route(text, self.projects)
         if routed is None and self.convo is not None and _IT_RE.match(text.strip()):
             tid = self.convo.last_task_id()

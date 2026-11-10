@@ -15,8 +15,14 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _SESSION_VARS = (
     "CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID",
     "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
-    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_ENTRYPOINT",
 )
+# M7: the hook relay (hookrelay/heyclaude_hook.py) reads these. A task hey-claude
+# starts carries its id, so the island links the watched session to the task;
+# hey-claude's own helper runs (the tool agent, task questions) are marked
+# internal and never show up as sessions or ask for approvals.
+TASK_VAR = "HEYCLAUDE_TASK"
+INTERNAL_VAR = "HEYCLAUDE_INTERNAL"
 
 # An API key in the environment makes the claude CLI bill the API instead of
 # the user's subscription login. hey-claude reads its own key for the direct
@@ -53,12 +59,18 @@ def find_claude(configured: str | None = None) -> str:
     )
 
 
-def child_env(base: dict | None = None) -> dict:
+def child_env(base: dict | None = None, *, internal: bool = False, task: str | None = None) -> dict:
     """Environment for every `claude` process hey-claude starts: no parent
-    session variables, and no API key (so it uses the subscription login)."""
+    session variables, and no API key (so it uses the subscription login).
+    internal: hey-claude's own helper run (the hooks ignore it); task: the id of
+    a voice task (the hooks report it with the session)."""
     env = dict(os.environ if base is None else base)
-    for k in _SESSION_VARS + _BILLING_VARS:
+    for k in _SESSION_VARS + _BILLING_VARS + (TASK_VAR, INTERNAL_VAR):
         env.pop(k, None)
+    if internal:
+        env[INTERNAL_VAR] = "1"
+    if task:
+        env[TASK_VAR] = str(task)
     return env
 
 

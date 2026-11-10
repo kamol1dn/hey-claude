@@ -264,6 +264,26 @@ def main(argv=None, harness=None):
         if hasattr(island, "widget_action"):
             island.widget_action.connect(widget_action)
 
+        # M7: watched Claude Code sessions. A card counts as shown once the island has
+        # put it up (this slot runs after the island's own, in connection order); an
+        # island without approval cards never acknowledges, so the terminal asks.
+        if hasattr(island, "approval_decided"):
+            bridge.approval.connect(lambda req: asst.approval_shown(str((req or {}).get("id", ""))))
+            island.approval_decided.connect(asst.approval_clicked)
+        if hasattr(island, "approval_answered"):
+            island.approval_answered.connect(asst.approval_answered)
+        if hasattr(island, "session_action"):
+            island.session_action.connect(asst.session_action)
+        if hasattr(island, "open_diff"):
+            from PySide6.QtCore import QObject, Signal
+
+            class _DiffRelay(QObject):
+                show = Signal(str, list)          # from any thread -> the GUI thread
+            diff_relay = _DiffRelay()
+            diff_relay.show.connect(island.open_diff)
+            asst.on_open_diff = lambda title, diffs: diff_relay.show.emit(title, diffs)
+            island._diff_relay = diff_relay       # keep it alive
+
         def attach_tm():
             asst.ready.wait()
             island.tm = asst.tasks
@@ -358,6 +378,10 @@ def main(argv=None, harness=None):
         stop_hk.close()
     if asst.hold:
         asst.hold.close()
+    try:
+        asst.close_hooks()                    # M7: pending approvals go back to the terminal
+    except Exception:
+        pass
     try:
         asst.brain.close()
     except Exception:

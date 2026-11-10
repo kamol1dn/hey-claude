@@ -56,6 +56,7 @@ class Bridge(QObject):
     approval = Signal(dict)         # {"id", "title", "detail", "tool", "session", "actions": [{"id","label","primary"}]}
     approval_withdrawn = Signal(str)  # the request went away (answered elsewhere, timed out)
     session_event = Signal(dict)    # {"session", "kind": started|tool|tool_done|idle|done|error, "tool", "text"}
+    sessions = Signal(list)         # M7: watched Claude Code sessions, a full snapshot, newest activity first
     quit = Signal()
 
 

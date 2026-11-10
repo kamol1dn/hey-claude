@@ -264,6 +264,17 @@ tasks:
   extra_args: []                 # anything else to pass to claude -p
   max_parallel: 3
 
+# M7: watch every Claude Code session on this PC (terminal, VS Code, the Claude
+# desktop app, and the tasks above) through Claude Code hooks. Nothing happens
+# until the hooks are installed: Settings -> Sessions -> Install hooks (it shows
+# the change to ~/.claude/settings.json first; Uninstall restores it exactly).
+hooks:
+  enabled: true                  # listen for hook events (a named pipe only your Windows user can connect to)
+  approvals: true                # Allow / Deny / Always on the island; off = the terminal always asks
+  approval_timeout_s: 100        # then the terminal's own prompt (tasks: denied). At most 108
+  voice_approvals: true          # "yes, allow that" / "deny" / "always" while a card is up (dangerous ones need a click)
+  done_flash: true               # the one-shot "done" moment when a session stops
+
 # Spoken name -> folder. Say "start a task in <name>: <thing>".
 # Several spoken names can point at the same folder.
 projects:

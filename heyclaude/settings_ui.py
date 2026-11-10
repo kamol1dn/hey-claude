@@ -291,6 +291,8 @@ class SettingsWindow(QWidget):
         self._build_models()
         self._build_projects()
         self._build_permissions()
+        from .hooks_settings import SessionsTab
+        self.sessions_tab = SessionsTab(self)       # M7: Claude Code hooks, approvals
 
         # Bottom: status line + Restart now + Save / Close.
         bottom = QHBoxLayout()
@@ -653,6 +655,7 @@ class SettingsWindow(QWidget):
 
     # -- filling / collecting -----------------------------------------------
     def _fill(self, cfg: dict):
+        self.sessions_tab.fill(cfg)
         self.cb_listening.setChecked(bool(_get(cfg, "app.listening", True)))
         self.ed_hotkey.setText(str(_get(cfg, "app.hotkey") or ""))
         self.cb_autostart.setChecked(bool(_get(cfg, "app.start_with_windows", False)))
@@ -732,6 +735,7 @@ class SettingsWindow(QWidget):
         new = copy.deepcopy(self._orig)
         errors: list[str] = []
         warnings: list[str] = []
+        self.sessions_tab.collect(new)
 
         _set(new, "app.listening", self.cb_listening.isChecked())
         hk = self.ed_hotkey.text().strip()

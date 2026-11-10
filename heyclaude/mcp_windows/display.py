@@ -158,16 +158,42 @@ def _os_broadcast_theme() -> None:
     The broadcast waits on every top-level window (up to 200 ms each for a
     slow one) and took ~2 s here, so it runs on its own thread: the tool
     answers at once and the windows repaint as the message reaches them.
-    (The async SendNotifyMessage can't carry the string to other processes.)"""
-    import ctypes
+    (The async SendNotifyMessage can't carry the string to other processes.)
+
+    The string lives in a buffer that is never freed. Windows copies it for
+    other processes, but our own windows (M10 runs this inside hey-claude) get
+    the raw pointer, and a window whose thread is busy past the 200 ms timeout
+    still receives the message later: with a temporary ctypes string, Qt then
+    read freed memory (the live re-check crashed with an access violation
+    right after an instant "light mode", twice)."""
     import threading
-    from ctypes import wintypes
 
     def send():
-        res = wintypes.DWORD()
-        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 200,
-                                                 ctypes.byref(res))
+        fn, lparam = _settingchange_call()
+        res = ctypes.c_size_t()
+        fn(0xFFFF, 0x001A, 0, lparam, 0x0002, 200, ctypes.byref(res))
     threading.Thread(target=send, daemon=False, name="theme-broadcast").start()
+
+
+import ctypes  # noqa: E402  (the broadcast's buffer must outlive every call)
+
+_IMMERSIVE = None
+_SMTO = None
+
+
+def _settingchange_call():
+    """SendMessageTimeoutW with real 64-bit types, and the LPARAM of a
+    process-lifetime "ImmersiveColorSet" buffer."""
+    global _IMMERSIVE, _SMTO
+    if _SMTO is None:
+        from ctypes import wintypes
+        f = ctypes.WinDLL("user32", use_last_error=True).SendMessageTimeoutW
+        f.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, wintypes.UINT,
+                      wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+        f.restype = wintypes.LPARAM
+        _IMMERSIVE = ctypes.create_unicode_buffer("ImmersiveColorSet")
+        _SMTO = f
+    return _SMTO, ctypes.cast(_IMMERSIVE, ctypes.c_void_p).value
 
 
 def _mode(v: int | None) -> str:

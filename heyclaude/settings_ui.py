@@ -134,6 +134,22 @@ TIPS = {
     "tts.speed": "Kokoro speaking speed (1.0 = normal).",
     "tts.rate": "SAPI speaking rate in words per minute.",
     "tts.sapi_voice": "SAPI voice name substring, e.g. \"Zira\". Empty = the Windows default voice.",
+    "instant.enabled": "Simple commands (\"volume 30\", \"mute\", \"dark mode\", \"next song\", \"set a timer for 5 "
+                       "minutes\", \"what time is it\") run here in about a millisecond, with the same island effect "
+                       "and \"undo that\" as when Claude does them. Anything it isn't sure about still goes to Claude.",
+    "instant.ack": "Speak: a short ack (\"Volume 30.\"). Effect only: just the island effect. Answers (the time, "
+                   "what's playing) and errors are always spoken.",
+    "instant.step": "How much \"turn it up\" changes the volume or brightness. \"A bit\" is half of it, \"a lot\" "
+                    "two and a half times.",
+    "instant.context_s": "\"A bit more\", \"again\", \"the other way\", \"make it 40\" apply to the last instant "
+                         "command if it was this recent.",
+    "instant.radios": "\"Wi-Fi off\" / \"Bluetooth on\" instantly. Off: those go to Claude.",
+    "instant.classifier": "A small local classifier for wordings the grammar doesn't know (\"my ears hurt, it's too "
+                          "loud\"). English only. Off: the grammar alone.",
+    "instant.threshold": "How close to one of the classifier's example phrasings a request must be. Higher = "
+                         "stricter (more goes to Claude). The grammar ignores this.",
+    "instant.learn": "When Claude handles a request with exactly one settings change, the wording is noted in "
+                     "state/intents_misses.jsonl (on this PC only). Say \"teach it\" right after to make it instant.",
 }
 BYPASS_TIP = ("bypassPermissions skips every permission check: tasks can run any command and edit any file "
               "without asking. Only use it in folders you can afford to lose.")
@@ -270,9 +286,10 @@ class SettingsWindow(QWidget):
     character_preview = Signal(object)   # M6: a pack id to show on the island now, or None = the saved one
     character_play = Signal(str)         # M6: "play now" an antic on the island
 
-    def __init__(self, cfg: dict, config_path=None, parent=None, wake_hooks=None):
+    def __init__(self, cfg: dict, config_path=None, parent=None, wake_hooks=None, state_dir=None):
         super().__init__(parent, Qt.Window)
         self.config_path = config_path
+        self.state_dir = Path(state_dir) if state_dir else config.STATE_DIR   # taught phrasings (M10)
         self.wake_hooks = wake_hooks          # __main__._WakeHooks (pause/resume listening, GPU load)
         self._wizard = None
         self._orig: dict = copy.deepcopy(cfg)
@@ -290,6 +307,7 @@ class SettingsWindow(QWidget):
         self._build_general()
         self._build_character()
         self._build_voice()
+        self._build_instant()
         self._build_wake()
         self._build_models()
         self._build_projects()
@@ -519,6 +537,7 @@ class SettingsWindow(QWidget):
 
     def _build_voice(self):
         v = self._scroll_tab("Voice")
+        self._build_speech(v)
         g = QGroupBox("Speech recognition (whisper)")
         f = self._form(g)
         self.cmb_stt_device = self._combo([("GPU, CPU as fallback", "gpu"), ("CPU only", "cpu")])
@@ -557,6 +576,190 @@ class SettingsWindow(QWidget):
         self._row(f, "tts.sapi_voice", "SAPI voice", self.cmb_voice, self.btn_test_voice)
         v.addWidget(g)
         v.addStretch(1)
+
+    def _build_instant(self):
+        """M10: simple commands run locally, no model (heyclaude/intents, config `instant:`)."""
+        v = self._scroll_tab("Instant")
+        v.addWidget(self._help(
+            "\"Volume 30\", \"turn it up a bit\", \"mute\", \"dark mode\", \"next song\", \"set a timer for 5 "
+            "minutes\", \"open Spotify\", \"what time is it\" run here without Claude, with the same island effect "
+            "and \"undo that\". Russian and Uzbek wordings work too when speech recognition writes them "
+            "(stt.language in config.yaml: empty to auto-detect). Sleep, restart and shutdown are never instant."))
+        g = QGroupBox("Instant commands")
+        f = self._form(g)
+        self.cb_instant = QCheckBox("Run simple commands locally, without Claude")
+        self._row(f, "instant.enabled", "Enabled", self.cb_instant)
+        self.cmb_instant_ack = self._combo([("Speak a short ack (\"Volume 30.\")", "speak"),
+                                            ("Effect only (answers are still spoken)", "silent")])
+        self._row(f, "instant.ack", "Acknowledge", self.cmb_instant_ack)
+        self.sp_instant_step = QSpinBox(minimum=2, maximum=50, singleStep=1, suffix=" %")
+        self._row(f, "instant.step", "\"Turn it up\" step", self.sp_instant_step)
+        self.sp_instant_context = QSpinBox(minimum=0, maximum=900, singleStep=15, suffix=" s")
+        self._row(f, "instant.context_s", "Follow-ups for", self.sp_instant_context)
+        self.cb_instant_radios = QCheckBox("Wi-Fi and Bluetooth on / off instantly")
+        self._row(f, "instant.radios", "Radios", self.cb_instant_radios)
+        v.addWidget(g)
+
+        g = QGroupBox("Paraphrases")
+        f = self._form(g)
+        self.cb_instant_clf = QCheckBox("Also catch looser wordings (\"my ears hurt, it's too loud\")")
+        self._row(f, "instant.classifier", "Classifier", self.cb_instant_clf)
+        self.sl_instant_threshold = QSlider(Qt.Horizontal)
+        self.sl_instant_threshold.setRange(50, 90)                  # x0.01: 0.50 .. 0.90
+        self.sl_instant_threshold.setPageStep(2)
+        self.sl_instant_threshold.setFixedWidth(220)
+        self.lb_instant_threshold = QLabel("0.62")
+        self.lb_instant_threshold.setMinimumWidth(110)
+        self.sl_instant_threshold.valueChanged.connect(self._instant_threshold_changed)
+        self.cb_instant_clf.toggled.connect(self._instant_threshold_changed)
+        self._row(f, "instant.threshold", "Strictness", self.sl_instant_threshold, self.lb_instant_threshold)
+        v.addWidget(g)
+
+        g = QGroupBox("Teach it")
+        gv = QVBoxLayout(g)
+        f = self._form()
+        self.cb_instant_learn = QCheckBox("Note wordings Claude handled with one settings change")
+        self._row(f, "instant.learn", "Learn", self.cb_instant_learn)
+        gv.addLayout(f)
+        gv.addWidget(self._help(
+            "Ask for something the long way (\"give the boombox some juice\"); when Claude has done it, say "
+            "\"teach it\" (or \"запомни это\", \"buni eslab qol\") and that wording is instant from then on. "
+            "Taught wordings stay on this PC (state/intents_taught.yaml)."))
+        self.tbl_taught = QTableWidget(0, 2)
+        self.tbl_taught.setHorizontalHeaderLabels(["Wording", "Means"])
+        self.tbl_taught.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tbl_taught.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.tbl_taught.verticalHeader().hide()
+        self.tbl_taught.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl_taught.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl_taught.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tbl_taught.setMinimumHeight(120)
+        gv.addWidget(self.tbl_taught)
+        bar = QHBoxLayout()
+        self.btn_taught_remove = QPushButton("Remove", clicked=self._remove_taught)
+        self.btn_taught_remove.setToolTip("Forget the selected wording now (it goes back to Claude).")
+        bar.addWidget(self.btn_taught_remove)
+        self.lb_taught = QLabel("")
+        self.lb_taught.setObjectName("hint")
+        bar.addWidget(self.lb_taught, 1)
+        gv.addLayout(bar)
+        self.tbl_taught.itemSelectionChanged.connect(
+            lambda: self.btn_taught_remove.setEnabled(self.tbl_taught.currentRow() >= 0))
+        v.addWidget(g)
+        v.addStretch(1)
+
+    def _instant_threshold_changed(self, *_):
+        val = self.sl_instant_threshold.value() / 100
+        word = "strict" if val >= 0.75 else "loose" if val < 0.58 else "balanced"
+        self.lb_instant_threshold.setText(f"{val:.2f} ({word})")
+        self.sl_instant_threshold.setEnabled(self.cb_instant_clf.isChecked())
+
+    def _load_taught(self):
+        """The wordings taught by voice, read-only, with Remove."""
+        from .intents import learn
+        from .intents.executors import describe_intent
+        rows = learn.load_taught(self.state_dir)
+        self.tbl_taught.setRowCount(0)
+        for x in rows:
+            r = self.tbl_taught.rowCount()
+            self.tbl_taught.insertRow(r)
+            self.tbl_taught.setItem(r, 0, QTableWidgetItem(str(x["text"])))
+            self.tbl_taught.setItem(r, 1, QTableWidgetItem(describe_intent(x["intent"], x.get("slots") or {})))
+        n_miss = len(learn.misses(self.state_dir))
+        self.lb_taught.setText(
+            (f"{len(rows)} taught" if rows else "Nothing taught yet") +
+            (f"; {n_miss} wording{'s' if n_miss != 1 else ''} noted in state/intents_misses.jsonl." if n_miss else "."))
+        self.btn_taught_remove.setEnabled(False)
+
+    def _remove_taught(self):
+        from .intents import learn
+        r = self.tbl_taught.currentRow()
+        if r < 0:
+            return
+        text = self._taught_cell(r)
+        if learn.remove_taught(self.state_dir, text):
+            self._set_status(f"Forgot \"{text}\" (applies now).", "#6CCB7A")
+        self._load_taught()
+
+    def _taught_cell(self, r: int) -> str:
+        it = self.tbl_taught.item(r, 0)
+        return it.text() if it else ""
+
+    # -- M4c: speech backends ---------------------------------------------------------
+    SPEECH_BACKENDS = [("Local: Whisper + Kokoro on this PC", "local"), ("Windows: no models", "windows"),
+                       ("Cloud: Groq / OpenAI", "cloud"), ("Auto: local while memory is free", "auto")]
+
+    def _build_speech(self, v):
+        g = QGroupBox("Speech backend (also in the tray menu)")
+        f = self._form(g)
+        self.cmb_speech = self._combo(self.SPEECH_BACKENDS)
+        self.cmb_speech.currentIndexChanged.connect(self._speech_status)
+        self._row(f, "speech.backend", "Backend", self.cmb_speech)
+        self.cb_lean = QCheckBox("Lean: unload Whisper and Kokoro when idle")
+        self.sp_unload = QSpinBox(minimum=1, maximum=240, suffix=" min")
+        self._row(f, "speech.lean", "Memory", self.cb_lean, self.sp_unload)
+        self.cmb_cloud_stt = self._combo([("Groq (whisper-large-v3-turbo, free tier)", "groq"),
+                                          ("OpenAI (gpt-4o-mini-transcribe)", "openai")])
+        self.cmb_cloud_stt.currentIndexChanged.connect(self._speech_status)
+        self.btn_key = QPushButton("Set key…", clicked=self._set_cloud_key)
+        self._row(f, "speech.cloud_stt_provider", "Cloud speech-to-text", self.cmb_cloud_stt, self.btn_key)
+        self.cmb_cloud_tts = self._combo([("Windows voice (free)", ""), ("OpenAI", "openai"),
+                                          ("ElevenLabs", "elevenlabs")])
+        self._row(f, "speech.cloud_tts_provider", "Cloud voice", self.cmb_cloud_tts)
+        self.lbl_speech = self._help("")
+        self.lbl_speech.setTextFormat(Qt.RichText)
+        f.addRow("", self.lbl_speech)
+        v.addWidget(g)
+
+    def _speech_status(self, *_):
+        """Key source, Windows online recognition, cost estimate and where audio goes."""
+        lines = []
+        backend = self._combo_value(self.cmb_speech)
+        prov = self._combo_value(self.cmb_cloud_stt) or "groq"
+        try:
+            from .speech import cloud
+            src = cloud.key_source(prov)
+            lines.append(f"{prov} key: " + ({"env": f"from {cloud.ENV_VARS[prov]}", "credential store":
+                                             "in the Windows credential store"}.get(src) or
+                                            f"none (set {cloud.ENV_VARS[prov]} or use Set key…)"))
+            model = _get(self._orig, "speech.groq_model" if prov == "groq" else "speech.openai_stt_model",
+                         "whisper-large-v3-turbo" if prov == "groq" else "gpt-4o-mini-transcribe")
+            logs = sorted(str(p) for p in config.STATE_DIR.glob("latency*.csv"))
+            lines.append("cloud cost: " + cloud.cost_line(logs, prov, model))
+        except Exception as e:
+            lines.append(f"cloud: {e}")
+        try:
+            from .speech.windows import online_speech_enabled
+            on = online_speech_enabled()
+            lines.append("Windows online speech recognition: " + {True: "on", False:
+                         "<b>off</b> (Settings > Privacy & security > Speech); the offline recognizer is used",
+                         None: "unknown"}[on])
+        except Exception:
+            pass
+        where = {"local": "Audio never leaves this PC.",
+                 "windows": "Windows online recognition sends your audio to Microsoft.",
+                 "cloud": f"<b>Your audio is sent to {prov.title()}</b> in this mode (only this mode).",
+                 "auto": "Auto may use Windows or the cloud when memory is short: then audio leaves this PC."}
+        lines.append(where.get(backend, ""))
+        self.lbl_speech.setText("<br>".join(lines))
+
+    def _set_cloud_key(self):
+        from PySide6.QtWidgets import QInputDialog, QLineEdit as _LE
+        prov = self._combo_value(self.cmb_cloud_stt) or "groq"
+        key, ok = QInputDialog.getText(self, "Cloud key", f"{prov.title()} API key (kept in the Windows "
+                                       "credential store, never in config.yaml). Empty = remove it:",
+                                       _LE.Password)
+        if not ok:
+            return
+        from .speech import cloud
+        try:
+            if key.strip():
+                cloud.set_key(prov, key.strip())
+            else:
+                cloud.delete_key(prov)
+        except Exception as e:
+            self._set_status(f"Couldn't store the key: {e}", "#E07A5F")
+        self._speech_status()
 
     def _build_models(self):
         v = self._scroll_tab("Models")
@@ -691,6 +894,12 @@ class SettingsWindow(QWidget):
         self.sp_threshold.setValue(float(_get(cfg, "wake.threshold", 0.5)))
         self.sp_cooldown.setValue(float(_get(cfg, "wake.cooldown", 1.0)))
         self._wake_status(cfg)
+        self._set_combo(self.cmb_speech, str(_get(cfg, "speech.backend", "local") or "local"))
+        self.cb_lean.setChecked(bool(_get(cfg, "speech.lean", False)))
+        self.sp_unload.setValue(int(_get(cfg, "speech.unload_after_min", 10) or 10))
+        self._set_combo(self.cmb_cloud_stt, str(_get(cfg, "speech.cloud_stt_provider", "groq") or "groq"))
+        self._set_combo(self.cmb_cloud_tts, str(_get(cfg, "speech.cloud_tts_provider") or ""))
+        self._speech_status()
         self._set_combo(self.cmb_stt_model, _get(cfg, "stt.cpu_model", "base.en"))
         dev = str(_get(cfg, "stt.device", "gpu")).lower()
         self._set_combo(self.cmb_stt_device, "gpu" if dev in ("gpu", "cuda") else "cpu")
@@ -705,6 +914,23 @@ class SettingsWindow(QWidget):
         self.sp_tts_speed.setValue(float(_get(cfg, "tts.speed", 1.0) or 1.0))
         self.sp_rate.setValue(int(_get(cfg, "tts.rate", 190)))
         self._set_combo(self.cmb_voice, _get(cfg, "tts.sapi_voice"))
+
+        self.cb_instant.setChecked(bool(_get(cfg, "instant.enabled", True)))
+        self._set_combo(self.cmb_instant_ack, str(_get(cfg, "instant.ack", "speak") or "speak").lower())
+        self.sp_instant_step.setValue(int(_get(cfg, "instant.step", 10) or 10))
+        self.sp_instant_context.setValue(int(_get(cfg, "instant.context_s", 120) or 0))
+        self.cb_instant_radios.setChecked(bool(_get(cfg, "instant.radios", True)))
+        self.cb_instant_clf.setChecked(bool(_get(cfg, "instant.classifier", True)))
+        try:
+            thr = float(_get(cfg, "instant.threshold", 0.62))
+        except (TypeError, ValueError):
+            thr = 0.62
+        pos = round(max(0.5, min(0.9, thr)) * 100)
+        self._instant_thr = (thr, pos)        # an out-of-range value from config.yaml survives an untouched save
+        self.sl_instant_threshold.setValue(pos)
+        self._instant_threshold_changed()
+        self.cb_instant_learn.setChecked(bool(_get(cfg, "instant.learn", True)))
+        self._load_taught()
 
         self._set_combo(self.cmb_fast_backend, _get(cfg, "fast.backend", "auto"))
         self._set_combo(self.cmb_fast_cli, _get(cfg, "fast.cli_model", "haiku"))
@@ -790,12 +1016,31 @@ class SettingsWindow(QWidget):
         # keep the resume point 10 below the busy point unless set by hand lower
         if int(_get(new, "stt.gpu_resume_pct", 60)) >= self.sp_gpu_busy.value():
             _set(new, "stt.gpu_resume_pct", max(5, self.sp_gpu_busy.value() - 10))
+        if self._combo_value(self.cmb_speech) != str(_get(self._orig, "speech.backend", "local") or "local"):
+            _set(new, "speech.stt_backend", None)        # the one switch sets both sides
+            _set(new, "speech.tts_backend", None)
+        _set(new, "speech.backend", self._combo_value(self.cmb_speech))
+        _set(new, "speech.lean", self.cb_lean.isChecked())
+        _set(new, "speech.unload_after_min", self.sp_unload.value())
+        _set(new, "speech.cloud_stt_provider", self._combo_value(self.cmb_cloud_stt))
+        _set(new, "speech.cloud_tts_provider", self._combo_value(self.cmb_cloud_tts) or None)
         _set(new, "tts.engine", self._combo_value(self.cmb_tts_backend))
         _set(new, "tts.device", self._combo_value(self.cmb_tts_device))
         _set(new, "tts.voice", self._combo_value(self.cmb_kokoro_voice) or "af_heart")
         _set(new, "tts.speed", round(self.sp_tts_speed.value(), 2))
         _set(new, "tts.rate", self.sp_rate.value())
         _set(new, "tts.sapi_voice", self._combo_value(self.cmb_voice) or None)
+
+        _set(new, "instant.enabled", self.cb_instant.isChecked())
+        _set(new, "instant.ack", self._combo_value(self.cmb_instant_ack))
+        _set(new, "instant.step", self.sp_instant_step.value())
+        _set(new, "instant.context_s", self.sp_instant_context.value())
+        _set(new, "instant.radios", self.cb_instant_radios.isChecked())
+        _set(new, "instant.classifier", self.cb_instant_clf.isChecked())
+        thr, pos = getattr(self, "_instant_thr", (None, None))
+        _set(new, "instant.threshold", thr if self.sl_instant_threshold.value() == pos
+             else round(self.sl_instant_threshold.value() / 100, 2))
+        _set(new, "instant.learn", self.cb_instant_learn.isChecked())
 
         _set(new, "fast.backend", self._combo_value(self.cmb_fast_backend))
         _set(new, "fast.cli_model", self._combo_value(self.cmb_fast_cli))

@@ -240,7 +240,54 @@ What was ruled out:
 
 What changed anyway, as hardening:
 - Every Windows tool that hey-claude runs in its own process (M10's executor, "undo that", album art, the start-up app list) now runs on one persistent COM thread (`mcp_windows._util.com_call`), never on a turn's short-lived thread.
-- **This is not shown to fix the crashes.** The next live run (pass 2 again, with `-X faulthandler`) is what tells.
+- **This is not shown to fix the crashes.** The next live run (pass 2 again, with `-X faulthandler`) is what tells. It didn't fix them (pass 3).
+
+### Pass 3: the crash found and fixed, the follow-ups measured
+
+All on the trial branch of the re-check follow-ups, with `python -X faulthandler`. Runs `state/ux/runs/20261110-06*`.
+
+**The crash.** It reproduced every time: 4 of 4 runs died within the first three instant commands. Windows' faulthandler also prints first-chance access violations that get handled, so the dumps were mostly noise; the process died on a second fault, on a native thread with no Python frame.
+
+The bisect:
+- **Acks off** (`--set instant.ack=effect`): 0 crashes and not even a handled access violation in 6 scenarios.
+- **Effects plus 12 fps frame grabs** on the real island, offline: 60 s and 85 effects without a crash.
+- **In-process colour-mode switches** with the island busy: no crash.
+
+So the spoken ack was the trigger.
+
+**Cause:** a race in `tts.Player`.
+- `Speaker.begin()` opens the output stream on its own thread (`prepare`), while the synth thread's `play()` opens it too.
+- `_open()` checked for a stream under the lock, then built the `sd.OutputStream` outside it, so two threads could both build one, and the second overwrote the first.
+- The overwritten stream was never closed: PortAudio kept calling its callback while Python freed the object.
+- Kokoro's ≥ 100 ms synthesis used to keep the two calls apart. M10's cached acks make `play()` immediate, so the race hit almost every time.
+- The `task_then_question` barge-in crash fits too: its short reply ("Okay, starting that in scratch.") goes through the same cache, and the stop and restart reopen the stream.
+- Against the old code, a test with a fake 50 ms stream open shows 2 streams built and 1 left running; with the fix, exactly one.
+
+**Fix** (`tts.Player`):
+- opening, replacing and closing the stream happen under one lock;
+- the idle closer re-checks under it.
+
+Two smaller defects were also fixed:
+- **The colour-mode broadcast** passed a temporary string pointer that our own busy windows could read after it was freed. It now uses a process-lifetime buffer with real 64-bit argtypes.
+- **In-process Windows tools** run on one lasting COM thread (pass 2's hardening).
+
+**After the fix:** 15 live scenarios with acks on: **0 crashes, 0 access violations**. Every Windows setting was restored (dark mode, volume 26). Brightness was never touched.
+
+| follow-up | before | after (live) |
+|---|---|---|
+| instant command, speech end → effect | median 0.52 s | **median 0.48 s** over 18 turns, range 0.30–0.69 s (1.16 s for "undo that") |
+| weather-mcp, speech end → card / first audio | answer 12.9 s through the agent | **0.44 s / 0.81 s**; follow-up "and tomorrow?" 0.30 s / 0.30 s |
+| late filler on an agent turn ("What is the volume of a sphere?") | 5.3–6.1 s | **1.78 s** (1.8 s from the end of speech, pre-synthesised) |
+| task dictated with pauses | answered over the second half for 1.4 s | still split at the second pause ("…haiku." / "A haiku about autumn."); the continuation joined it. Now every task start waits `long_silence_ms` (offline-tested, not yet live) |
+
+**Where the instant time goes:**
+- A parsed instant command now ends the turn as soon as the pause transcript is in (`listen.instant_end`), not after another 300 ms.
+- The end of turn is still about 0.55 s in the app's log: the 160 ms pause probe, Whisper on the pause and Silero's hangover.
+- Going further needs acting on a partial transcript taken *while* speaking.
+
+**Two misses found:**
+- **"Now the other way."** came out of Whisper as "Know the other way." twice, so it went to the agent. The agent asked for `set_theme`, which the harness's safe list refused. That's now a slip fix, with near-misses ("I know the other way home") staying quiet; not re-checked live yet.
+- **The late filler only starts once a turn reaches the agent.** When the quick tier first answers "LOOKUP", its own round trip (about 5 s here) is still silent.
 
 ## Harness artifacts (excluded from scoring)
 

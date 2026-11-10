@@ -59,11 +59,14 @@ class Rule:
 RULES: list[Rule] = []
 
 
-def rule(intent: str, *patterns: str):
-    """Decorator: the same builder for several patterns."""
+def rule(intent: str, *patterns: str, into: list | None = None):
+    """Decorator: the same builder for several patterns (into RULES, or another
+    language's rule list: grammar_ru.py, grammar_uz.py)."""
+    target = RULES if into is None else into
+
     def deco(fn):
         for p in patterns:
-            RULES.append(Rule(intent, re.compile(p), fn))
+            target.append(Rule(intent, re.compile(p), fn))
         return fn
     return deco
 
@@ -514,8 +517,12 @@ _APP_VERB = r"(?:open|launch|start|fire up|bring up|load up|pull up|boot up|star
 @rule("app.open", _APP_VERB + r"\s+(?:up\s+)?(?:the\s+|my\s+)?(?:app\s+)?(?P<app>[a-z0-9 .]+?)"
       r"(?:\s+(?:app|application|program|for me))?")
 def _app(m, ctx):
+    return open_app(_g(m, "app"), ctx)
+
+
+def open_app(want: str, ctx: Ctx) -> dict | None:
+    """{"app": <Start-menu name>} for a spoken app name, or None (unknown or blocked)."""
     from ..mcp_windows.apps import BLOCKED_APPS
-    want = _g(m, "app")
     if not want or BLOCKED_APPS.search(want):
         return None
     name = resolve_app(want, ctx.apps)
@@ -700,9 +707,9 @@ def _ctx_set(m, ctx):
 CONTEXT_INTENTS = ("context.more", "context.less", "context.again", "context.reverse", "context.set")
 
 
-def parse(t: str, ctx: Ctx):
+def parse(t: str, ctx: Ctx, rules: list | None = None):
     """(intent, slots) for the first rule that matches all of `t` and whose slots parse."""
-    for r in RULES:
+    for r in RULES if rules is None else rules:
         if r.intent in CONTEXT_INTENTS:
             continue
         m = r.rx.fullmatch(t)
@@ -714,9 +721,9 @@ def parse(t: str, ctx: Ctx):
     return None
 
 
-def parse_context(t: str, ctx: Ctx):
+def parse_context(t: str, ctx: Ctx, rules: list | None = None):
     """The follow-up rules ("a bit more", "again", "the other way", "make it 40")."""
-    for r in RULES:
+    for r in RULES if rules is None else rules:
         if r.intent not in CONTEXT_INTENTS:
             continue
         m = r.rx.fullmatch(t)

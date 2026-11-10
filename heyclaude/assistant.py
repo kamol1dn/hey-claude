@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import collections
 import csv
+import re
 import threading
 import time
 import traceback
@@ -12,7 +13,8 @@ from .brain import Brain, Projects
 from .config import STATE_DIR
 from .conversation import FollowUp, is_end_phrase, strip_wake
 from .listen import MicSource, SpeakingGate, WakeWord, WavSource, record_utterance
-from .stt import SpeechToText, normalize_device
+from .speech.manager import Speech, VoiceRouter
+from .stt import normalize_device
 from .tasks import TaskManager
 from .tts import Speaker, clean_for_speech
 from .vad import TurnListener, make_vad
@@ -78,7 +80,9 @@ class Assistant:
         self.mic_open = False
         self.stopping = False
         self.on_listening = None                # callback(on: bool, paused_until: float | None)
-        self.stt: SpeechToText | None = None
+        self.stt: Speech | None = None          # M4c: speech.manager.Speech (stt.SpeechToText's interface)
+        self.speech: Speech | None = None       # the same object; also there in text mode (the voice uses it)
+        self.dictating = False                 # M4d: dictation has the mic: no wake word meanwhile
         self.hold = None                        # holdkey.HoldKey, set by __main__ (mic runs only)
         self.wake_gate = SpeakingGate(cfg["wake"])   # no wake triggers while it talks (+ a short tail)
         # Hotkey "talk or type" session (inputbox.InputSession drives these).
@@ -147,7 +151,36 @@ class Assistant:
 
     def set_mode(self, mode, text=""):
         self.mode = mode
+        self.mode_text = text
         self.ui.state.emit(mode, text)
+
+    mode_text = ""
+
+    # -- M4c: speech backends -----------------------------------------------------
+    def _speech_note(self, text: str):
+        self._ui_emit("note", text)
+
+    def _speech_loading(self, on: bool, text: str = ""):
+        """A lean reload is blocking a transcription: show "loading…", then put the
+        island back the way it was."""
+        if on:
+            self._before_loading = (self.mode, self.mode_text)
+            self.set_mode("loading", text or "loading…")
+        else:
+            prev = getattr(self, "_before_loading", None)
+            self._before_loading = None
+            if prev and self.mode == "loading":
+                self.set_mode(*prev)
+
+    def set_speech_backend(self, name: str, kind: str | None = None):
+        """The tray switch (any thread): no restart."""
+        if self.speech is None:
+            return
+        self.speech.set_backend(name, kind)
+
+    def free_speech_memory(self):
+        if self.speech is not None:
+            threading.Thread(target=self.speech.free_memory, daemon=True, name="speech-free").start()
 
     def rest(self):
         """Back to the resting state: idle pill, or the muted one while listening is off."""
@@ -250,6 +283,9 @@ class Assistant:
         if "projects" in changed and brain is not None:
             brain.projects = Projects(self.cfg["projects"])
         wake = getattr(self, "wake", None)
+        if self.speech is not None and any(k in changed for k in ("speech.backend", "speech.stt_backend",
+                                                                    "speech.tts_backend")):
+            self.speech.reconfigure()
         if "wake.model" in changed and wake is not None:
             self.reload_wake()
         elif "wake.threshold" in changed and wake is not None:
@@ -348,9 +384,15 @@ class Assistant:
             self.aec = make_canceller(c["listen"], self.far)
             self.barge = BargeIn(c["listen"])
         self.set_mode("loading", "loading voice…")
+        from .tts import _premiere_running
+        self.speech = Speech(c, monitor=self.monitor, hint_words=list(c["projects"]), stt_device=self.stt_device(),
+                             on_label=self._stt_changed, on_note=self._speech_note, on_loading=self._speech_loading,
+                             busy=lambda: self.mode not in ("idle", "off"))
+        voice = VoiceRouter(self.speech, c["tts"], c["stt"], monitor=self.monitor, on_change=self._voice_changed,
+                            premiere_running=_premiere_running)
         self.speaker = Speaker(c["tts"], on_start=self._tts_started, on_idle=self._tts_idle, stt_cfg=c["stt"],
                                monitor=self.monitor, far_tap=self.far.push if self.aec else None,
-                               on_label=self._voice_changed)
+                               on_label=self._voice_changed, engine=voice)
         self._voice_changed(self.speaker.label)
         player = getattr(self.speaker, "player", None)
         if player is not None and hasattr(player, "on_level"):
@@ -384,14 +426,16 @@ class Assistant:
                 print(f"[wake] default model check failed: {e}")
             self.wake = WakeWord(c["wake"]["model"], float(c["wake"]["threshold"]), gate=self.wake_gate)
             self._wake_label(self.wake.label)
-            self.set_mode("loading", f"loading whisper ({self.stt_device()})…")
-            self.stt = SpeechToText(c["stt"], device=self.stt_device(), hint_words=list(c["projects"]),
-                                    on_change=self._stt_changed, monitor=self.monitor)
+            if self.speech.resolve("stt")[0] == "local" and not self.speech.lean():
+                self.set_mode("loading", f"loading whisper ({self.stt_device()})…")
+            else:
+                self.set_mode("loading", "loading speech…")
+            self.speech.start()
+            self.stt = self.speech
             self.vad = make_vad(c["listen"])
             self.barge_vad = make_vad(c["listen"]) if self.aec else None
             self._stt_changed(self.stt.label)
-            if self.stt.want == "gpu" and not self.stt.gpu_failed:
-                threading.Thread(target=self._stt_poll_loop, daemon=True, name="stt-load").start()
+            threading.Thread(target=self._stt_poll_loop, daemon=True, name="stt-load").start()
         self.ready.set()
         self.rest()
         load = f" [{self.stt.readings()}]" if self.stt and self.stt.readings() else ""
@@ -591,7 +635,32 @@ class Assistant:
             threading.Thread(target=apps, daemon=True, name="instant-apps").start()
         sp = getattr(self, "speaker", None)
         if sp is not None and hasattr(sp, "prewarm") and self._instant_ack() == "speak":
-            sp.prewarm(INSTANT_ACKS)
+            filler = str((self.cfg.get("agent") or {}).get("filler") or "").strip()
+            sp.prewarm(INSTANT_ACKS + ((filler,) if filler else ()))
+
+    def _instant_at_pause(self, text: str) -> bool:
+        """End of turn: the transcript at this pause is a complete instant command the
+        grammar parsed (slots and all), so act now instead of waiting out the silence.
+        The classifier's guesses still wait for the normal end of turn."""
+        eng = getattr(self.brain, "intents", None)
+        if eng is None or not eng.enabled or not (self.cfg.get("listen") or {}).get("instant_end", True):
+            return False
+        from .brain import local_route
+        r = local_route(text, self.brain.projects)
+        if r is not None and r[0] not in ("control", "lookup"):
+            return False                       # undo / task / status routes keep their own timing
+        m = eng.match(text)
+        return m is not None and m.source in ("grammar", "context", "taught")
+
+    def _task_start_at_pause(self, text: str) -> bool:
+        """A task start at a pause: wait the long silence for the rest. People dictate a
+        task with pauses ("Start a task in the scratch project. Create a file called
+        haiku. ... about autumn."), Whisper ends each piece with a full stop, and the live
+        re-check heard the request split there and answered over the rest. A task runs for
+        minutes, so starting it ~0.9 s later costs nothing."""
+        from .brain import local_route
+        r = local_route(text, self.brain.projects)
+        return bool(r) and r[0] == "task"
 
     def _instant_ack(self) -> str:
         return str((self.cfg.get("instant") or {}).get("ack") or "speak").lower()
@@ -787,6 +856,8 @@ class Assistant:
                 return                          # listening switched off: release the mic
             # No wake word while the input field is open (you might be typing).
             hit = False if (one_shot or self.input_open) else self.wake.hit(block)
+            if hit and self.dictating:
+                hit = False                     # M4d: "hey claude" said in a dictation is text, not a wake
             by_wake = hit                       # the wake word fired (not a click, hotkey or follow-up)
             from_input = False
             if self.manual.is_set():
@@ -829,6 +900,10 @@ class Assistant:
             hold = self.hold if (self.hold is not None and not self.simulate) else None
             if hold:
                 hold.arm()
+            st = self.stt
+            if hasattr(st, "wake"):              # M4c: reload lean-unloaded models while the user talks
+                st.wake()
+                st.begin(live=isinstance(src, MicSource) and self.cfg["listen"].get("device") is None)
             try:
                 stops = [] if self.simulate else ([] if one_shot else [self._abort_rec])
                 self._reject_rec.clear()
@@ -841,8 +916,14 @@ class Assistant:
                     stop = _Either(stop.is_set if stop else None, self.wake_gate.busy)
                 if self.vad is not None:
                     self.vad.reset()
-                self.turn = TurnListener(self.stt.transcribe, self.cfg["listen"], on_partial=self._partial,
-                                         partials=self._partials_on()) if self.stt is not None else None
+                # Pause probes and live partials only where they're cheap (not cloud / windows).
+                probe = self.stt is not None and getattr(self.stt, "probe_ok", True)
+                self.turn = TurnListener(getattr(self.stt, "transcribe_partial", None) or self.stt.transcribe,
+                                         self.cfg["listen"], on_partial=self._partial,
+                                         partials=self._partials_on()) if probe else None
+                if self.turn is not None:
+                    self.turn.eot.instant = self._instant_at_pause
+                    self.turn.eot.more_expected = self._task_start_at_pause
                 audio, t_end = record_utterance(blocks, lcfg, on_level=self.ui.level.emit,
                                                 stop_event=stop, hold=hold.state if hold else None,
                                                 vad=self.vad, listener=self.turn,
@@ -853,6 +934,8 @@ class Assistant:
                 self.followup.close()
             self.wake.reset()
             if audio is None:
+                if hasattr(self.stt, "cancel"):
+                    self.stt.cancel()
                 if followup:
                     print("[followup] closed: nothing said")
                 if from_input:
@@ -1025,22 +1108,22 @@ class Assistant:
                     # answered quickly. If it isn't (a slow tool), it gets it after a few seconds.
                     late = 0.0
                     if len(text.split()) < int(self.cfg["agent"].get("filler_min_words", 8) or 0):
-                        late = float(self.cfg["agent"].get("filler_after_s", 3.5) or 0)
+                        late = float(self.cfg["agent"].get("filler_after_s", 1.8) or 0)
                     self.set_mode("thinking", "checking with your tools… " + text)
                     if filler and not late:
                         self._filler = filler           # spoken, shown as the status line; not the answer
                         self.speaker.feed(filler + " ")
                     elif filler and late > 0:
-                        self._late_filler(filler, late, gen)
+                        self._late_filler(filler, late, gen, since=timing.get("speech_end"))
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
                 elif kind == "control":
                     # "volume 30": straight to the agent and its Windows tools; the filler only
                     # if the change hasn't been confirmed after a few seconds.
                     filler = self.cfg["agent"].get("filler")
-                    late = float(self.cfg["agent"].get("filler_after_s", 3.5) or 0)
+                    late = float(self.cfg["agent"].get("filler_after_s", 1.8) or 0)
                     if filler and late > 0:
-                        self._late_filler(filler, late, gen)
+                        self._late_filler(filler, late, gen, since=timing.get("speech_end"))
                     tier = "agent"
                     self._stream(self.brain.lookup(ev[1]), gen, timing)
                 elif kind == "instant":
@@ -1116,8 +1199,15 @@ class Assistant:
             self.rest()
         self._maybe_exit()
 
-    def _late_filler(self, filler: str, after: float, gen: int):
-        """Say the filler only if nothing has been said yet `after` seconds into the request."""
+    def _late_filler(self, filler: str, after: float, gen: int, since: float | None = None):
+        """Say the filler only if nothing has been said yet `after` seconds into the request,
+        counted from the end of speech (`since`, perf_counter) when known: the time spent
+        on the end of turn and the transcript is dead air too (the live re-check heard it
+        start 5.3-6.1 s after speech with a 3.5 s timer from the route). The filler is in
+        the voice's short-phrase cache, so it plays at once."""
+        if since is not None:
+            after = max(0.05, after - (time.perf_counter() - since))
+
         def go():
             if (gen == self.gen and self.mode == "thinking" and not self._reply and not self._filler
                     and self.speaker.first_audio_t is None):

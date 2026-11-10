@@ -110,6 +110,11 @@ Item {
         }
         var tier = gap === Infinity ? -1 : gap
         if (model && tier !== root.lastTier) { root.lastTier = tier; model.frame(tier) }   // only when the tier changes
+        if (root.hasChar) {                     // M6: at rest the character paints on our ticks, in phase
+            var hf = gap === Infinity ? 0 : 1000 / Math.max(1, gap)
+            if (character.hostFps !== hf) character.hostFps = hf
+            character.hostTick()
+        }
     }
     // Live tier: a ~60 Hz timer. (A running FrameAnimation makes Qt draw every vsync,
     // 144 a second on this laptop's panel, even when nothing changed.)

@@ -434,12 +434,14 @@ def test_the_island_hosts_a_character_and_switches_packs_live():
     b = Bridge()
     cfg = {"screen": "primary", "top_margin": 8, "motion": "full", "character": {"pack": "echo", "antics": "lively"}}
     isl = QmlIsland(b, cfg, wake_label="hey claude", software=True)
+    isl._input_watch = CH.InputWatch(probe=lambda: (1.0, (0, 0)))   # the user is here (a CI VM has been idle for ages)
     try:
         spin(600)
         assert isl.model.characterUrl.endswith("characters/echo/Character.qml")
         isl.set_state("idle", "")
-        spin(200)
+        spin(2500)
         assert info()["ready"] and info()["state"] == "idle"
+        assert info()["riding"], "at rest the character should paint on the island's ticks, not its own timer"
         isl.set_state("listening", "")
         spin(150)
         assert info()["state"] == "listening"

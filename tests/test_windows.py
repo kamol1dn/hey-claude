@@ -772,6 +772,18 @@ def test_island_effect_row_and_buttons():
     isl.close()
 
 
+def test_theme_broadcast_string_outlives_the_call():
+    """WM_SETTINGCHANGE inside hey-claude's own process passes the raw pointer, and a
+    busy window gets it after SendMessageTimeout gave up: the string must never be freed."""
+    import ctypes
+    from ctypes import wintypes
+    fn, lp = display._settingchange_call()
+    fn2, lp2 = display._settingchange_call()
+    assert fn is fn2 and lp == lp2 and lp
+    assert ctypes.wstring_at(lp) == "ImmersiveColorSet"
+    assert fn.argtypes[3] is wintypes.LPARAM and fn.restype is wintypes.LPARAM
+
+
 def test_in_process_tools_run_on_one_lasting_com_thread():
     """M10/undo run the tools inside hey-claude: always on the same persistent thread
     (never the short-lived turn threads, whose COM objects would be freed after the

@@ -1,11 +1,12 @@
 """IntentEngine: text -> Match (or None), in about a millisecond.
 
 Order inside match():
-  1. the grammar (grammar.py) over the normalized text;
+  1. the grammar (grammar.py) over the normalized text, then the Russian and
+     Uzbek grammars (grammar_ru.py, grammar_uz.py);
   2. follow-ups on the last instant command ("a bit more", "again", "the other
      way", "make it 40"), only while it is recent (instant.context_s);
   3. phrasings you taught it ("teach it"), exactly;
-  4. the classifier (classifier.py), for paraphrases; timid by design.
+  4. the classifier (classifier.py), for English paraphrases; timid by design.
 None means "not an instant command": the request goes on to Claude.
 
 The engine only decides. executors.py acts, and the assistant calls
@@ -13,12 +14,15 @@ remember() after a command ran, which is what step 2 reads.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import grammar as G
+from . import grammar_ru as RU
+from . import grammar_uz as UZ
 from . import learn
 from .classifier import Classifier
 from .normalize import basic, fix_slips, normalize
@@ -54,6 +58,14 @@ class Match:
     def describe(self) -> str:
         s = ", ".join(f"{k}={v}" for k, v in self.slots.items())
         return f"{self.intent}({s}) via {self.source}" + (f" {self.score:.2f}" if self.source == "classifier" else "")
+
+
+def language(norm: str) -> str:
+    """'ru', 'uz' or 'en' for normalized text: Cyrillic is Russian unless it has
+    Uzbek letters (ў қ ғ ҳ); Latin is Uzbek when it has Uzbek command words."""
+    if UZ.HAS_CYR.search(norm):
+        return "uz" if re.search(r"[ўқғҳ]", norm) else "ru"
+    return "uz" if UZ.looks_uzbek(norm) else "en"
 
 
 def _label_to_intent(label: str, step: int) -> tuple[str, dict]:
@@ -109,6 +121,7 @@ class IntentEngine:
         except Exception as e:
             print(f"[instant] examples: {e}")
         self.taught = {}
+        self._taught_mtime = learn.taught_mtime(self.state_dir)
         for ex in learn.load_taught(self.state_dir):
             n = normalize(ex["text"])
             if n:
@@ -117,6 +130,12 @@ class IntentEngine:
                 if lab:
                     rows.append((ex["text"], lab))
         self.clf = Classifier(rows, threshold=float(self.opt("threshold")))
+
+    def _check_taught(self):
+        """Reload when state/intents_taught.yaml changed on disk (edited by hand, or a
+        phrasing removed in Settings). One stat per request."""
+        if self.state_dir is not None and learn.taught_mtime(self.state_dir) != self._taught_mtime:
+            self.reload()
 
     def set_apps(self, names):
         """The installed Start-menu apps (names), for "open <app>"."""
@@ -156,18 +175,31 @@ class IntentEngine:
             m.match_ms = (time.perf_counter() - t0) * 1000
         return m
 
+    def _other_langs(self, raw: str):
+        """(module, lang) for the Russian / Uzbek grammars worth trying on this text."""
+        if UZ.HAS_CYR.search(raw):
+            return ((RU, "ru"), (UZ, "uz"))
+        return ((UZ, "uz"),)
+
     def _match(self, text: str) -> Match | None:
         t = normalize(text)
         if not t:
             return None
+        self._check_taught()
         ctx = self._ctx()
         raw = fix_slips(basic(text))
         for cand in dict.fromkeys((t, raw)):
             hit = G.parse(cand, ctx)
             if hit:
                 return Match(hit[0], hit[1], text, cand, "grammar")
+        for mod, lang in self._other_langs(raw):        # Russian, Uzbek (Latin or Cyrillic)
+            hit = mod.parse(raw, ctx)
+            if hit:
+                return Match(hit[0], hit[1], text, mod.prep(raw), "grammar", extra={"lang": lang})
         if ctx.domain:
             hit = G.parse_context(t, ctx)
+            for mod, lang in self._other_langs(raw):
+                hit = hit or mod.parse_context(raw, ctx)
             if hit:
                 m = self._resolve_context(hit[0], hit[1], text, t)
                 if m is not None:
@@ -175,7 +207,8 @@ class IntentEngine:
         if t in self.taught:
             intent, sl = self.taught[t]
             return Match(intent, dict(sl), text, t, "taught")
-        if self.clf is not None and self.opt("classifier"):
+        # The classifier only knows English: it never decides a Russian or Uzbek sentence.
+        if self.clf is not None and self.opt("classifier") and language(t) == "en":
             self.clf.threshold = float(self.opt("threshold"))
             got = self.clf.predict(t, allowed=CLASSIFIER_LABELS)
             if got:
@@ -200,7 +233,7 @@ class IntentEngine:
                 return None
             up = sl["direction"] == "up"
             if prev.intent == f"{dom}.step" and kind == "context.more" and prev.slots.get("delta", 0) < 0 \
-                    and t.split()[-1] in ("more", "further", "going"):
+                    and (sl.get("keep") or t.split()[-1] in ("more", "further", "going")):
                 up = False                                 # "quieter" ... "a bit more" = quieter still
             amt = int(sl["amount"])
             return mk(f"{dom}.step", {"delta": amt if up else -amt})

@@ -39,6 +39,7 @@ class Bridge(QObject):
     heard = Signal(str)             # the hotkey session's spoken request was transcribed ("" = nothing)
     partial = Signal(str)           # live transcript while you talk ("" = none yet)
     voice = Signal(str)             # active text-to-speech engine/device, e.g. "kokoro gpu"
+    note = Signal(str)              # M4c: a short flash, e.g. "cloud: no network; used local"
     wake = Signal(str)              # the wake phrase that's loaded ("hey claude", or the fallback)
     wake_hit = Signal(float)        # the wake word fired (time.time()); "not me" becomes possible
     effect = Signal(dict)           # M9: a tool effect event (effects.py), e.g. volume 45 -> 30
@@ -133,6 +134,8 @@ class Island(QWidget):
         bridge.heard.connect(self._heard)
         bridge.partial.connect(self.set_partial)
         bridge.voice.connect(self.set_voice)
+        if hasattr(bridge, "note"):
+            bridge.note.connect(lambda t: self.flash(t, 3.5))   # M4c: speech fallbacks / switches
         bridge.wake.connect(self.set_wake_label)
         bridge.wake_hit.connect(self._wake_hit)
         self.last_wake_t = 0.0          # when the wake word last fired (wall clock)
@@ -280,7 +283,7 @@ class Island(QWidget):
             w, h = max(120, QFontMetrics(self.font_small).horizontalAdvance(label) + 46), 28
         elif self.mode == "off":
             w, h = (170 if n_running or "until" in self.text else 130), 28
-        elif self.mode in ("listening", "holding", "followup"):
+        elif self.mode in ("listening", "holding", "followup", "dictating"):
             w, h = 300, PILL_H
         elif self.mode in ("thinking", "speaking", "loading", "error"):
             w = min(560, max(300, fm.horizontalAdvance(self.text) + 80))
@@ -326,7 +329,7 @@ class Island(QWidget):
 
     # -- inputs from the assistant --------------------------------------------
     def set_state(self, mode: str, text: str):
-        if mode not in ("listening", "holding", "followup"):
+        if mode not in ("listening", "holding", "followup", "dictating"):
             self.partial = ""
         if mode != "listening":
             self.wake_listening = False
@@ -403,7 +406,7 @@ class Island(QWidget):
 
     def set_partial(self, text: str):
         """Live transcript while listening (M4 hook; drawn after the level meter)."""
-        self.partial = text if self.mode in ("listening", "holding", "followup") else ""
+        self.partial = text if self.mode in ("listening", "holding", "followup", "dictating") else ""
         self.update()
 
     def _stt_short(self) -> str:
@@ -575,6 +578,10 @@ class Island(QWidget):
             p.drawRoundedRect(r, 11, 11)
             p.setPen(FG if on else DIM)
             p.drawText(r, Qt.AlignCenter, "not me")
+
+    def _paint_dictating(self, p, head, t):
+        """M4d: dictation into another app: the listening meter."""
+        self._paint_listening(p, head, t)
 
     def _paint_holding(self, p, head, t):
         """Hold key down: still listening, pauses don't end it. Ctrl+Shift: muted, still holding."""

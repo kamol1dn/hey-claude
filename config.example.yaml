@@ -47,6 +47,13 @@ listen:
   short_silence_ms: 300
   long_silence_ms: 1200
   pause_probe_ms: 160     # silence before the pause is transcribed
+  # An instant command (M10) the grammar fully parsed at that pause ("mute",
+  # "volume 30") ends the turn as soon as its transcript is in, after
+  # instant_silence_ms, instead of waiting out the silence above. A task start
+  # ("start a task in <project>: ...") always waits long_silence_ms: people
+  # dictate tasks with pauses.
+  instant_end: true
+  instant_silence_ms: 0
   # Live transcript on the island while you talk: auto = when whisper is on the GPU.
   partials: auto
   partial_interval_s: 0.8
@@ -96,6 +103,49 @@ stt:
   # Opt-in: never use the GPU while Adobe Premiere Pro is running (an idle
   # Premiere is fine otherwise; the load check above handles a busy one).
   yield_to_premiere: false
+  # Limit language detection to these (e.g. [en, ru, uz]); one fixes the
+  # language; [] = `language` above. Needs a multilingual model (not *.en).
+  languages: []
+
+speech:
+  # M4c. How much memory speech uses, switchable from the tray (Speech) without
+  # a restart:
+  #   local:   faster-whisper + Kokoro on your GPU/CPU (best voice, ~2.5 GB VRAM)
+  #   windows: no models. Speech-to-text: Windows online dictation (needs
+  #            Settings > Privacy & security > Speech > Online speech recognition;
+  #            audio goes to Microsoft), else the offline SAPI recognizer. Voice:
+  #            the Windows voices.
+  #   cloud:   Groq or OpenAI transcription (audio leaves the machine; keys only
+  #            from GROQ_API_KEY / OPENAI_API_KEY or the Windows credential store,
+  #            never this file). Voice: the Windows voice, or cloud_tts_provider.
+  #   auto:    local while the GPU (or, without one, RAM) has room, else windows
+  #            (online recognition on) or cloud (a key).
+  backend: local
+  stt_backend: null        # mix them: e.g. stt_backend: windows with backend: local (Kokoro voice)
+  tts_backend: null
+  # When the chosen backend fails (no network, no key, a WinRT error), the next
+  # one in this list runs, and the island says why.
+  fallback_order: [local, windows, cloud]
+  # Lean: unload Whisper and Kokoro after unload_after_min idle; they reload on
+  # the next wake (the island shows "loading…" if they aren't ready when you
+  # stop talking). The wake word (~20 MB, CPU) always stays loaded.
+  lean: false
+  unload_after_min: 10
+  auto_min_vram_mb: null   # auto: free VRAM local needs (null = Whisper + Kokoro's own need)
+  auto_min_ram_mb: 1500    # auto without a usable GPU: free RAM local needs
+  # windows
+  windows_language: en-US
+  windows_voice: null      # a Windows voice name substring, e.g. "Aria"; null = the default
+  # cloud
+  cloud_stt_provider: groq            # groq (hosted whisper-large-v3-turbo, free tier) | openai
+  groq_model: whisper-large-v3-turbo
+  openai_stt_model: gpt-4o-mini-transcribe
+  cloud_tts_provider: null            # null = the Windows voice | openai | elevenlabs
+  openai_tts_model: gpt-4o-mini-tts
+  openai_voice: alloy
+  elevenlabs_model: eleven_flash_v2_5
+  elevenlabs_voice: 21m00Tcm4TlvDq8ikWAM
+  cloud_timeout_s: 15
 
 fast:
   # auto  = the Anthropic API if there's a key (see api_key_file), otherwise the claude CLI
@@ -221,7 +271,7 @@ agent:
   timeout: 180                 # seconds to wait for one answer
   filler: "Let me check."      # spoken right away while it looks things up
   filler_min_words: 8          # ...but only for requests of at least this many words (0 = always)
-  filler_after_s: 3.5          # a shorter request still gets it if nothing has been said after this long (0 = never)
+  filler_after_s: 1.8          # a shorter request still gets it if nothing has been said this long after you stop talking (0 = never)
   extra_args: []
   disallowed_tools: []         # more tools the agent is never offered (Claude Code's own PowerShell never is)
 
@@ -306,6 +356,11 @@ instant:
   # on the last one: "a bit more", "again", "the other way", "make it 40".
   # Anything it isn't sure about still goes to Claude. Sleep, restart and
   # shutdown are never instant (they keep the click to confirm).
+  # Russian and Uzbek wordings work too ("громкость 30", "тише", "таймер на пять
+  # минут"; "ovozni o'ttizga qo'y", "keyingi qo'shiq", "soat necha"), but only
+  # when Whisper writes them: set stt.language to empty (auto-detect) or ru/uz.
+  # With `en` it turns them into English. The acks stay English.
+  # Settings > Instant edits everything here and lists the taught wordings.
   enabled: true
   # The paraphrase classifier (for wordings the grammar doesn't know, like "my
   # ears hurt"): how similar to one of its example phrasings a request must be,

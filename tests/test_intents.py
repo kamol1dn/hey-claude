@@ -17,6 +17,10 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+try:                                     # Russian / Uzbek in a miss line must not crash a cp1252 console
+    sys.stdout.reconfigure(errors="backslashreplace")
+except (AttributeError, ValueError):
+    pass
 
 import yaml  # noqa: E402
 
@@ -136,6 +140,182 @@ def test_near_misses_stay_quiet_with_context_and_a_lower_threshold():
     bare = {"more.", "again.", "the other way.", "up.", "forty."}
     hits = [t for t in CORPUS["near_miss"] if t.lower() not in bare and e.match(t) is not None]
     assert not hits, hits
+
+
+# == Russian and Uzbek ================================================================================
+def _routed(e, rows):
+    ok, bad = 0, []
+    for text, intent, want in rows:
+        m = e.match(text)
+        if m is not None and m.intent == intent and same(m.slots, want):
+            ok += 1
+        else:
+            bad.append((text, intent, want, m.describe() if m else None))
+    return ok, bad
+
+
+def test_corpus_accuracy_per_language():
+    """English, Russian and Uzbek each >= 95% routed right, and overall."""
+    e = engine()
+    tot_ok = tot_n = 0
+    for lang, key in (("en", "corpus"), ("ru", "corpus_ru"), ("uz", "corpus_uz")):
+        rows = CORPUS[key]
+        ok, bad = _routed(e, rows)
+        tot_ok, tot_n = tot_ok + ok, tot_n + len(rows)
+        print(f"[intents] corpus {lang}: {ok}/{len(rows)} = {ok / len(rows):.1%}")
+        for b in bad:
+            print(f"[intents]   miss ({lang}): {b[0]!r} want {b[1]} {b[2]} got {b[3]}")
+        assert ok / len(rows) >= 0.95, (lang, ok, len(rows))
+    print(f"[intents] corpus overall: {tot_ok}/{tot_n} = {tot_ok / tot_n:.1%}")
+    assert len(CORPUS["corpus_ru"]) >= 80 and len(CORPUS["corpus_uz"]) >= 70
+    assert tot_ok / tot_n >= 0.95
+
+
+def test_near_misses_ru_uz_never_trigger():
+    """Russian and Uzbek near-misses: never acted on, also right after a command with the classifier looser."""
+    e = engine()
+    loose = engine({"threshold": 0.5})
+    loose.remember(loose.match("volume 30"))
+    for lang in ("ru", "uz"):
+        rows = CORPUS[f"near_miss_{lang}"]
+        hits = [(t, e.match(t).describe()) for t in rows if e.match(t) is not None]
+        hits += [(t, "in context: " + loose.match(t).describe()) for t in rows if loose.match(t) is not None]
+        print(f"[intents] near-misses {lang}: {len(rows)} checked, {len(hits)} false trigger(s)")
+        for h in hits:
+            print(f"[intents]   FALSE TRIGGER ({lang}): {h}")
+        assert len(rows) >= 30
+        assert not hits, hits
+
+
+def test_context_followups_ru_uz():
+    e = engine()
+    for convo in CORPUS["context_ru_uz"]:
+        e.forget()
+        for text, intent, want in convo:
+            m = e.match(text)
+            assert m is not None and m.intent == intent and same(m.slots, want), (text, intent, want,
+                                                                               m.describe() if m else None)
+            e.remember(m, {"new": want.get("mode")} if intent == "theme.set" else None)
+    e.forget()
+    for t in ("ещё", "меньше", "наоборот", "на 40", "yana", "kamroq", "teskari", "дальше", "keyingisi"):
+        assert e.match(t) is None, t                               # nothing to lean on
+
+
+def test_ru_uz_numbers_durations_and_folding():
+    from heyclaude.intents import grammar_ru as RU
+    from heyclaude.intents import grammar_uz as UZ
+    from heyclaude.intents.engine import language
+    for s, want in {"30": 30, "тридцать": 30, "тридцать пять": 35, "тридцати": 30, "сто": 100, "пятьдесят": 50,
+                    "десять": 10, "пятнадцати": 15, "сорока": 40, "пять тридцать": None, "дорога": None}.items():
+        assert RU.parse_int(s) == want, (s, RU.parse_int(s))
+    for s, want in {"на пятьдесят процентов": 50, "максимум": 100, "половину": 50, "на 120": None}.items():
+        assert RU.parse_level(s) == want, (s, RU.parse_level(s))
+    for s, want in {"пять минут": 300, "10 минут": 600, "полчаса": 1800, "час": 3600, "полтора часа": 5400,
+                    "одну минуту": 60, "30 секунд": 30, "1 час 30 минут": 5400, "минуту": 60, "в питоне": None,
+                    "пять": None}.items():
+        assert RU.parse_duration(s) == want, (s, RU.parse_duration(s))
+    for s, want in {"ottiz": 30, "ottiz besh": 35, "on besh": 15, "yigirma": 20, "ellik": 50, "yuz": 100,
+                    "toqson": 90, "qirq": 40, "besh ottiz": None, "nima": None}.items():
+        assert UZ.parse_int(s) == want, (s, UZ.parse_int(s))
+    for s, want in {"besh daqiqa": 300, "yarim soat": 1800, "bir yarim soat": 5400, "30 soniya": 30,
+                    "1 soat 30 daqiqa": 5400, "besh": None}.items():
+        assert UZ.parse_duration(s) == want, (s, UZ.parse_duration(s))
+    # Cyrillic kept, ё -> е for Russian, every Uzbek apostrophe folded the same way
+    assert normalize("Тёмная тема!") == "темная тема"
+    assert {normalize(s) for s in ("O'ttiz", "Oʻttiz", "O‘ttiz", "O’ttiz", "O`ttiz", "Ottiz")} == {"ottiz"}
+    assert UZ.prep(normalize("Овозни ўттизга қўй")) == "ovozni ottiz ga qoy"
+    assert UZ.prep(normalize("Қоронғи режимни ёқ")) == "qorongi rejim ni yoq"
+    assert UZ.prep(normalize("Keyingi ko'shik")) == "keyingi qoshiq"
+    assert [language(normalize(s)) for s in ("Громкость 30", "Овозни ўчир", "Ovozni o'chir", "Get rid of the timer")] \
+        == ["ru", "uz", "uz", "en"]
+    # the English corpus still normalises as before
+    assert normalize("Hey Claude, could you turn it up a bit, please?") == "turn it up a bit"
+
+
+def test_classifier_never_decides_ru_uz():
+    """The classifier is English-only: Russian/Uzbek text that the grammar doesn't parse goes to Claude
+    without the classifier being asked, even with a taught Russian phrasing in its training rows."""
+    with tempfile.TemporaryDirectory() as d:
+        learn._write_taught(Path(d), [{"text": "сделай звук как в кино", "intent": "volume.step", "slots": {"delta": 20}}])
+        e = engine(state_dir=d)
+        m = e.match("Сделай звук как в кино!")
+        assert m is not None and m.source == "taught" and m.slots == {"delta": 20}
+        asked = []
+        real = e.clf.predict
+        e.clf.predict = lambda t, allowed=None: asked.append(t) or real(t, allowed)
+        for t in CORPUS["near_miss_ru"] + CORPUS["near_miss_uz"] + ["сделай звук как в театре", "ovozni yaxshila"]:
+            assert e.match(t) is None, t
+        assert asked == [], asked
+        assert e.match("My ears hurt, it's too loud.").source == "classifier" and asked
+
+
+def test_taught_phrasing_removed_applies_live():
+    with tempfile.TemporaryDirectory() as d:
+        learn._write_taught(Path(d), [{"text": "give the boombox some juice", "intent": "volume.step",
+                                       "slots": {"delta": 20}}])
+        e = engine(state_dir=d)
+        assert e.match("give the boombox some juice").source == "taught"
+        assert learn.remove_taught(d, "Give the boombox some juice!") and not learn.load_taught(d)
+        assert not learn.remove_taught(d, "nothing like it")
+        assert e.match("give the boombox some juice") is None       # the engine saw the file change
+
+
+def test_settings_instant_page():
+    """Settings > Instant builds, shows the config, writes the instant.* keys (all live), and lists the
+    taught wordings with a working Remove."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from heyclaude import config
+    from heyclaude.settings_ui import SettingsWindow
+    with tempfile.TemporaryDirectory() as d:
+        learn._write_taught(Path(d), [{"text": "give the boombox some juice", "intent": "volume.step",
+                                       "slots": {"delta": 20}}])
+        cfg = config.defaults()
+        cfg["instant"]["threshold"] = 0.95                          # hand-edited, outside the slider's range
+        w = SettingsWindow(cfg, config_path=Path(d) / "config.yaml", state_dir=d)
+        tabs = [w.tabs.tabText(i) for i in range(w.tabs.count())]
+        assert "Instant" in tabs, tabs
+        assert w.cb_instant.isChecked() and w._combo_value(w.cmb_instant_ack) == "speak"
+        assert w.sp_instant_step.value() == 10 and w.cb_instant_clf.isChecked() and w.cb_instant_radios.isChecked()
+        assert w.sl_instant_threshold.value() == 90
+        new, errors, _ = w._collect()
+        assert not errors and not config.diff(cfg, new)             # nothing touched -> nothing changes (0.95 kept)
+        # the taught list
+        assert w.tbl_taught.rowCount() == 1 and w.tbl_taught.item(0, 1).text() == "volume up"
+        # change everything
+        w.cb_instant.setChecked(False)
+        w._set_combo(w.cmb_instant_ack, "silent")
+        w.sp_instant_step.setValue(20)
+        w.sp_instant_context.setValue(60)
+        w.cb_instant_radios.setChecked(False)
+        w.sl_instant_threshold.setValue(75)
+        assert "0.75" in w.lb_instant_threshold.text()
+        w.cb_instant_clf.setChecked(False)
+        assert not w.sl_instant_threshold.isEnabled()
+        w.cb_instant_learn.setChecked(False)
+        new, errors, _ = w._collect()
+        assert not errors
+        assert new["instant"] == {**cfg["instant"], "enabled": False, "ack": "silent", "step": 20, "context_s": 60,
+                                  "radios": False, "threshold": 0.75, "classifier": False, "learn": False}
+        changed = config.diff(cfg, new)
+        assert set(changed) == {f"instant.{k}" for k in ("enabled", "ack", "step", "context_s", "radios",
+                                                          "threshold", "classifier", "learn")}
+        assert config.needs_restart(changed) == []                  # all applied live
+        got = []
+        w.saved.connect(lambda c, keys: got.append((c, keys)))
+        assert w.save()
+        written = yaml.safe_load((Path(d) / "config.yaml").read_text(encoding="utf-8"))
+        assert written["instant"]["ack"] == "silent" and written["instant"]["threshold"] == 0.75
+        assert got and got[-1][0]["instant"]["enabled"] is False
+        # an engine reading that config dict follows it
+        e = engine(got[-1][0]["instant"])
+        assert e.match("volume 30") is None
+        # Remove forgets the wording on disk
+        w.tbl_taught.selectRow(0)
+        w._remove_taught()
+        assert w.tbl_taught.rowCount() == 0 and learn.load_taught(d) == []
+        w.hide()
+        w.deleteLater()
 
 
 def test_classifier_alone_is_timid():

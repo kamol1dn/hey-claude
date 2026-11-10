@@ -2,6 +2,8 @@
 
     engine.py      IntentEngine.match(text) -> Match | None (grammar, context, taught, classifier)
     grammar.py     the anchored patterns, one set per command
+    grammar_ru.py  the same for Russian (Cyrillic), with its numbers and durations
+    grammar_uz.py  the same for Uzbek (Latin, or Cyrillic transliterated), with its numbers
     slots.py       spoken numbers, amounts, durations, on/off
     normalize.py   clean-up and Whisper slips
     classifier.py  numpy TF-IDF nearest neighbours for paraphrases (timid)

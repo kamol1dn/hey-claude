@@ -57,6 +57,11 @@ def route(mode: str, text: str, ctx: dict) -> list[tuple[str, list]]:
         return [("go", ["off", {}])]
     if mode == "loading":
         return [("go", ["loading", {"text": text or "loading…"}])]
+    if mode == "dictating":
+        # M4d. No theme draws "dictating" yet: ui/states.json falls back to listening
+        # (the level meter), with the label saying it's dictation.
+        cmds = [] if st == "listening" else [("go", ["listening", {}])]
+        return cmds + [("setPartial", [text or "dictating…"])]
     if mode == "listening":
         if ctx.get("input"):
             return []                                  # the field already shows the mic
@@ -462,6 +467,8 @@ class QmlIsland(QObject):
         bridge.heard.connect(self._heard)
         bridge.partial.connect(self.set_partial)
         bridge.voice.connect(self.set_voice)
+        if hasattr(bridge, "note"):
+            bridge.note.connect(lambda t: self.flash(t, 3.5))   # M4c: speech fallbacks / switches
         bridge.wake.connect(self.set_wake_label)
         bridge.wake_hit.connect(self._wake_hit)
         bridge.effect.connect(self.show_effect)
@@ -712,7 +719,7 @@ class QmlIsland(QObject):
     def set_state(self, mode: str, text: str = ""):
         prev = self.mode
         self.mode, self.text = mode, text
-        if mode not in ("listening", "holding", "followup"):
+        if mode not in ("listening", "holding", "followup", "dictating"):
             self.partial = ""
         if mode != "listening":
             self.wake_listening = False

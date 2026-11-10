@@ -306,6 +306,11 @@ instant:
   # on the last one: "a bit more", "again", "the other way", "make it 40".
   # Anything it isn't sure about still goes to Claude. Sleep, restart and
   # shutdown are never instant (they keep the click to confirm).
+  # Russian and Uzbek wordings work too ("громкость 30", "тише", "таймер на пять
+  # минут"; "ovozni o'ttizga qo'y", "keyingi qo'shiq", "soat necha"), but only
+  # when Whisper writes them: set stt.language to empty (auto-detect) or ru/uz.
+  # With `en` it turns them into English. The acks stay English.
+  # Settings > Instant edits everything here and lists the taught wordings.
   enabled: true
   # The paraphrase classifier (for wordings the grammar doesn't know, like "my
   # ears hurt"): how similar to one of its example phrasings a request must be,

@@ -353,6 +353,37 @@ class VoiceEngine:
             self.sapi = self._sapi_factory()
         return self.sapi
 
+    # -- lean mode (M4c) ---------------------------------------------------------------
+    unloaded = False
+
+    @property
+    def loaded(self) -> bool:
+        return self.gpu is not None or self.cpu is not None
+
+    def unload(self):
+        """Drop the Kokoro sessions (VRAM/RAM back). SAPI and piper stay: they hold no model."""
+        with self._lock:
+            if self.engine != "kokoro":
+                return
+            if self.current is self.gpu or self.current is self.cpu:
+                self.current = None
+            self.gpu = self.cpu = None
+            self.unloaded = True
+        import gc
+        gc.collect()
+        print("[tts] kokoro unloaded (lean)")
+
+    def reload(self):
+        """Load Kokoro again after unload() (blocking): the GPU unless it's off or busy."""
+        with self._lock:
+            if not self.unloaded:
+                return
+            self.unloaded = False
+        if self.want == "gpu" and not self.gpu_failed:
+            self._try_gpu()
+        if self.gpu is None:
+            self._ensure_cpu()
+
     # -- the per-reply choice ------------------------------------------------------------
     def _premiere_on(self) -> bool:
         if not self.stt_cfg.get("yield_to_premiere") or self._premiere is None:
@@ -369,6 +400,8 @@ class VoiceEngine:
     def pick(self):
         """Choose the engine for the next reply from the current load. Returns it."""
         from .stt import choose
+        if self.unloaded:
+            self.reload()
         with self._lock:
             before = self.label
             if self.engine == "sapi" or (self.engine == "piper" and self.piper is None) or self.kokoro_failed:

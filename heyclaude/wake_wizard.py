@@ -396,6 +396,7 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
     config); both return a status line. hooks: pause()/resume() listening,
     gpu_util()."""
     QtCore, QtGui, QtWidgets = _qt()
+    from . import settings_theme as th
     from .listen import MicSource
     from .wake_samples import ClipRecorder, clip_path, list_clips, next_index, record_seconds, write_wav
 
@@ -429,14 +430,15 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
             p.setRenderHint(QtGui.QPainter.Antialiasing)
             r = self.rect().adjusted(0, 2, 0, -2)
             p.setPen(QtCore.Qt.NoPen)
-            p.setBrush(QtGui.QColor("#262626"))
+            t = th.T
+            p.setBrush(QtGui.QColor(t["track_off"]))
             p.drawRoundedRect(r, 5, 5)
-            c = "#E5646A" if self.v > 0.95 else "#6CCB7A" if self.v > 0.08 else "#E5A04A"
+            c = t["bad"] if self.v > 0.95 else t["ok"] if self.v > 0.08 else t["warn"]
             p.setBrush(QtGui.QColor(c))
             p.drawRoundedRect(QtCore.QRectF(r.x(), r.y(), r.width() * min(1.0, self.v), r.height()), 5, 5)
             if self.mark is not None:
                 x = r.x() + r.width() * self.mark
-                p.setPen(QtGui.QPen(QtGui.QColor("#EDEDED"), 1.5))
+                p.setPen(QtGui.QPen(QtGui.QColor(t["fg"]), 1.5))
                 p.drawLine(QtCore.QPointF(x, r.top()), QtCore.QPointF(x, r.bottom()))
 
     device = cfg.get("listen", {}).get("device")
@@ -450,9 +452,9 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
         def __init__(self):
             super().__init__(parent)
             self.setWindowTitle("Wake word: personal tune-up")
-            self.resize(640, 520)
-            if parent is not None:
-                self.setStyleSheet(parent.styleSheet())
+            self.resize(680, 560)
+            self.setStyleSheet(parent.styleSheet() if parent is not None and parent.styleSheet() else th.stylesheet())
+            self.setFont(th.font("body"))
             self.st = WizardState()
             self.b = Bridge()
             self.recorder = ClipRecorder(open_mic, on_level=self.b.level.emit,
@@ -474,6 +476,8 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
             self.b.hit.connect(lambda n: self.test_hits.setText(f"{n} wake{'s' if n != 1 else ''} heard"))
 
             lay = QtWidgets.QVBoxLayout(self)
+            lay.setContentsMargins(th.S[5], th.S[5], th.S[5], th.S[4])
+            lay.setSpacing(th.S[4])
             self.steps = QtWidgets.QLabel()
             self.steps.setTextFormat(QtCore.Qt.RichText)
             lay.addWidget(self.steps)
@@ -486,10 +490,14 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
             self.status.setWordWrap(True)
             lay.addWidget(self.status)
             row = QtWidgets.QHBoxLayout()
+            row.setSpacing(th.S[2])
             self.btn_back = QtWidgets.QPushButton("Back", clicked=self._back)
+            self.btn_back.setObjectName("ghost")
             self.btn_next = QtWidgets.QPushButton("Next", clicked=self._next)
             self.btn_next.setObjectName("primary")
             self.btn_close = QtWidgets.QPushButton("Close", clicked=self.close)
+            for b in (self.btn_back, self.btn_next, self.btn_close):
+                b.setMinimumWidth(88)
             row.addWidget(self.btn_back)
             row.addStretch(1)
             row.addWidget(self.btn_next)
@@ -531,9 +539,7 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
             v = QtWidgets.QVBoxLayout(w)
             self.lb_cue = QtWidgets.QLabel("")
             self.lb_cue.setWordWrap(True)
-            f = self.lb_cue.font()
-            f.setPointSize(f.pointSize() + 3)
-            self.lb_cue.setFont(f)
+            self.lb_cue.setObjectName("cue")            # the stylesheet's larger display type
             v.addWidget(self.lb_cue)
             self.meter = Meter()
             v.addWidget(self.meter)
@@ -634,8 +640,8 @@ def make_wizard(cfg: dict, hooks=None, parent=None, on_apply=None, on_undo=None)
             names = []
             for i, pg in enumerate(PAGES):
                 t = f"{i + 1} {TITLES[pg]}"
-                names.append(f"<b style='color:#D97757'>{t}</b>" if pg == self.st.page else
-                             f"<span style='color:#9A9A9A'>{t}</span>")
+                names.append(f"<b style='color:{th.T['accent_text']}'>{t}</b>" if pg == self.st.page else
+                             f"<span style='color:{th.T['dim']}'>{t}</span>")
             self.steps.setText(" &nbsp;·&nbsp; ".join(names))
             self.stack.setCurrentIndex(PAGES.index(self.st.page))
             ok, why = self.st.can_next()

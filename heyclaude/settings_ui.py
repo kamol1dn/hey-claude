@@ -1,9 +1,13 @@
-"""Settings window: edits config.yaml through a few tabs.
+"""Settings window: edits config.yaml, one page per section in a sidebar.
 
 Works on a copy of the merged config, so keys it doesn't show (claude.exe,
 listen.*, island.*, piper/kokoro paths...) are written back unchanged. Save
 writes the file, emits `saved(new_cfg, changed_keys)` and says inline which of
 the changes only apply after a restart (with a "Restart now" button).
+
+Looks: heyclaude/settings_theme.py (palette, spacing, type, the one stylesheet)
+and heyclaude/settings_kit.py (sidebar, pages, groups, rows, the switch). This
+module only says which settings go on which page.
 """
 from __future__ import annotations
 
@@ -12,59 +16,16 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
-                               QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-                               QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox, QTableWidget,
-                               QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
+                               QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QSlider,
+                               QSpinBox, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from . import config, holdkey, hotkey
+from . import settings_kit as kit
+from . import settings_theme as th
 
-ACCENT = "#D97757"
-
-STYLE = f"""
-QWidget {{ background: #141414; color: #EDEDED; font-family: 'Segoe UI'; font-size: 10pt; }}
-QToolTip {{ background: #262626; color: #EDEDED; border: 1px solid #3A3A3A; padding: 4px; }}
-QTabWidget::pane {{ border: 1px solid #2A2A2A; border-radius: 6px; top: -1px; }}
-QTabBar::tab {{ background: transparent; color: #9A9A9A; padding: 7px 14px; border: none;
-               border-bottom: 2px solid transparent; }}
-QTabBar::tab:selected {{ color: #F2F2F2; border-bottom: 2px solid {ACCENT}; }}
-QTabBar::tab:hover {{ color: #F2F2F2; }}
-QScrollArea, QScrollArea > QWidget > QWidget {{ border: none; background: #141414; }}
-QGroupBox {{ border: 1px solid #2A2A2A; border-radius: 6px; margin-top: 14px; padding: 12px 10px 8px 10px; }}
-QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {ACCENT}; }}
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTableWidget {{
-    background: #0C0C0C; border: 1px solid #2E2E2E; border-radius: 5px; padding: 4px 6px;
-    selection-background-color: {ACCENT}; selection-color: #141414; }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QPlainTextEdit:focus {{
-    border: 1px solid {ACCENT}; }}
-QLineEdit[recording="true"] {{ border: 1px solid {ACCENT}; background: #2A1A14; }}
-QComboBox QAbstractItemView {{ background: #1A1A1A; border: 1px solid #3A3A3A; selection-background-color: #333; }}
-QPlainTextEdit {{ font-family: Consolas, monospace; }}
-QTableWidget {{ gridline-color: #262626; padding: 0; }}
-QHeaderView::section {{ background: #1C1C1C; color: #9A9A9A; border: none; border-bottom: 1px solid #2A2A2A;
-                        padding: 5px 6px; }}
-QCheckBox {{ spacing: 8px; }}
-QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid #555; border-radius: 3px; background: #0C0C0C; }}
-QCheckBox::indicator:checked {{ background: {ACCENT}; border: 1px solid {ACCENT}; }}
-QPushButton {{ background: #262626; border: 1px solid #3A3A3A; padding: 6px 12px; border-radius: 6px; }}
-QPushButton:hover {{ background: #333; }}
-QPushButton:disabled {{ color: #666; }}
-QPushButton#primary {{ background: {ACCENT}; border: 1px solid {ACCENT}; color: #141414; font-weight: 600; }}
-QPushButton#primary:hover {{ background: #E58A6B; }}
-QLabel#restartTag {{ color: {ACCENT}; border: 1px solid #5A3A2E; border-radius: 7px; padding: 0 6px;
-                     font-size: 8pt; background: transparent; }}
-QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: #3A3A3A; border-radius: 3px; min-height: 24px; }}
-QScrollBar::handle:vertical:hover {{ background: #4A4A4A; }}
-QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
-QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
-QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
-QScrollBar::handle:horizontal {{ background: #3A3A3A; border-radius: 3px; min-width: 24px; }}
-QLabel#help {{ color: #9A9A9A; }}
-QLabel#hint {{ color: #9A9A9A; font-size: 9pt; }}
-QLabel#warn {{ color: #E5A04A; font-size: 9pt; }}
-"""
+ACCENT = th.BASE["live"]
 
 WAKE_MODELS = ["models/hey_claude.onnx", "hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy"]
 STT_MODELS = ["tiny.en", "base.en", "small.en", "small", "medium"]
@@ -154,6 +115,47 @@ TIPS = {
 BYPASS_TIP = ("bypassPermissions skips every permission check: tasks can run any command and edit any file "
               "without asking. Only use it in folders you can afford to lose.")
 
+HOTKEY_HINT = "e.g. ctrl+alt+space"
+
+# One line under a setting, where its name alone doesn't say enough. The longer story stays in TIPS
+# (the tooltip on the setting's name and control).
+DESC = {
+    "app.listening": "Off: the mic stays closed until you turn listening on.",
+    "app.start_with_windows": "Adds a shortcut to your Startup folder.",
+    "listen.hold_key": "Hold it while you talk, so a pause doesn't end your turn. Empty: off.",
+    "weather.location": "For \"what's the weather?\". Empty: say a place when you ask.",
+    "island.motion": "Calm keeps what carries meaning and drops decoration. Off is instant.",
+    "island.hide_when_idle": "Nothing on screen while it waits. Touch the top edge with the pointer to peek.",
+    "wake.threshold": "Higher: fewer false wakes, but it may miss you.",
+    "wake.cooldown": "Ignore the wake word this long after an answer.",
+    "wake.model": "The trained \"hey claude\" model, another .onnx file, or a built-in name like hey_jarvis.",
+    "speech.backend": "Also in the tray menu.",
+    "speech.cloud_stt_provider": "Only used when speech runs in the cloud.",
+    "speech.cloud_tts_provider": "The voice used when speech runs in the cloud.",
+    "stt.device": "The GPU is much faster; the CPU takes over when the GPU is missing or busy.",
+    "stt.gpu_busy_pct": "Use the CPU for a request when the GPU is at least this busy.",
+    "stt.cpu_busy_pct": "If the CPU is this busy too, stay on the GPU anyway.",
+    "stt.yield_to_premiere": "Even when Premiere is idle.",
+    "tts.voice": "a = American, b = British; f = female, m = male.",
+    "tts.device": "GPU: picked per reply from GPU load. CPU: always the CPU.",
+    "tts.rate": "For Windows voices.",
+    "dictate.key": "Hold it to dictate. Double tap for hands-free; tap again to finish.",
+    "dictate.paste_again_hotkey": "Types the last dictation again. Empty: none.",
+    "dictate.cleanup": "Adds a second or two. Per app: dictate.cleanup_apps in config.yaml.",
+    "instant.ack": "Answers, like the time, and errors are always spoken.",
+    "instant.step": "\"A bit\" is half of it, \"a lot\" two and a half times.",
+    "instant.context_s": "\"A bit more\", \"again\" and \"make it 40\" apply to the last command this recent.",
+    "instant.threshold": "Higher: stricter, more goes to Claude.",
+    "fast.backend": "The SDK needs ANTHROPIC_API_KEY; the CLI uses your subscription login.",
+    "agent.model": "Sonnet for harder lookups, at some latency cost.",
+    "agent.filler": "Said right away while the agent looks things up.",
+    "agent.filler_min_words": "Shorter requests get no filler. 0: always.",
+    "conversation.followup_s": "Keep listening this long after an answer, without the wake word. 0: off.",
+    "conversation.idle_reset_s": "After this long without a request.",
+    "tasks.model": "Empty: your Claude Code default.",
+    "tasks.max_parallel": "How many background tasks may run at once.",
+}
+
 
 def _get(cfg: dict, dotted: str, default=None):
     cur = cfg
@@ -242,7 +244,7 @@ class _HotkeyRecorder(QObject):
         self.edit.style().unpolish(self.edit)
         self.edit.style().polish(self.edit)
         self.edit.clear()
-        self.edit.setPlaceholderText("press the key combination… (Esc cancels)")
+        self.edit.setPlaceholderText("Press the keys…")
         self.edit.installEventFilter(self)
         self.edit.setFocus(Qt.OtherFocusReason)
 
@@ -255,7 +257,7 @@ class _HotkeyRecorder(QObject):
         self.edit.setProperty("recording", False)
         self.edit.style().unpolish(self.edit)
         self.edit.style().polish(self.edit)
-        self.edit.setPlaceholderText("e.g. ctrl+alt+space (empty = no hotkey)")
+        self.edit.setPlaceholderText(HOTKEY_HINT)
         self.edit.setText(self._before if text is None else text)
         self.on_done()
 
@@ -295,112 +297,130 @@ class SettingsWindow(QWidget):
         self._orig: dict = copy.deepcopy(cfg)
         self._pending_restart: list[str] = []
         self._tts_test = None
+        self._cur_page: kit.Page | None = None
+        self._sized = False
+        th.T.update(th.tokens(th.load_palette()))
+        th.set_motion(_get(cfg, "island.motion", "auto"))
+        self.setObjectName("settingsWindow")
         self.setWindowTitle("hey-claude settings")
-        self.resize(720, 640)
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(th.stylesheet())
+        self.setFont(th.font("body"))
+        self.setMinimumSize(760, 480)
+        self.resize(1000, 760)
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 12, 12, 10)
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(False)
-        lay.addWidget(self.tabs, 1)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.sidebar = kit.Sidebar("hey-claude", "Settings")
+        root.addWidget(kit.sidebar_scroll(self.sidebar))
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(0)
+        self.tabs = kit.PageStack(self.sidebar)
+        right.addWidget(self.tabs, 1)
+        root.addLayout(right, 1)
+
         self._build_general()
+        self._build_island()
         self._build_character()
-        self._build_voice()
-        self._build_instant()
         self._build_wake()
+        self._build_voice()
         self._build_dictation()
+        self._build_instant()
         self._build_models()
         self._build_projects()
         self._build_permissions()
         from .hooks_settings import SessionsTab
         self.sessions_tab = SessionsTab(self)       # M7: Claude Code hooks, approvals
+        # A "Plugins" page goes last, in its own sidebar section: one kit.Group of list rows
+        # (kit.SettingRow(name, line, (kit.Switch(),), kind="trailing", icon=pixmap)), and
+        # row.set_details(widget) for a plugin with settings of its own.
 
         # Bottom: status line + Restart now + Save / Close.
-        bottom = QHBoxLayout()
+        footer = QFrame()
+        footer.setObjectName("footer")
+        bottom = QHBoxLayout(footer)
+        bottom.setContentsMargins(th.PAGE_PAD[0], th.S[3], th.S[5], th.S[3])
+        bottom.setSpacing(th.S[2])
         self.status = QLabel("")
+        self.status.setObjectName("status")
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.RichText)
-        self.btn_restart = QPushButton("Restart now", clicked=lambda: self.restart_requested.emit())
+        self.btn_restart = kit.button("Restart now", "secondary", lambda: self.restart_requested.emit())
         self.btn_restart.hide()
-        self.btn_save = QPushButton("Save", clicked=lambda: self.save())
-        self.btn_save.setObjectName("primary")
+        self.btn_save = kit.button("Save", "primary", lambda: self.save())
         self.btn_save.setDefault(True)
-        self.btn_close = QPushButton("Close", clicked=self.close)
+        self.btn_save.setMinimumWidth(88)
+        self.btn_close = kit.button("Close", "secondary", self.close)
+        self.btn_close.setMinimumWidth(88)
         bottom.addWidget(self.status, 1)
         bottom.addWidget(self.btn_restart)
-        bottom.addSpacing(8)
+        bottom.addSpacing(th.S[2])
         bottom.addWidget(self.btn_save)
         bottom.addWidget(self.btn_close)
-        lay.addLayout(bottom)
+        right.addWidget(footer)
 
         self._fill(self._orig)
 
+    def showEvent(self, e):
+        """The first time: no bigger than the screen (at 150 / 200 % scaling 1000 x 760 may not fit)."""
+        if not self._sized:
+            self._sized = True
+            scr = self.screen() or QGuiApplication.primaryScreen()
+            if scr is not None:
+                av = scr.availableGeometry()
+                w = min(self.width(), int(av.width() * 0.92))
+                h = min(self.height(), int(av.height() * 0.92))
+                if (w, h) != (self.width(), self.height()):
+                    self.resize(max(w, self.minimumWidth()), max(h, self.minimumHeight()))
+        super().showEvent(e)
+
     # -- building blocks ------------------------------------------------------
-    def _tag(self, key: str) -> QWidget | None:
-        if not config.needs_restart([key]):
-            return None
-        t = QLabel("restart")
-        t.setObjectName("restartTag")
-        t.setToolTip("Takes effect after hey-claude restarts.")
-        t.setFixedHeight(18)
-        t.setAlignment(Qt.AlignCenter)
-        return t
+    def _page(self, title: str, subtitle: str, glyph: str, section: str | None = None,
+              nav: str | None = None) -> kit.Page:
+        p = kit.Page(title, subtitle)
+        self.tabs.addTab(p, nav or title, glyph, section)
+        self._cur_page = p
+        return p
 
-    def _row(self, form: QFormLayout, key: str, label: str, *widgets: QWidget):
-        box = QHBoxLayout()
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(6)
-        for w in widgets:
-            box.addWidget(w, 1 if isinstance(w, (QLineEdit, QComboBox)) else 0)
-        if not any(isinstance(w, (QLineEdit, QComboBox)) for w in widgets):
-            box.addStretch(1)
-        tag = self._tag(key)
-        if tag:
-            box.addWidget(tag, 0, Qt.AlignVCenter)
-        lab = QLabel(label)
-        tip = TIPS.get(key)
-        if tip:
-            lab.setToolTip(tip)
-            for w in widgets:
-                if not w.toolTip():
-                    w.setToolTip(tip)
-        holder = QWidget()
-        holder.setLayout(box)
-        form.addRow(lab, holder)
+    def _row(self, group: kit.Group, key: str, title: str, *widgets: QWidget, desc: str | None = None,
+             kind: str = "field") -> kit.SettingRow:
+        """One setting: `title` (+ a restart tag when `key` needs one), a description line
+        (DESC[key] unless given) and its control(s). The tooltip is TIPS[key]."""
+        row = kit.SettingRow(title, DESC.get(key, "") if desc is None else desc, widgets, kind=kind,
+                             tag=bool(key) and bool(config.needs_restart([key])), tip=TIPS.get(key, ""))
+        group.add(row)
+        if self._cur_page is not None:
+            self._cur_page.register(row)
+        return row
 
-    @staticmethod
-    def _form(group: QGroupBox | None = None) -> QFormLayout:
-        f = QFormLayout(group) if group is not None else QFormLayout()
-        f.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        f.setHorizontalSpacing(12)
-        f.setVerticalSpacing(8)
-        f.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        return f
-
-    def _scroll_tab(self, title: str) -> QVBoxLayout:
-        inner = QWidget()
-        v = QVBoxLayout(inner)
-        v.setContentsMargins(14, 10, 14, 14)
-        v.setSpacing(6)
-        sa = QScrollArea()
-        sa.setWidgetResizable(True)
-        sa.setFrameShape(QFrame.NoFrame)
-        sa.setWidget(inner)
-        self.tabs.addTab(sa, title)
-        return v
+    def _switch(self, group: kit.Group, key: str, title: str, desc: str | None = None) -> kit.Switch:
+        sw = kit.Switch()
+        sw.row = self._row(group, key, title, sw, desc=desc, kind="trailing")
+        return sw
 
     @staticmethod
     def _help(text: str) -> QLabel:
         lab = QLabel(text)
-        lab.setObjectName("help")
+        lab.setObjectName("note")
         lab.setWordWrap(True)
+        return lab
+
+    @staticmethod
+    def _readout(text: str = "", width: int = kit.READOUT_W) -> QLabel:
+        lab = QLabel(text)
+        lab.setObjectName("value")
+        lab.setFixedWidth(width)
+        lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         return lab
 
     @staticmethod
     def _combo(items, editable=False) -> QComboBox:
         c = QComboBox()
         c.setEditable(editable)
+        c.setItemDelegate(QStyledItemDelegate(c))          # lets the stylesheet size the popup's rows
+        c.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        c.setMinimumContentsLength(8)
         if editable:
             c.setInsertPolicy(QComboBox.NoInsert)
         for it in items:
@@ -432,196 +452,194 @@ class SettingsWindow(QWidget):
             return str(c.itemData(i)) if i >= 0 and c.itemData(i) is not None else text
         return str(c.currentData())
 
-    # -- tabs -----------------------------------------------------------------
-    def _build_general(self):
-        v = self._scroll_tab("General")
-        g = QGroupBox("Startup")
-        f = self._form(g)
-        self.cb_listening = QCheckBox("Listen for the wake word at start")
-        self._row(f, "app.listening", "Wake word", self.cb_listening)
-        self.cb_autostart = QCheckBox("Start hey-claude with Windows")
-        self._row(f, "app.start_with_windows", "Windows", self.cb_autostart)
-        v.addWidget(g)
+    @staticmethod
+    def _text_box(placeholder: str = "", height: int = 96) -> QPlainTextEdit:
+        e = QPlainTextEdit()
+        e.setPlaceholderText(placeholder)
+        e.setFixedHeight(height)                 # in a scrolling page a box only gets its own height
+        e.setTabChangesFocus(True)
+        return e
 
-        g = QGroupBox("Push-to-talk")
-        f = self._form(g)
+    @staticmethod
+    def _table(headers: list[str]) -> QTableWidget:
+        t = QTableWidget(0, len(headers))
+        t.setObjectName("flush")
+        t.setHorizontalHeaderLabels(headers)
+        t.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        t.horizontalHeader().setHighlightSections(False)
+        t.verticalHeader().hide()
+        t.verticalHeader().setDefaultSectionSize(34)
+        t.setShowGrid(False)
+        t.setFrameShape(QFrame.NoFrame)
+        t.setSelectionBehavior(QAbstractItemView.SelectRows)
+        t.setSelectionMode(QAbstractItemView.SingleSelection)
+        t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        return t
+
+    # -- pages ----------------------------------------------------------------
+    def _build_general(self):
+        p = self._page("General", "How hey-claude starts, and how you call it.", "general", section="")
+        g = p.add_group("Startup")
+        self.cb_listening = self._switch(g, "app.listening", "Listen for the wake word at start")
+        self.cb_autostart = self._switch(g, "app.start_with_windows", "Start with Windows")
+
+        g = p.add_group("Push-to-talk")
         self.ed_hotkey = QLineEdit()
-        self.ed_hotkey.setPlaceholderText("e.g. ctrl+alt+space (empty = no hotkey)")
-        self.btn_record = QPushButton("Record…", clicked=self._record_hotkey)
+        self.ed_hotkey.setPlaceholderText(HOTKEY_HINT)
+        self.btn_record = kit.button("Record", "secondary", self._record_hotkey,
+                                     tip="Click, then press the key combination. Esc cancels.")
         self.btn_record.setFocusPolicy(Qt.NoFocus)   # don't steal focus from the field being recorded
-        self.btn_record.setToolTip("Click, then press the key combination. Esc cancels.")
-        self.btn_hk_clear = QPushButton("Clear", clicked=lambda: self.ed_hotkey.setText(""))
-        self._row(f, "app.hotkey", "Hotkey", self.ed_hotkey, self.btn_record, self.btn_hk_clear)
-        self.lb_hotkey = QLabel("")
-        self.lb_hotkey.setObjectName("hint")
-        f.addRow("", self.lb_hotkey)
+        # the clear "x" sits inside the field, at its right end (shown only when there's something to clear)
+        self.btn_hk_clear = self.ed_hotkey.addAction(th.glyph_icon("clear", th.T["dim"], th.T["fg"], 12),
+                                                     QLineEdit.TrailingPosition)
+        self.btn_hk_clear.setToolTip("No hotkey")
+        self.btn_hk_clear.triggered.connect(lambda: self.ed_hotkey.setText(""))
+        row = self._row(g, "app.hotkey", "Push-to-talk hotkey", self.ed_hotkey, self.btn_record, desc=" ")
+        self.lb_hotkey = row.desc_label              # says what will be saved, or what's wrong
         self._recorder = _HotkeyRecorder(self.ed_hotkey, self._hotkey_changed)
         self.ed_hotkey.textChanged.connect(self._hotkey_changed)
         self.ed_hold = QLineEdit()
-        self.ed_hold.setPlaceholderText("e.g. ctrl, right ctrl, caps lock (empty = off)")
-        self._row(f, "listen.hold_key", "Hold to keep listening", self.ed_hold)
-        v.addWidget(g)
-        g = QGroupBox("Island")
-        f = self._form(g)
+        self.ed_hold.setPlaceholderText("e.g. ctrl, right ctrl, caps lock")
+        self._row(g, "listen.hold_key", "Hold to keep listening", self.ed_hold)
+
+        g = p.add_group("Weather")
+        self.ed_weather = QLineEdit()
+        self.ed_weather.setPlaceholderText("e.g. Tashkent")
+        self._row(g, "weather.location", "Home place", self.ed_weather)
+
+        note = QLabel(f"Settings marked <span style='color:{th.T['accent_text']}'>restart</span> take effect the next "
+                      "time hey-claude starts; everything else applies when you save. Settings not shown here "
+                      "(listen timings, the island's position, the claude.exe path, voice model paths…) can be "
+                      "edited in config.yaml by hand.")
+        note.setObjectName("note")
+        note.setWordWrap(True)
+        note.setTextFormat(Qt.RichText)
+        p.add(note)
+
+    def _build_island(self):
+        p = self._page("Island", "How the island at the top of the screen looks and moves.", "island")
+        g = p.add_group("Size")
+        self.cb_scale_auto = self._switch(g, "island.scale", "Automatic size",
+                                          desc="100 %, or 125 % on a screen of 27 inches or more.")
         self.sl_scale = QSlider(Qt.Horizontal)
         self.sl_scale.setRange(16, 40)                 # x5 %: 80 % .. 200 %
         self.sl_scale.setPageStep(1)
-        self.sl_scale.setFixedWidth(220)
-        self.lb_scale = QLabel("100 %")
-        self.lb_scale.setMinimumWidth(44)
-        self.cb_scale_auto = QCheckBox("Auto")
+        self.lb_scale = self._readout("100 %")
+        self.row_scale = self._row(g, "island.scale", "Size", self.sl_scale, self.lb_scale,
+                                   desc="Shown on the island while you drag; kept when you save.")
         self.sl_scale.valueChanged.connect(self._scale_changed)
         self.cb_scale_auto.toggled.connect(self._scale_changed)
-        self._row(f, "island.scale", "Size", self.sl_scale, self.lb_scale, self.cb_scale_auto)
-        self.cmb_motion = self._combo(["auto", "full", "calm", "off"])
-        self._row(f, "island.motion", "Motion", self.cmb_motion)
-        self.cb_hide_idle = QCheckBox("Hide when idle")
-        self._row(f, "island.hide_when_idle", "At rest", self.cb_hide_idle)
-        self.ed_weather = QLineEdit()
-        self.ed_weather.setPlaceholderText("e.g. Tashkent (empty = say a place when you ask)")
-        self._row(f, "weather.location", "Weather place", self.ed_weather)
-        v.addWidget(g)
-        v.addWidget(self._help("Settings marked <span style='color:%s'>restart</span> take effect the next time "
-                               "hey-claude starts; everything else applies as soon as you save. "
-                               "Keys not shown here (listen timings, island position, claude.exe path, piper/kokoro "
-                               "paths…) can be edited in config.yaml by hand." % ACCENT))
-        v.addStretch(1)
+
+        g = p.add_group("Motion and visibility")
+        self.cmb_motion = self._combo([("Follow Windows", "auto"), ("Full", "full"), ("Calm", "calm"), ("Off", "off")])
+        self._row(g, "island.motion", "Motion", self.cmb_motion)
+        # The island's frame rate (auto / 30 / 60 / display rate) goes here, as a field row like Motion.
+        self.cb_hide_idle = self._switch(g, "island.hide_when_idle", "Hide when idle")
 
     def _build_character(self):
         """M6: Settings > Character (heyclaude/character_settings.py)."""
         from .character_settings import CharacterTab
+        p = self._page("Character", "Give the island a face, and choose what it does when nothing is happening.",
+                       "character")
         self.char_tab = CharacterTab()
         self.char_tab.preview_pack.connect(self.character_preview.emit)
         self.char_tab.play_antic.connect(self.character_play.emit)
-        sa = QScrollArea()
-        sa.setWidgetResizable(True)
-        sa.setFrameShape(QFrame.NoFrame)
-        sa.setWidget(self.char_tab)
-        self.tabs.addTab(sa, "Character")
+        p.add(self.char_tab)
+        for r in self.char_tab.field_rows:
+            p.register(r)
 
     def _build_wake(self):
-        v = self._scroll_tab("Wake word")
-        g = QGroupBox("Wake word")
-        f = self._form(g)
+        p = self._page("Wake word", "What wakes hey-claude up, and how easily.", "wake", section="Speech")
+        g = p.add_group("Model")
         self.lb_wake_now = QLabel("")
+        self.lb_wake_now.setObjectName("value")
         self.lb_wake_now.setWordWrap(True)
-        f.addRow("Using", self.lb_wake_now)
+        self._row(g, "", "In use now", self.lb_wake_now, desc="")
         self.cmb_wake = self._combo(WAKE_MODELS, editable=True)
-        self.btn_wake_browse = QPushButton("Browse…", clicked=self._browse_wake)
-        self._row(f, "wake.model", "Model", self.cmb_wake, self.btn_wake_browse)
+        self.btn_wake_browse = kit.button("Browse…", "secondary", self._browse_wake)
+        self._row(g, "wake.model", "Model", self.cmb_wake, self.btn_wake_browse, kind="stacked")
         self.sp_threshold = QDoubleSpinBox(minimum=0.05, maximum=0.95, singleStep=0.05, decimals=2)
-        self._row(f, "wake.threshold", "Threshold", self.sp_threshold)
+        self._row(g, "wake.threshold", "Threshold", self.sp_threshold)
         self.sp_cooldown = QDoubleSpinBox(minimum=0.0, maximum=30.0, singleStep=0.5, decimals=2, suffix=" s")
-        self._row(f, "wake.cooldown", "Cooldown", self.sp_cooldown)
-        v.addWidget(g)
+        self._row(g, "wake.cooldown", "Cooldown", self.sp_cooldown)
 
-        g = QGroupBox("Personal tune-up (optional)")
-        gv = QVBoxLayout(g)
-        gv.addWidget(self._help(
-            "The shared \"hey claude\" model works for most voices. If it often misses you, or you want a "
-            "different phrase, this trains a model on your voice, here on this PC, in about 15 minutes. "
-            "Your recordings and the model stay in the state folder."))
-        row = QHBoxLayout()
-        self.btn_wizard = QPushButton("Tune it to my voice…", clicked=self._open_wizard)
-        self.btn_wizard.setObjectName("primary")
-        self.btn_wake_default = QPushButton("Use the shared default", clicked=self._use_default_wake)
-        self.btn_wake_undo = QPushButton("Undo the last change", clicked=self._undo_wake)
-        row.addWidget(self.btn_wizard)
-        row.addWidget(self.btn_wake_default)
-        row.addWidget(self.btn_wake_undo)
-        row.addStretch(1)
-        gv.addLayout(row)
-        self.lb_false_wakes = QLabel("")
-        self.lb_false_wakes.setObjectName("hint")
-        self.lb_false_wakes.setWordWrap(True)
-        gv.addWidget(self.lb_false_wakes)
-        v.addWidget(g)
-        v.addStretch(1)
+        g = p.add_group("Personal tune-up", "Optional. Trains a model on your voice, here on this PC, in about "
+                                            "15 minutes.")
+        g.add_note("The shared \"hey claude\" model works for most voices. Tune it if it often misses you, or to "
+                   "use a different phrase. Your recordings and the model stay in the state folder.")
+        self.btn_wizard = kit.button("Tune it to my voice…", "primary", self._open_wizard)
+        self.btn_wake_default = kit.button("Use the shared default", "secondary", self._use_default_wake)
+        self.btn_wake_undo = kit.button("Undo the last change", "ghost", self._undo_wake)
+        g.add_widget(kit.buttons_row(self.btn_wizard, self.btn_wake_default, self.btn_wake_undo))
+        self.lb_false_wakes = g.add_note()
 
     def _build_voice(self):
-        v = self._scroll_tab("Voice")
-        self._build_speech(v)
-        g = QGroupBox("Speech recognition (whisper)")
-        f = self._form(g)
+        p = self._page("Voice", "How hey-claude hears you, and how it sounds.", "voice")
+        self._build_speech(p)
+        g = p.add_group("Speech to text", "Whisper, on this PC.")
         self.cmb_stt_device = self._combo([("GPU, CPU as fallback", "gpu"), ("CPU only", "cpu")])
-        self._row(f, "stt.device", "Device", self.cmb_stt_device)
+        self._row(g, "stt.device", "Device", self.cmb_stt_device)
         self.cmb_stt_gpu_model = self._combo(STT_GPU_MODELS, editable=True)
-        self._row(f, "stt.gpu_model", "GPU model", self.cmb_stt_gpu_model)
+        self._row(g, "stt.gpu_model", "GPU model", self.cmb_stt_gpu_model)
         self.cmb_stt_gpu_compute = self._combo(["int8_float16", "float16"])
-        self._row(f, "stt.gpu_compute_type", "GPU precision", self.cmb_stt_gpu_compute)
+        self._row(g, "stt.gpu_compute_type", "GPU precision", self.cmb_stt_gpu_compute,
+                  desc="int8_float16 uses less video memory.")
         self.cmb_stt_model = self._combo(STT_MODELS, editable=True)
-        self._row(f, "stt.cpu_model", "CPU model", self.cmb_stt_model)
+        self._row(g, "stt.cpu_model", "CPU model", self.cmb_stt_model, desc="Loaded only when needed.")
         self.sp_gpu_busy = QSpinBox(minimum=10, maximum=100, singleStep=5, suffix=" %")
-        self._row(f, "stt.gpu_busy_pct", "GPU busy at", self.sp_gpu_busy)
+        self._row(g, "stt.gpu_busy_pct", "GPU counts as busy at", self.sp_gpu_busy)
         self.sp_cpu_busy = QSpinBox(minimum=10, maximum=100, singleStep=5, suffix=" %")
-        self._row(f, "stt.cpu_busy_pct", "CPU busy at", self.sp_cpu_busy)
-        self.cb_premiere = QCheckBox("Never use the GPU while Premiere Pro runs, even idle")
-        self._row(f, "stt.yield_to_premiere", "Premiere", self.cb_premiere)
-        v.addWidget(g)
+        self._row(g, "stt.cpu_busy_pct", "CPU counts as busy at", self.sp_cpu_busy)
+        self.cb_premiere = self._switch(g, "stt.yield_to_premiere", "Leave the GPU to Premiere Pro")
 
-        g = QGroupBox("Speech output")
-        f = self._form(g)
+        g = p.add_group("Voice")
         from .tts import KOKORO_VOICES
-        self.cmb_tts_backend = self._combo([("Kokoro", "kokoro"), ("Windows voices (SAPI)", "sapi"),
-                                            ("Piper", "piper")])
-        self._row(f, "tts.engine", "Engine", self.cmb_tts_backend)
+        self.cmb_tts_backend = self._combo([("Kokoro", "kokoro"), ("Windows voices", "sapi"), ("Piper", "piper")])
+        self._row(g, "tts.engine", "Engine", self.cmb_tts_backend,
+                  desc="Windows voices can't be talked over. Piper: set its paths in config.yaml.")
         self.cmb_tts_device = self._combo([("GPU (CPU when busy)", "gpu"), ("CPU", "cpu")])
-        self._row(f, "tts.device", "Device", self.cmb_tts_device)
+        self._row(g, "tts.device", "Device", self.cmb_tts_device)
         self.cmb_kokoro_voice = self._combo([(x, x) for x in KOKORO_VOICES], editable=True)
-        self._row(f, "tts.voice", "Kokoro voice", self.cmb_kokoro_voice)
-        self.sp_tts_speed = QDoubleSpinBox(minimum=0.5, maximum=2.0, singleStep=0.05, decimals=2)
-        self._row(f, "tts.speed", "Speed", self.sp_tts_speed)
-        self.sp_rate = QSpinBox(minimum=80, maximum=400, singleStep=10, suffix=" wpm")
-        self._row(f, "tts.rate", "SAPI rate", self.sp_rate)
-        self.cmb_voice = self._combo([("(Windows default)", "")] + [(d, d) for d in self._sapi_voices()],
+        self._row(g, "tts.voice", "Kokoro voice", self.cmb_kokoro_voice)
+        self.sp_tts_speed = QDoubleSpinBox(minimum=0.5, maximum=2.0, singleStep=0.05, decimals=2, suffix=" ×")
+        self._row(g, "tts.speed", "Kokoro speed", self.sp_tts_speed)
+        self.cmb_voice = self._combo([("Windows default", "")] + [(d, d) for d in self._sapi_voices()],
                                      editable=True)
-        self.btn_test_voice = QPushButton("Test SAPI voice", clicked=self._test_voice)
-        self._row(f, "tts.sapi_voice", "SAPI voice", self.cmb_voice, self.btn_test_voice)
-        v.addWidget(g)
-        v.addStretch(1)
+        self.btn_test_voice = kit.button("Test", "secondary", self._test_voice, tip="Say a sentence in this voice.")
+        self._row(g, "tts.sapi_voice", "Windows voice", self.cmb_voice, self.btn_test_voice)
+        self.sp_rate = QSpinBox(minimum=80, maximum=400, singleStep=10, suffix=" wpm")
+        self._row(g, "tts.rate", "Windows voice speed", self.sp_rate)
 
     # -- M4d: dictation and the personal dictionary --------------------------------------
     CLEANUP = [("Off (fastest)", "off"), ("As said: punctuation only", "as_said"),
-               ("Natural: drop um/uh and false starts", "natural"), ("Polished", "polished")]
+               ("Natural: drop um, uh and false starts", "natural"), ("Polished", "polished")]
 
     def _build_dictation(self):
-        v = self._scroll_tab("Dictation")
-        g = QGroupBox("Dictate anywhere")
-        f = self._form(g)
-        self.cb_dictate = QCheckBox("Hold the key, speak, let go: it types where the cursor is")
-        self._row(f, "dictate.enabled", "Dictation", self.cb_dictate)
+        p = self._page("Dictation", "Hold a key, speak, let go: it types where the cursor is.", "dictation")
+        g = p.add_group("Dictate anywhere")
+        self.cb_dictate = self._switch(g, "dictate.enabled", "Dictation",
+                                       desc="Your clipboard is put back after each paste; nothing is typed into "
+                                            "password fields.")
         self.ed_dictate_key = QLineEdit()
-        self.ed_dictate_key.setPlaceholderText("right alt, caps lock, f13, right ctrl…")
-        self._row(f, "dictate.key", "Key", self.ed_dictate_key)
+        self.ed_dictate_key.setPlaceholderText("right alt, caps lock, f13…")
+        self._row(g, "dictate.key", "Key", self.ed_dictate_key)
         self.ed_paste_again = QLineEdit()
-        self.ed_paste_again.setPlaceholderText("e.g. win+alt+v; empty = none")
-        self._row(f, "dictate.paste_again_hotkey", "Paste again", self.ed_paste_again)
+        self.ed_paste_again.setPlaceholderText("e.g. win+alt+v")
+        self._row(g, "dictate.paste_again_hotkey", "Paste again", self.ed_paste_again)
         self.cmb_cleanup = self._combo(self.CLEANUP)
-        self._row(f, "dictate.cleanup", "Clean-up by Claude", self.cmb_cleanup)
-        f.addRow("", self._help("Double tap the key for hands-free (tap again to finish); Esc cancels. "
-                                "Your clipboard is put back after each paste; nothing is typed into "
-                                "password fields. Clean-up adds a second or two; set it per app in "
-                                "config.yaml (dictate.cleanup_apps)."))
-        self.lbl_dictate_stats = self._help("")
-        f.addRow("", self.lbl_dictate_stats)
-        v.addWidget(g)
+        self._row(g, "dictate.cleanup", "Clean-up by Claude", self.cmb_cleanup)
+        self.lbl_dictate_stats = g.add_note()
 
-        g = QGroupBox("Personal dictionary (dictation and the assistant)")
-        f = self._form(g)
-        self.ed_dict_words = QPlainTextEdit()
-        self.ed_dict_words.setPlaceholderText("One per line: names, course names, words it gets wrong")
-        self.ed_dict_words.setFixedHeight(80)
-        self._row(f, "dictionary.words", "Words", self.ed_dict_words)
-        self.ed_dict_repl = QPlainTextEdit()
-        self.ed_dict_repl.setPlaceholderText("heard => meant, one per line (e.g. hey cloud => hey Claude)")
-        self.ed_dict_repl.setFixedHeight(80)
-        self._row(f, "dictionary.replacements", "Replacements", self.ed_dict_repl)
-        self.ed_dict_snip = QPlainTextEdit()
-        self.ed_dict_snip.setPlaceholderText("spoken phrase => text, one per line (\\n for a new line)")
-        self.ed_dict_snip.setFixedHeight(80)
-        self._row(f, "dictionary.snippets", "Snippets", self.ed_dict_snip)
-        v.addWidget(g)
-        v.addStretch(1)
+        g = p.add_group("Personal dictionary", "Used by dictation and by the assistant.")
+        self.ed_dict_words = self._text_box("One per line")
+        self._row(g, "dictionary.words", "Words", self.ed_dict_words, kind="stacked",
+                  desc="Names, course names, words it gets wrong.")
+        self.ed_dict_repl = self._text_box("hey cloud => hey Claude")
+        self._row(g, "dictionary.replacements", "Replacements", self.ed_dict_repl, kind="stacked",
+                  desc="heard => meant, one per line.")
+        self.ed_dict_snip = self._text_box("my address => 12 Main St\\nTashkent")
+        self._row(g, "dictionary.snippets", "Snippets", self.ed_dict_snip, kind="stacked",
+                  desc="spoken phrase => text, one per line; \\n for a new line.")
 
     @staticmethod
     def _pairs_text(d: dict) -> str:
@@ -647,86 +665,70 @@ class SettingsWindow(QWidget):
             st = json.loads((config.STATE_DIR / "dictation.json").read_text(encoding="utf-8"))
             self.lbl_dictate_stats.setText(f"{st.get('dictations', 0)} dictations, {st.get('words', 0)} words, "
                                            f"about {float(st.get('saved_s', 0)) / 60:.0f} min saved vs typing "
-                                           "(kept on this PC only)")
+                                           "(kept on this PC only).")
         except Exception:
             self.lbl_dictate_stats.setText("No dictations yet.")
 
     def _build_instant(self):
         """M10: simple commands run locally, no model (heyclaude/intents, config `instant:`)."""
-        v = self._scroll_tab("Instant")
-        v.addWidget(self._help(
-            "\"Volume 30\", \"turn it up a bit\", \"mute\", \"dark mode\", \"next song\", \"set a timer for 5 "
-            "minutes\", \"open Spotify\", \"what time is it\" run here without Claude, with the same island effect "
-            "and \"undo that\". Russian and Uzbek wordings work too when speech recognition writes them "
-            "(stt.language in config.yaml: empty to auto-detect). Sleep, restart and shutdown are never instant."))
-        g = QGroupBox("Instant commands")
-        f = self._form(g)
-        self.cb_instant = QCheckBox("Run simple commands locally, without Claude")
-        self._row(f, "instant.enabled", "Enabled", self.cb_instant)
+        p = self._page("Instant commands", "Simple commands run here in about a millisecond, without Claude, with "
+                       "the same island effect and \"undo that\".", "instant", nav="Instant")
+        g = p.add_group("Instant commands")
+        self.cb_instant = self._switch(g, "instant.enabled", "Run simple commands locally",
+                                       desc="\"Volume 30\", \"mute\", \"dark mode\", \"next song\", \"timer for 5 "
+                                            "minutes\". Anything it isn't sure about still goes to Claude.")
         self.cmb_instant_ack = self._combo([("Speak a short ack (\"Volume 30.\")", "speak"),
-                                            ("Effect only (answers are still spoken)", "silent")])
-        self._row(f, "instant.ack", "Acknowledge", self.cmb_instant_ack)
+                                            ("Effect only", "silent")])
+        self._row(g, "instant.ack", "Acknowledge", self.cmb_instant_ack)
         self.sp_instant_step = QSpinBox(minimum=2, maximum=50, singleStep=1, suffix=" %")
-        self._row(f, "instant.step", "\"Turn it up\" step", self.sp_instant_step)
+        self._row(g, "instant.step", "\"Turn it up\" step", self.sp_instant_step)
         self.sp_instant_context = QSpinBox(minimum=0, maximum=900, singleStep=15, suffix=" s")
-        self._row(f, "instant.context_s", "Follow-ups for", self.sp_instant_context)
-        self.cb_instant_radios = QCheckBox("Wi-Fi and Bluetooth on / off instantly")
-        self._row(f, "instant.radios", "Radios", self.cb_instant_radios)
-        v.addWidget(g)
+        self._row(g, "instant.context_s", "Follow-ups for", self.sp_instant_context)
+        self.cb_instant_radios = self._switch(g, "instant.radios", "Wi-Fi and Bluetooth on and off",
+                                              desc="Off: those go to Claude.")
+        g.add_note("Russian and Uzbek wordings work too when speech recognition writes them (stt.language in "
+                   "config.yaml: empty to auto-detect). Sleep, restart and shutdown are never instant.")
 
-        g = QGroupBox("Paraphrases")
-        f = self._form(g)
-        self.cb_instant_clf = QCheckBox("Also catch looser wordings (\"my ears hurt, it's too loud\")")
-        self._row(f, "instant.classifier", "Classifier", self.cb_instant_clf)
+        g = p.add_group("Looser wordings")
+        self.cb_instant_clf = self._switch(g, "instant.classifier", "Catch looser wordings",
+                                           desc="Like \"my ears hurt, it's too loud\". English only.")
         self.sl_instant_threshold = QSlider(Qt.Horizontal)
         self.sl_instant_threshold.setRange(50, 90)                  # x0.01: 0.50 .. 0.90
         self.sl_instant_threshold.setPageStep(2)
-        self.sl_instant_threshold.setFixedWidth(220)
-        self.lb_instant_threshold = QLabel("0.62")
-        self.lb_instant_threshold.setMinimumWidth(110)
+        self.lb_instant_threshold = self._readout("0.62", 104)
+        self.row_instant_threshold = self._row(g, "instant.threshold", "Strictness", self.sl_instant_threshold,
+                                               self.lb_instant_threshold)
         self.sl_instant_threshold.valueChanged.connect(self._instant_threshold_changed)
         self.cb_instant_clf.toggled.connect(self._instant_threshold_changed)
-        self._row(f, "instant.threshold", "Strictness", self.sl_instant_threshold, self.lb_instant_threshold)
-        v.addWidget(g)
 
-        g = QGroupBox("Teach it")
-        gv = QVBoxLayout(g)
-        f = self._form()
-        self.cb_instant_learn = QCheckBox("Note wordings Claude handled with one settings change")
-        self._row(f, "instant.learn", "Learn", self.cb_instant_learn)
-        gv.addLayout(f)
-        gv.addWidget(self._help(
-            "Ask for something the long way (\"give the boombox some juice\"); when Claude has done it, say "
-            "\"teach it\" (or \"запомни это\", \"buni eslab qol\") and that wording is instant from then on. "
-            "Taught wordings stay on this PC (state/intents_taught.yaml)."))
-        self.tbl_taught = QTableWidget(0, 2)
-        self.tbl_taught.setHorizontalHeaderLabels(["Wording", "Means"])
+        g = p.add_group("Teach it", "Say \"teach it\" right after Claude did something, and that wording is "
+                                    "instant from then on.")
+        self.cb_instant_learn = self._switch(g, "instant.learn", "Note wordings Claude handled",
+                                             desc="Only ones done with a single settings change; kept on this PC.")
+        g.add_note("Ask for something the long way (\"give the boombox some juice\"); when Claude has done it, say "
+                   "\"teach it\" (or \"запомни это\", \"buni eslab qol\"). Taught wordings are kept in "
+                   "state/intents_taught.yaml.")
+        self.tbl_taught = self._table(["Wording", "Means"])
         self.tbl_taught.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tbl_taught.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.tbl_taught.verticalHeader().hide()
         self.tbl_taught.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl_taught.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tbl_taught.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.tbl_taught.setMinimumHeight(120)
-        gv.addWidget(self.tbl_taught)
-        bar = QHBoxLayout()
-        self.btn_taught_remove = QPushButton("Remove", clicked=self._remove_taught)
-        self.btn_taught_remove.setToolTip("Forget the selected wording now (it goes back to Claude).")
-        bar.addWidget(self.btn_taught_remove)
+        self.tbl_taught.setMinimumHeight(140)
+        g.add_widget(self.tbl_taught, pad=False, vpad=0)
+        self.btn_taught_remove = kit.button("Remove", "danger", self._remove_taught,
+                                            tip="Forget the selected wording now (it goes back to Claude).")
         self.lb_taught = QLabel("")
-        self.lb_taught.setObjectName("hint")
-        bar.addWidget(self.lb_taught, 1)
-        gv.addLayout(bar)
+        self.lb_taught.setObjectName("note")
+        bar = kit.buttons_row(self.lb_taught, None, self.btn_taught_remove, stretch_end=False)
+        g.add_widget(bar)
         self.tbl_taught.itemSelectionChanged.connect(
             lambda: self.btn_taught_remove.setEnabled(self.tbl_taught.currentRow() >= 0))
-        v.addWidget(g)
-        v.addStretch(1)
 
     def _instant_threshold_changed(self, *_):
         val = self.sl_instant_threshold.value() / 100
         word = "strict" if val >= 0.75 else "loose" if val < 0.58 else "balanced"
         self.lb_instant_threshold.setText(f"{val:.2f} ({word})")
         self.sl_instant_threshold.setEnabled(self.cb_instant_clf.isChecked())
+        self.row_instant_threshold.setEnabled(self.cb_instant_clf.isChecked())
 
     def _load_taught(self):
         """The wordings taught by voice, read-only, with Remove."""
@@ -752,7 +754,7 @@ class SettingsWindow(QWidget):
             return
         text = self._taught_cell(r)
         if learn.remove_taught(self.state_dir, text):
-            self._set_status(f"Forgot \"{text}\" (applies now).", "#6CCB7A")
+            self._set_status(f"Forgot \"{text}\" (applies now).", "ok")
         self._load_taught()
 
     def _taught_cell(self, r: int) -> str:
@@ -760,62 +762,64 @@ class SettingsWindow(QWidget):
         return it.text() if it else ""
 
     # -- M4c: speech backends ---------------------------------------------------------
-    SPEECH_BACKENDS = [("Local: Whisper + Kokoro on this PC", "local"), ("Windows: no models", "windows"),
-                       ("Cloud: Groq / OpenAI", "cloud"), ("Auto: local while memory is free", "auto")]
+    SPEECH_BACKENDS = [("Local: Whisper and Kokoro on this PC", "local"), ("Windows: no models", "windows"),
+                       ("Cloud: Groq or OpenAI", "cloud"), ("Auto: local while memory is free", "auto")]
 
-    def _build_speech(self, v):
-        g = QGroupBox("Speech backend (also in the tray menu)")
-        f = self._form(g)
+    def _build_speech(self, p: kit.Page):
+        g = p.add_group("Where speech runs")
         self.cmb_speech = self._combo(self.SPEECH_BACKENDS)
         self.cmb_speech.currentIndexChanged.connect(self._speech_status)
-        self._row(f, "speech.backend", "Backend", self.cmb_speech)
-        self.cb_lean = QCheckBox("Lean: unload Whisper and Kokoro when idle")
+        self._row(g, "speech.backend", "Speech runs", self.cmb_speech)
+        self.cb_lean = self._switch(g, "speech.lean", "Free memory when idle",
+                                    desc="Unloads Whisper and Kokoro; the next request loads them again.")
         self.sp_unload = QSpinBox(minimum=1, maximum=240, suffix=" min")
-        self._row(f, "speech.lean", "Memory", self.cb_lean, self.sp_unload)
-        self.cmb_cloud_stt = self._combo([("Groq (whisper-large-v3-turbo, free tier)", "groq"),
-                                          ("OpenAI (gpt-4o-mini-transcribe)", "openai")])
+        self.row_unload = self._row(g, "speech.lean", "Unload after", self.sp_unload, desc="")
+        self.cb_lean.toggled.connect(self.row_unload.setEnabled)
+        self.cmb_cloud_stt = self._combo([("Groq: whisper-large-v3-turbo", "groq"),
+                                          ("OpenAI: gpt-4o-mini-transcribe", "openai")])
         self.cmb_cloud_stt.currentIndexChanged.connect(self._speech_status)
-        self.btn_key = QPushButton("Set key…", clicked=self._set_cloud_key)
-        self._row(f, "speech.cloud_stt_provider", "Cloud speech-to-text", self.cmb_cloud_stt, self.btn_key)
+        self._row(g, "speech.cloud_stt_provider", "Cloud speech to text", self.cmb_cloud_stt)
+        self.btn_key = kit.button("Set key…", "secondary", self._set_cloud_key)
+        self._row(g, "", "Cloud key", self.btn_key, kind="trailing",
+                  desc="Kept in the Windows credential store, never in config.yaml.")
         self.cmb_cloud_tts = self._combo([("Windows voice (free)", ""), ("OpenAI", "openai"),
                                           ("ElevenLabs", "elevenlabs")])
-        self._row(f, "speech.cloud_tts_provider", "Cloud voice", self.cmb_cloud_tts)
-        self.lbl_speech = self._help("")
-        self.lbl_speech.setTextFormat(Qt.RichText)
-        f.addRow("", self.lbl_speech)
-        v.addWidget(g)
+        self._row(g, "speech.cloud_tts_provider", "Cloud voice", self.cmb_cloud_tts)
+        self.lbl_speech = g.add_note(rich=True)
 
     def _speech_status(self, *_):
         """Key source, Windows online recognition, cost estimate and where audio goes."""
+        t = th.T
         lines = []
         backend = self._combo_value(self.cmb_speech)
         prov = self._combo_value(self.cmb_cloud_stt) or "groq"
         try:
             from .speech import cloud
             src = cloud.key_source(prov)
-            lines.append(f"{prov} key: " + ({"env": f"from {cloud.ENV_VARS[prov]}", "credential store":
-                                             "in the Windows credential store"}.get(src) or
-                                            f"none (set {cloud.ENV_VARS[prov]} or use Set key…)"))
+            lines.append(f"{prov.title()} key: " + ({"env": f"from {cloud.ENV_VARS[prov]}", "credential store":
+                                                     "in the Windows credential store"}.get(src) or
+                                                    f"none (set {cloud.ENV_VARS[prov]} or use Set key…)"))
             model = _get(self._orig, "speech.groq_model" if prov == "groq" else "speech.openai_stt_model",
                          "whisper-large-v3-turbo" if prov == "groq" else "gpt-4o-mini-transcribe")
             logs = sorted(str(p) for p in config.STATE_DIR.glob("latency*.csv"))
-            lines.append("cloud cost: " + cloud.cost_line(logs, prov, model))
+            lines.append("Cloud cost: " + cloud.cost_line(logs, prov, model))
         except Exception as e:
-            lines.append(f"cloud: {e}")
+            lines.append(f"Cloud: {e}")
         try:
             from .speech.windows import online_speech_enabled
             on = online_speech_enabled()
             lines.append("Windows online speech recognition: " + {True: "on", False:
-                         "<b>off</b> (Settings > Privacy & security > Speech); the offline recognizer is used",
-                         None: "unknown"}[on])
+                         f"<span style='color:{t['fg']}'>off</span> (Settings › Privacy &amp; security › Speech); "
+                         "the offline recognizer is used", None: "unknown"}[on])
         except Exception:
             pass
         where = {"local": "Audio never leaves this PC.",
                  "windows": "Windows online recognition sends your audio to Microsoft.",
-                 "cloud": f"<b>Your audio is sent to {prov.title()}</b> in this mode (only this mode).",
+                 "cloud": f"<span style='color:{t['warn']}'>Your audio is sent to {prov.title()}</span> in this "
+                          "mode (only this mode).",
                  "auto": "Auto may use Windows or the cloud when memory is short: then audio leaves this PC."}
         lines.append(where.get(backend, ""))
-        self.lbl_speech.setText("<br>".join(lines))
+        self.lbl_speech.setText("<br>".join(x for x in lines if x))
 
     def _set_cloud_key(self):
         from PySide6.QtWidgets import QInputDialog, QLineEdit as _LE
@@ -832,116 +836,86 @@ class SettingsWindow(QWidget):
             else:
                 cloud.delete_key(prov)
         except Exception as e:
-            self._set_status(f"Couldn't store the key: {e}", "#E07A5F")
+            self._set_status(f"Couldn't store the key: {e}", "bad")
         self._speech_status()
 
     def _build_models(self):
-        v = self._scroll_tab("Models")
-        g = QGroupBox("Quick answers")
-        f = self._form(g)
-        self.cmb_fast_backend = self._combo([("auto (SDK if ANTHROPIC_API_KEY is set, else CLI)", "auto"),
-                                             ("claude CLI (your subscription login)", "cli"),
+        p = self._page("Claude", "Which models answer, and how a conversation carries on.", "claude",
+                       section="Claude")
+        g = p.add_group("Quick answers")
+        self.cmb_fast_backend = self._combo([("Auto: SDK when there's an API key", "auto"),
+                                             ("claude CLI (your subscription)", "cli"),
                                              ("Anthropic SDK (API key)", "sdk")])
-        self._row(f, "fast.backend", "Backend", self.cmb_fast_backend)
+        self._row(g, "fast.backend", "Backend", self.cmb_fast_backend)
         self.cmb_fast_cli = self._combo(CLI_MODELS, editable=True)
-        self._row(f, "fast.cli_model", "CLI model", self.cmb_fast_cli)
+        self._row(g, "fast.cli_model", "CLI model", self.cmb_fast_cli)
         self.ed_fast_sdk = QLineEdit()
-        self._row(f, "fast.sdk_model", "SDK model", self.ed_fast_sdk)
-        v.addWidget(g)
+        self._row(g, "fast.sdk_model", "SDK model", self.ed_fast_sdk)
 
-        g = QGroupBox("Tool agent (calendar, mail, MCP lookups)")
-        f = self._form(g)
-        self.cb_agent = QCheckBox("Keep a warm Claude Code process for questions that need tools")
-        self._row(f, "agent.enabled", "Enabled", self.cb_agent)
+        g = p.add_group("Tool agent", "For questions that need your tools: calendar, mail, MCP lookups.")
+        self.cb_agent = self._switch(g, "agent.enabled", "Keep a tool agent ready",
+                                     desc="One warm Claude Code process, started at launch and reused.")
         self.cmb_agent_model = self._combo(CLI_MODELS, editable=True)
-        self._row(f, "agent.model", "Model", self.cmb_agent_model)
+        self._row(g, "agent.model", "Model", self.cmb_agent_model)
         self.ed_filler = QLineEdit()
+        self._row(g, "agent.filler", "Filler phrase", self.ed_filler)
         self.sp_filler_words = QSpinBox(minimum=0, maximum=40, suffix=" words")
-        self._row(f, "agent.filler", "Filler phrase", self.ed_filler, QLabel("for requests of"), self.sp_filler_words)
-        v.addWidget(g)
+        self._row(g, "agent.filler_min_words", "Say it for requests of at least", self.sp_filler_words)
 
-        g = QGroupBox("Conversation")
-        f = self._form(g)
+        g = p.add_group("Conversation")
         self.sp_followup = QDoubleSpinBox(minimum=0.0, maximum=30.0, singleStep=1.0, decimals=1, suffix=" s")
-        self._row(f, "conversation.followup_s", "Follow-up window", self.sp_followup)
+        self._row(g, "conversation.followup_s", "Follow-up window", self.sp_followup)
         self.sp_idle_reset = QSpinBox(minimum=30, maximum=86400, singleStep=60, suffix=" s")
-        self._row(f, "conversation.idle_reset_s", "New conversation after", self.sp_idle_reset)
-        self.cb_save_conv = QCheckBox("Save this conversation (per day)")
-        self._row(f, "conversation.save", "Save", self.cb_save_conv)
-        v.addWidget(g)
+        self._row(g, "conversation.idle_reset_s", "Start a new conversation", self.sp_idle_reset)
+        self.cb_save_conv = self._switch(g, "conversation.save", "Save conversations",
+                                         desc="Per day, so they come back after a restart. Off: nothing is written.")
 
-        g = QGroupBox("Background tasks (claude -p)")
-        f = self._form(g)
-        self.cmb_tasks_model = self._combo([("(Claude Code default)", "")] + CLI_MODELS, editable=True)
-        self._row(f, "tasks.model", "Model", self.cmb_tasks_model)
+        g = p.add_group("Background tasks", "Tasks you start by voice; they run claude -p in a project folder.")
+        self.cmb_tasks_model = self._combo([("Claude Code default", "")] + CLI_MODELS, editable=True)
+        self._row(g, "tasks.model", "Model", self.cmb_tasks_model)
         self.cmb_perm = self._combo(PERMISSION_MODES)
         self.cmb_perm.setItemData(PERMISSION_MODES.index("bypassPermissions"), BYPASS_TIP, Qt.ToolTipRole)
-        self._row(f, "tasks.permission_mode", "Permission mode", self.cmb_perm)
-        self.lb_bypass = QLabel("Warning: bypassPermissions lets tasks run anything without asking.")
-        self.lb_bypass.setObjectName("warn")
+        self._row(g, "tasks.permission_mode", "Permission mode", self.cmb_perm,
+                  desc="acceptEdits: edits files without asking, asks for the rest.")
+        self.lb_bypass = g.add_note("Careful: bypassPermissions lets tasks run anything without asking.")
+        kit.set_tone(self.lb_bypass, "warn")
         self.lb_bypass.setToolTip(BYPASS_TIP)
-        self.lb_bypass.hide()
-        f.addRow("", self.lb_bypass)
+        self._bypass_row = self.lb_bypass.parentWidget()
         self.cmb_perm.currentIndexChanged.connect(self._perm_changed)
         self.sp_parallel = QSpinBox(minimum=1, maximum=10)
-        self._row(f, "tasks.max_parallel", "Max parallel", self.sp_parallel)
-        v.addWidget(g)
-        v.addStretch(1)
+        self._row(g, "tasks.max_parallel", "At most at once", self.sp_parallel, desc="")
 
     def _build_projects(self):
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(14, 12, 14, 14)
-        v.addWidget(self._help("Say \"start a task in <name>: <thing>\". Several spoken names can point at the same "
-                               "folder. Names are lowercased when saved. Changes apply right away."))
-        self.tbl = QTableWidget(0, 2)
-        self.tbl.setHorizontalHeaderLabels(["Spoken name", "Folder"])
+        p = self._page("Projects", "Say \"start a task in <name>: <thing>\". Several spoken names can point at the "
+                       "same folder.", "projects")
+        g = p.add_group("Spoken names", "Names are lowercased when saved. Changes apply right away.")
+        self.tbl = self._table(["Spoken name", "Folder"])
         self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
         self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.tbl.setColumnWidth(0, 180)
-        self.tbl.verticalHeader().hide()
-        self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tbl.setColumnWidth(0, 200)
+        self.tbl.setMinimumHeight(260)
         self.tbl.itemChanged.connect(self._mark_folder)
-        v.addWidget(self.tbl, 1)
-        bar = QHBoxLayout()
-        bar.addWidget(QPushButton("Add", clicked=lambda: self._add_project()))
-        bar.addWidget(QPushButton("Remove", clicked=self._remove_project))
-        bar.addWidget(QPushButton("Browse…", clicked=self._browse_project))
-        bar.addStretch(1)
-        v.addLayout(bar)
-        self.tabs.addTab(w, "Projects")
+        g.add_widget(self.tbl, pad=False, vpad=0)
+        g.add_widget(kit.buttons_row(kit.button("Add", "secondary", lambda: self._add_project()),
+                                     kit.button("Choose folder…", "secondary", self._browse_project), None,
+                                     kit.button("Remove", "danger", self._remove_project), stretch_end=False))
 
     def _build_permissions(self):
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(14, 12, 14, 14)
-        v.addWidget(self._help("One tool per line; blank lines are ignored. Anything not listed is denied "
-                               "automatically. An MCP server name prefix such as mcp__telegram allows all of that "
-                               "server's tools; Bash(git status:*) allows one command."))
-        head = QHBoxLayout()
-        head.addWidget(QLabel("Tool agent (questions that need tools)"))
-        tag = self._tag("agent.allowed_tools")
-        if tag:
-            head.addWidget(tag)
-        head.addStretch(1)
-        v.addLayout(head)
-        self.ed_agent_tools = QPlainTextEdit()
+        p = self._page("Permissions", "Which tools Claude may use without asking. Anything not listed is denied "
+                       "automatically.", "permissions")
+        g = p.add_group("Tool agent", "Questions that need your tools.")
+        self.ed_agent_tools = self._text_box("mcp__telegram\nBash(git status:*)", 240)
         self.ed_agent_tools.setToolTip("Leave out tools that send or change things unless you want "
                                        "\"send Sam a message saying …\" to just do it.")
-        v.addWidget(self.ed_agent_tools, 3)
-        head = QHBoxLayout()
-        head.addWidget(QLabel("Background tasks (claude -p)"))
-        tag = self._tag("tasks.allowed_tools")
-        if tag:
-            head.addWidget(tag)
-        head.addStretch(1)
-        v.addLayout(head)
-        self.ed_tasks_tools = QPlainTextEdit()
+        self._row(g, "agent.allowed_tools", "Allowed tools", self.ed_agent_tools, kind="stacked",
+                  desc="One per line. A server prefix like mcp__telegram allows all its tools; "
+                       "Bash(git status:*) allows one command.")
+        g = p.add_group("Background tasks", "Tasks you start by voice (claude -p).")
+        self.ed_tasks_tools = self._text_box("Read\nEdit", 168)
         self.ed_tasks_tools.setToolTip("Tools the headless run may use without asking; anything else that would "
                                        "need a permission prompt is denied.")
-        v.addWidget(self.ed_tasks_tools, 2)
-        self.tabs.addTab(w, "Permissions")
+        self._row(g, "tasks.allowed_tools", "Allowed tools", self.ed_tasks_tools, kind="stacked",
+                  desc="Anything else that would need a permission prompt is denied.")
 
     # -- filling / collecting -----------------------------------------------
     def _fill(self, cfg: dict):
@@ -980,6 +954,7 @@ class SettingsWindow(QWidget):
         self._set_combo(self.cmb_speech, str(_get(cfg, "speech.backend", "local") or "local"))
         self.cb_lean.setChecked(bool(_get(cfg, "speech.lean", False)))
         self.sp_unload.setValue(int(_get(cfg, "speech.unload_after_min", 10) or 10))
+        self.row_unload.setEnabled(self.cb_lean.isChecked())
         self._set_combo(self.cmb_cloud_stt, str(_get(cfg, "speech.cloud_stt_provider", "groq") or "groq"))
         self._set_combo(self.cmb_cloud_tts, str(_get(cfg, "speech.cloud_tts_provider") or ""))
         self._speech_status()
@@ -1069,7 +1044,7 @@ class SettingsWindow(QWidget):
         _set(new, "app.hotkey", hk)
         _set(new, "app.start_with_windows", self.cb_autostart.isChecked())
         _set(new, "island.scale", "auto" if self.cb_scale_auto.isChecked() else self.sl_scale.value() * 5 / 100)
-        _set(new, "island.motion", self.cmb_motion.currentText())
+        _set(new, "island.motion", self._combo_value(self.cmb_motion))
         _set(new, "island.hide_when_idle", self.cb_hide_idle.isChecked())
         _set(new, "weather.location", self.ed_weather.text().strip())
         hold = " ".join(self.ed_hold.text().lower().split())
@@ -1220,20 +1195,20 @@ class SettingsWindow(QWidget):
     def save(self) -> bool:
         new, errors, warnings = self._collect()
         if errors:
-            self._set_status("Not saved. " + " ".join(errors), "#E5646A")
+            self._set_status("Not saved. " + " ".join(errors), "bad")
             return False
         changed = config.diff(self._orig, new)
         if not changed:
             msg = "No changes to save."
             if warnings:
                 msg += " " + " ".join(warnings)
-            self._set_status(msg, "#9A9A9A")
+            self._set_status(msg, "dim")
             return True
         try:
             config.ensure_user_config(self.config_path)
             config.save(new, self.config_path)
         except OSError as e:
-            self._set_status(f"Couldn't write the config file: {e}", "#E5646A")
+            self._set_status(f"Couldn't write the config file: {e}", "bad")
             return False
         self._orig = copy.deepcopy(new)
         self.ed_hotkey.setText(str(new["app"].get("hotkey") or ""))   # show the normalized form
@@ -1247,16 +1222,24 @@ class SettingsWindow(QWidget):
             self._show_restart(self._pending_restart, "Saved", extra)
         else:
             self.btn_restart.hide()
-            self._set_status("Saved. Applied now." + extra, "#6CCB7A" if not warnings else "#E5A04A")
+            self._set_status("Saved. Applied now." + extra, "ok" if not warnings else "warn")
         return True
 
     # -- status ------------------------------------------------------------------
-    def _set_status(self, text: str, color: str = "#9A9A9A"):
+    _TONES = {"#6CCB7A": "ok", "#E5646A": "bad", "#E08A6B": "bad", "#E07A5F": "bad", "#E5A04A": "warn",
+              "#E0B04A": "warn", "#9A9A9A": "dim"}
+
+    def _set_status(self, text: str, tone: str = "dim"):
+        """The footer line. tone: ok / bad / warn / dim (or one of the old hex colours)."""
         from html import escape
-        self.status.setText(f"<span style='color:{color}'>{escape(text)}</span>" if text else "")
+        tone = self._TONES.get(str(tone).upper(), tone)
+        color = th.T.get(tone, th.T["dim"])
+        dot = f"<span style='color:{color}'>&#9679;</span>&nbsp;&nbsp;" if tone in ("ok", "bad", "warn") else ""
+        body = th.T["fg"] if tone == "ok" else color
+        self.status.setText(f"{dot}<span style='color:{body}'>{escape(text)}</span>" if text else "")
 
     def _show_restart(self, keys: list[str], head: str, extra: str = ""):
-        self._set_status(f"{head}. Needs a restart to apply: {', '.join(keys)}.{extra}", "#E5A04A")
+        self._set_status(f"{head}. Needs a restart to apply: {', '.join(keys)}.{extra}", "warn")
         self.btn_restart.show()
 
     # -- slots ------------------------------------------------------------------------
@@ -1266,36 +1249,43 @@ class SettingsWindow(QWidget):
         """The island size slider: shown on the running island as you drag (saved on Save)."""
         auto = self.cb_scale_auto.isChecked()
         self.sl_scale.setEnabled(not auto)
+        self.row_scale.setEnabled(not auto)
         self.lb_scale.setText("auto" if auto else f"{self.sl_scale.value() * 5} %")
         if not self._filling_scale:
             self.island_preview.emit("auto" if auto else self.sl_scale.value() * 5 / 100)
+
     def _hotkey_changed(self, *_):
         if self._recorder.active:
             return
         text = self.ed_hotkey.text().strip()
+        kit.set_error(self.ed_hotkey, False)
+        kit.set_tone(self.lb_hotkey, "")
+        self.btn_hk_clear.setVisible(bool(text))
         if not text:
-            self.lb_hotkey.setText("No push-to-talk hotkey.")
-            self.lb_hotkey.setStyleSheet("color: #9A9A9A;")
+            self.lb_hotkey.setText("Press it anywhere to talk. Empty: no hotkey.")
             return
         try:
             norm = hotkey.normalize(text)
-            self.lb_hotkey.setText(f"Will be saved as: {norm}")
-            self.lb_hotkey.setStyleSheet("color: #9A9A9A;")
+            self.lb_hotkey.setText("Press it anywhere to talk." if norm == text else f"Will be saved as {norm}.")
         except ValueError as e:
-            self.lb_hotkey.setText(f"Invalid hotkey: {e}")
-            self.lb_hotkey.setStyleSheet("color: #E5646A;")
+            self.lb_hotkey.setText(f"Not a hotkey: {e}")
+            kit.set_tone(self.lb_hotkey, "bad")
+            kit.set_error(self.ed_hotkey, True)
 
     def _record_hotkey(self):
         if self._recorder.active:
             self._recorder.stop(None)
         else:
-            self.lb_hotkey.setText("Press the combination now (Esc cancels).")
-            self.lb_hotkey.setStyleSheet(f"color: {ACCENT};")
+            self.lb_hotkey.setText("Press the combination now. Esc cancels.")
+            kit.set_tone(self.lb_hotkey, "accent")
+            kit.set_error(self.ed_hotkey, False)
             self._recorder.start()
 
     def _perm_changed(self, *_):
         bypass = self._combo_value(self.cmb_perm) == "bypassPermissions"
         self.lb_bypass.setVisible(bypass)
+        self._bypass_row.setVisible(bypass)
+        getattr(self._bypass_row, "_divider", self._bypass_row).setVisible(bypass)
         self.cmb_perm.setToolTip(BYPASS_TIP if bypass else TIPS["tasks.permission_mode"])
 
     def _browse_wake(self):
@@ -1317,6 +1307,7 @@ class SettingsWindow(QWidget):
         else:
             text = f"\"{wake_label(model)}\": {describe_model(model)}"
         self.lb_wake_now.setText(text)
+        kit.set_tone(self.lb_wake_now, "warn" if ("not found" in text or "fallback" in text) else "")
         self.btn_wake_undo.setEnabled(bool(load_history()))
         n = len(list(FALSE_WAKES.glob("*.wav"))) if FALSE_WAKES.is_dir() else 0
         self.lb_false_wakes.setText(
@@ -1332,7 +1323,7 @@ class SettingsWindow(QWidget):
             config.ensure_user_config(self.config_path)
             config.save(new, self.config_path)
         except OSError as e:
-            self._set_status(f"Couldn't write the config file: {e}", "#E5646A")
+            self._set_status(f"Couldn't write the config file: {e}", "bad")
             return f"Couldn't write the config file: {e}"
         changed = config.diff(self._orig, new)
         self._orig = copy.deepcopy(new)
@@ -1340,7 +1331,7 @@ class SettingsWindow(QWidget):
         self.sp_threshold.setValue(float(_get(new, "wake.threshold", 0.5)))
         self.saved.emit(copy.deepcopy(new), list(changed))
         self._wake_status(new)
-        self._set_status(msg, "#6CCB7A")
+        self._set_status(msg, "ok")
         return msg
 
     def _open_wizard(self):
@@ -1392,7 +1383,7 @@ class SettingsWindow(QWidget):
         folder = item.text().strip().strip('"')
         ok = not folder or Path(os.path.expandvars(folder)).is_dir()
         self.tbl.blockSignals(True)
-        item.setForeground(QColor("#EDEDED") if ok else QColor("#E5A04A"))
+        item.setForeground(QColor(th.T["fg"]) if ok else QColor(th.T["warn"]))
         item.setToolTip("" if ok else "This folder doesn't exist.")
         self.tbl.blockSignals(False)
 
@@ -1441,7 +1432,7 @@ class SettingsWindow(QWidget):
             v.Speak("", 3)    # purge anything still playing
             v.Speak("Hi, this is how I'll sound.", 1)
         except Exception as e:
-            self._set_status(f"Couldn't play a test sentence: {e}", "#E5646A")
+            self._set_status(f"Couldn't play a test sentence: {e}", "bad")
 
     def closeEvent(self, e):
         if self._recorder.active:

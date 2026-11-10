@@ -585,6 +585,44 @@ def test_simulator_plays_one_clip_per_followup_window(tmp_path):
     assert a._sim_ready()
 
 
+def test_end_of_turn_judges_from_the_assistant(tmp_path):
+    """The live re-check: instant commands wait out ~0.3-0.8 s of silence they don't
+    need, and 'Start a task in the sandbox project.' + a pause was cut off there."""
+    from heyclaude.intents import IntentEngine
+    a = _assistant(tmp_path)
+    a.cfg.setdefault("listen", {})
+    a.brain.intents = IntentEngine({}, state_dir=None)
+    yes = ["Mute.", "Set the volume to thirty.", "Dark mode.", "next song", "Set a timer for five minutes."]
+    no = ["What's the volume of a sphere?", "Undo that.", "Start a task in sandbox: add a readme.",
+          "What's the weather?", "Tell me a joke."]
+    assert all(a._instant_at_pause(t) for t in yes), [t for t in yes if not a._instant_at_pause(t)]
+    assert not any(a._instant_at_pause(t) for t in no), [t for t in no if a._instant_at_pause(t)]
+    a.cfg["listen"]["instant_end"] = False
+    assert not a._instant_at_pause("Mute.")
+    assert a._task_without_body("Start a task in the sandbox project.")
+    assert a._task_without_body("Start a task in sandbox.")
+    assert not a._task_without_body("Start a task in sandbox: add a readme with setup steps.")
+    assert not a._task_without_body("Mute.")
+
+
+def test_late_filler_counts_from_the_end_of_speech(tmp_path):
+    a = _assistant(tmp_path)
+    fired = []
+    a.mode, a._reply, a._filler = "thinking", [], ""
+    a.speaker.first_audio_t = None
+    a.speaker.feed = lambda t: fired.append((time.perf_counter(), t))
+    a.speaker.flush = lambda: None
+    t0 = time.perf_counter()
+    a._late_filler("Let me check.", 1.0, a.gen, since=t0 - 0.8)        # 0.8 s already gone since speech
+    time.sleep(0.5)
+    assert fired and fired[0][0] - t0 < 0.45, fired
+    fired.clear()
+    a._filler = ""
+    a._late_filler("Let me check.", 1.0, a.gen)                        # no speech end known: the full delay
+    time.sleep(0.4)
+    assert not fired
+
+
 if __name__ == "__main__":
     import tempfile
     n = 0

@@ -321,6 +321,25 @@ def test_end_of_turn_silence_window():
     assert e.needed_ms("What time is it?") == 700
 
 
+def test_end_of_turn_instant_commands_and_bare_task_starts():
+    """A pause transcript that is a parsed instant command ends the turn at once; a task
+    start with no task yet waits the long silence even though Whisper ended it with a stop."""
+    cfg = {"end_silence_ms": 700, "short_silence_ms": 300, "long_silence_ms": 1200, "instant_silence_ms": 0}
+    e = V.EndOfTurn(cfg)
+    asked = []
+    e.instant = lambda t: asked.append(t) or t.lower().startswith(("mute", "volume 30"))
+    e.more_expected = lambda t: t.lower().startswith("start a task in the scratch project")
+    assert e.needed_ms("volume 30") == 0                                           # with or without a stop
+    assert e.needed_ms("Mute.") == 0 and e.needed_ms("Mute.") == 0
+    assert asked.count("Mute.") == 1                                                # judged once per transcript
+    assert e.needed_ms("Start a task in the scratch project.") == 1200
+    assert e.needed_ms("What time is it?") == 300                                   # not instant here: as before
+    assert e.needed_ms("Mute the") == 1200                                          # trailing off still waits
+    e.instant = lambda t: 1 / 0                                                    # a broken judge: as before
+    e._memo = None
+    assert e.needed_ms("Dark mode.") == 300
+
+
 class ScriptVad:
     """frames(block) from a script of 'v' (voiced) / '.' per 80 ms block."""
     frame_ms = 20.0

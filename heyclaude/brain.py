@@ -599,6 +599,18 @@ def weather_mcp_servers(cfg: dict) -> dict:
             **agent_servers(cfg)}
 
 
+def info_mcp_servers(cfg: dict) -> dict:
+    """mcpServers entry for hey-claude's own read-only data tools (heyclaude/mcp_info; M5b widget packs)."""
+    import json
+    from .config import ROOT
+    i = cfg.get("info") or {}
+    if not i.get("enabled", True):
+        return {}
+    return {"info": {"command": _console_python(), "args": ["-m", "heyclaude.mcp_info"],
+                     "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
+                             "HEYCLAUDE_INFO_CONFIG": json.dumps(i, default=str)}}}
+
+
 WEATHER_TOOL = "mcp__weather__get_weather"
 AGENT_WEATHER_PROMPT = (
     " For any weather question call mcp__weather__get_weather (empty location = the user's home place); "
@@ -671,9 +683,12 @@ class Agent:
         day = self.day = session_name(self.cfg.get("conversation"))
         win = windows_mcp_servers(a)
         win.update(weather_mcp_servers(self.cfg))
+        win.update(info_mcp_servers(self.cfg))
+        from . import mcp_info
         prompt = (AGENT_PROMPT + (AGENT_WINDOWS_PROMPT if "windows" in win else "")
                   + (AGENT_WEATHER_PROMPT if "weather" in win else "")
-                  + (AGENT_WEATHER_MCP_PROMPT if "weather-mcp" in win else "") + widget_prompt(self.cfg))
+                  + (AGENT_WEATHER_MCP_PROMPT if "weather-mcp" in win else "")
+                  + (mcp_info.prompt() if "info" in win else "") + widget_prompt(self.cfg))
         args = ["--model", a["model"], "--output-format", "stream-json", "--verbose",
                 "--permission-mode", a["permission_mode"], "--permission-prompts", "none",
                 "--append-system-prompt", prompt, "--name", day or "hey-claude assistant"]
@@ -686,6 +701,8 @@ class Agent:
             if "weather-mcp" in win:                      # M5b: exactly weather.mcp.tools (read-only, keyless)
                 from .weather_mcp import agent_tools
                 allowed += [t for t in agent_tools(self.cfg) if t not in allowed]
+            if "info" in win:                             # M5b: hey-claude's own tools, all read-only
+                allowed += [t for t in mcp_info.tool_names() if t not in allowed]
             kept, dropped = gate_allowed_tools(allowed)
             if dropped:
                 print(f"[agent] not allowed without approvals (M7): {', '.join(dropped)}")

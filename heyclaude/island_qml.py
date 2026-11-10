@@ -803,11 +803,15 @@ class QmlIsland(QObject):
                 lw.update_task(r)
 
     def set_stt(self, label: str):
+        from .widgets import APP_STATE
+        APP_STATE["stt"] = label
         old = self.stt_label
         self.stt_label = label
         self._send("setBadge", [stt_short(label), badge_dir(old, label)])
 
     def set_voice(self, label: str):
+        from .widgets import APP_STATE
+        APP_STATE["voice"] = label
         self.voice_label = label
 
     def set_wake_label(self, label: str):

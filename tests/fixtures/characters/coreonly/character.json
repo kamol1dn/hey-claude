@@ -1,0 +1,14 @@
+{
+  "id": "coreonly",
+  "name": "Core only",
+  "kind": "test pack",
+  "line": "Implements just the five core states; everything else must arrive through fallbacks.",
+  "author": "hey-claude tests",
+  "licence": "MIT",
+  "registry": "1.0",
+  "implements": ["idle", "off", "listening", "thinking", "talking"],
+  "antics": [
+    {"id": "spin", "name": "Spins once", "duration": 2, "weight": 1, "cooldown": 60, "min_idle": 0,
+     "where": ["pill", "desktop"], "props": [{"id": "ring", "box": [-55, -55, 110, 110]}], "exit": "stops dead"}
+  ]
+}

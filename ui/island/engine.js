@@ -360,6 +360,7 @@ function resize(pre) {
         case 'speaking': w = S.speakW; break;
         case 'error': w = clampW(tw(S.errText, true) + 56); break;
     }
+    if (CHPAD && st !== 'input') w += CHPAD;      // a character (M6) sits where the ember was: the labels move over
     if (S.turn && ['woke', 'listening', 'holding', 'followup', 'thinking', 'speaking', 'ready', 'error'].indexOf(st) >= 0) w = turnW();
     var h = head + (st === 'speaking' && S.lines > 1 && !S.turn ? 20 : 0);
     if (S.extraW) w = Math.max(w, S.extraW);
@@ -867,8 +868,8 @@ function render() {
     var ex = EX.x + trem + shake, er = Math.max(0.5, ER.x * R.rScale + R.rAdd + K.r);
     out.ex = ex; out.er = er; out.trem = trem;
     var ec = EC.c();
-    out.emberCol = ec; out.emberA = R.alpha;
-    out.core = CORE.x; out.coreCol = OV.done ? C.okCore : (OV.wake ? C.white : C.hot);
+    out.emberCol = ec; out.emberA = CHAR ? 0 : R.alpha;
+    out.core = CHAR ? 0 : CORE.x; out.chpad = CHPAD; out.character = CHAR; out.coreCol = OV.done ? C.okCore : (OV.wake ? C.white : C.hot);
     out.glowA = Math.min(0.5, GA.x + K.g); out.glowR = Math.max(4, GR.x); out.glowCol = GC.c();
     out.rimCol = RIMC.c(); out.rimA = RIMA.x;
     // followup wash (drains into the ember)
@@ -983,6 +984,8 @@ function render() {
     out.listGeom = S.listGeom;
     out.state = S.state;
     out.motion = MOTION;
+    out.mic = micOpen() && NOW - AU.micT < 400 ? AU.micRaw : 0;        // the character's inputs (M6)
+    out.tts = S.state === 'speaking' && NOW - AU.ttsT < 300 ? AU.ttsRaw : 0;
     out.drop = S.drop ? 1 : 0;
     return out;
 }
@@ -1223,6 +1226,10 @@ function setPaused(untilMs) {
     NOW = env.now();
     if (S.state === 'paused') { S.pauseEnd = untilMs; S.pauseDur = Math.max(1000, untilMs - S.pauseT0); wake(); }
 }
+// M6: a character pack replaces the ember (it draws itself in ui/CharacterHost.qml); the
+// labels move right by `pad` to make room for its box.
+var CHAR = false, CHPAD = 0;
+function setCharacter(on, pad) { CHAR = !!on; CHPAD = on ? (pad || 0) : 0; resize(); wake(); }
 function setHideIdle(on) { S.hideIdle = !!on; wake(); }
 function setPeek(on) { S.peek = !!on; wake(); }
 function setHover(on) { NOW = env.now(); if (S.hover === !!on) return; S.hover = !!on; if (on) S.hoverSince = NOW; S.lastActivity = NOW; wake(); }

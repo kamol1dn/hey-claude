@@ -431,3 +431,10 @@ island:
   fetch_favicons: false   # fetch a favicon once for services without a bundled icon (state/icons/)
   service_icons: {}       # per-server override, e.g. {google_calendar: C:/icons/cal.png}
   usage_pill: true        # plan usage (5 h / week) in the hover list, as Claude Code reports it
+  # M6: a character in the island instead of the ember (characters/README.md). Settings > Character.
+  character:
+    pack: ember           # ember (the theme's own), echo, cinder, wren, tycho, hum, or a pack in state/characters/
+    where: island         # island, desktop (a companion above the taskbar), or both
+    desktop_size: 120     # the companion's size in px
+    antics: normal        # idle antics: off, rare (~10 min apart), normal (~4 min), lively (~1.5 min)
+    antics_off: []        # antic ids to skip, e.g. [fishing]

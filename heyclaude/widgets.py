@@ -127,6 +127,28 @@ def validate(value, schema: dict, path: str = "data") -> list[str]:
     return errs
 
 
+def _fit(value, schema: dict, path: str = "data", notes: list | None = None):
+    """Trim what only breaks a size limit instead of losing the card: lists past maxItems
+    keep their first items (a busy day's agenda shows its first six events), strings past
+    maxLength are cut with an ellipsis. Everything else is left for validate()."""
+    if isinstance(value, dict) and "properties" in schema:
+        return {k: _fit(v, schema["properties"][k], f"{path}.{k}", notes) if k in schema["properties"] else v
+                for k, v in value.items()}
+    if isinstance(value, list):
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            if notes is not None:
+                notes.append(f"{path}: kept {schema['maxItems']} of {len(value)}")
+            value = value[:schema["maxItems"]]
+        if "items" in schema:
+            return [_fit(v, schema["items"], f"{path}[{i}]", notes) for i, v in enumerate(value)]
+        return value
+    if isinstance(value, str) and "maxLength" in schema and len(value) > schema["maxLength"] \
+            and "pattern" not in schema and "enum" not in schema:
+        n = schema["maxLength"]
+        return value[:max(0, n - 1)].rstrip() + "…" if n > 1 else value[:n]
+    return value
+
+
 def _strip(value, schema: dict):
     """Keep only declared properties (the island never sees anything else)."""
     if isinstance(value, dict) and "properties" in schema:
@@ -156,6 +178,10 @@ def normalise(spec) -> dict | None:
     out["ttl_s"] = max(3.0, min(3600.0, ttl))
     if name not in reg or not isinstance(data, dict):
         return _fallback(out, f"unknown widget {name!r}" if name not in reg else "no data")
+    notes: list = []
+    data = _fit(data, reg[name]["schema"], notes=notes)
+    if notes:
+        print(f"[widget] {name!r} trimmed to fit ({'; '.join(notes[:3])})")
     errs = validate(data, reg[name]["schema"])
     if errs:
         return _fallback(out, "; ".join(errs[:3]))

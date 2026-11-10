@@ -116,6 +116,17 @@ def test_every_widget_example_validates_and_the_prompt_lists_it():
                               "telegram_chats", "telegram_message", "telegram_draft"}
 
 
+def test_a_busy_agenda_keeps_its_card():
+    """Nine events today: the card shows the first six (and long titles are cut), not an empty text card."""
+    ev = [{"start": f"{8 + i:02d}:00", "title": f"Class {i}" + ("x" * 100 if i == 0 else "")} for i in range(9)]
+    w = W.normalise({"widget": "calendar_list", "data": {"title": "Today's agenda", "events": ev}, "text": "Today's agenda"})
+    assert w["widget"] == "calendar_list", w
+    assert len(w["data"]["events"]) == 6 and w["data"]["events"][5]["title"] == "Class 5"
+    assert len(w["data"]["events"][0]["title"]) == 80 and w["data"]["events"][0]["title"].endswith("…")
+    # what isn't a size problem still falls back
+    assert W.normalise({"widget": "calendar_list", "data": {"events": [{"title": "no start"}]}, "text": "x"})["widget"] == "text"
+
+
 def test_widget_filter_takes_the_line_out_wherever_the_stream_splits():
     spec = {"widget": "weather", "data": {"location": "Tashkent", "temp": 21}}
     text = "It's 21 degrees and sunny.\nWIDGET " + json.dumps(spec) + "\n"

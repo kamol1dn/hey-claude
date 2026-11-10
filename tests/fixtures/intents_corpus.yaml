@@ -405,8 +405,11 @@ context:
   - [["Dark mode.", theme.set, {mode: dark}], ["The opposite.", theme.set, {mode: light}]]
   - [["Mute.", volume.mute, {}], ["The other way.", volume.unmute, {}]]
   - [["Light mode.", theme.set, {mode: light}], ["Turn it to dark.", theme.set, {mode: dark}]]
+  - [["Switch to light mode.", theme.set, {mode: light}], ["Know the other way.", theme.set, {mode: dark}]]   # live Whisper slip
 
 near_miss:
+  - "I know the other way home."
+  - "No, the other way round is better for the essay."
   # the brief's examples
   - "What's the volume of a sphere?"
   - "The music was too dark."

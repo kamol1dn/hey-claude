@@ -609,17 +609,15 @@ class Assistant:
         m = eng.match(text)
         return m is not None and m.source in ("grammar", "context", "taught")
 
-    def _task_without_body(self, text: str) -> bool:
-        """'Start a task in the scratch project.' and a pause: Whisper ends it with a full
-        stop, but the task itself hasn't been said yet. Wait the long silence for it
-        (the live re-check heard the request split here and answered over the rest)."""
-        from .brain import local_route, norm
+    def _task_start_at_pause(self, text: str) -> bool:
+        """A task start at a pause: wait the long silence for the rest. People dictate a
+        task with pauses ("Start a task in the scratch project. Create a file called
+        haiku. ... about autumn."), Whisper ends each piece with a full stop, and the live
+        re-check heard the request split there and answered over the rest. A task runs for
+        minutes, so starting it ~0.9 s later costs nothing."""
+        from .brain import local_route
         r = local_route(text, self.brain.projects)
-        if not r or r[0] != "task":
-            return False
-        body = norm(re.sub(r"\b(?:project|folder|repo|repository)\b", " ", r[2] or "", flags=re.I))
-        proj = norm(r[1] or "")
-        return not body or body == proj or len(body.split()) <= 1
+        return bool(r) and r[0] == "task"
 
     def _instant_ack(self) -> str:
         return str((self.cfg.get("instant") or {}).get("ack") or "speak").lower()
@@ -873,7 +871,7 @@ class Assistant:
                                          partials=self._partials_on()) if self.stt is not None else None
                 if self.turn is not None:
                     self.turn.eot.instant = self._instant_at_pause
-                    self.turn.eot.more_expected = self._task_without_body
+                    self.turn.eot.more_expected = self._task_start_at_pause
                 audio, t_end = record_utterance(blocks, lcfg, on_level=self.ui.level.emit,
                                                 stop_event=stop, hold=hold.state if hold else None,
                                                 vad=self.vad, listener=self.turn,

@@ -49,6 +49,8 @@ _SLIPS = [
     (re.compile(r"\bspot\s?ify\b"), "spotify"), (re.compile(r"\bspotty\s?fi\b"), "spotify"),
     (re.compile(r"\btimes\s+(?=for\s)"), "timer "),
     (re.compile(r"\bmutes\b(?=\s*$)"), "mute"),
+    # "Now the other way." came out of Whisper live as "Know the other way." (twice)
+    (re.compile(r"^(?:know|no)\s+(?=(?:the\s+)?other\s+way\b)"), "now "),
 ]
 
 # Keywords a slightly misheard word is pulled to (only words of 5+ letters, close spellings).

@@ -599,10 +599,10 @@ def test_end_of_turn_judges_from_the_assistant(tmp_path):
     assert not any(a._instant_at_pause(t) for t in no), [t for t in no if a._instant_at_pause(t)]
     a.cfg["listen"]["instant_end"] = False
     assert not a._instant_at_pause("Mute.")
-    assert a._task_without_body("Start a task in the sandbox project.")
-    assert a._task_without_body("Start a task in sandbox.")
-    assert not a._task_without_body("Start a task in sandbox: add a readme with setup steps.")
-    assert not a._task_without_body("Mute.")
+    assert a._task_start_at_pause("Start a task in the sandbox project.")
+    assert a._task_start_at_pause("Start a task in sandbox.")
+    assert a._task_start_at_pause("Start a task in sandbox: add a readme with setup steps.")    # any task start
+    assert not a._task_start_at_pause("Mute.")
 
 
 def test_late_filler_counts_from_the_end_of_speech(tmp_path):

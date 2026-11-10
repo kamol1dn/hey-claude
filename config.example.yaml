@@ -49,8 +49,9 @@ listen:
   pause_probe_ms: 160     # silence before the pause is transcribed
   # An instant command (M10) the grammar fully parsed at that pause ("mute",
   # "volume 30") ends the turn as soon as its transcript is in, after
-  # instant_silence_ms, instead of waiting out the silence above. "Start a task
-  # in <project>." with no task yet waits long_silence_ms for the rest.
+  # instant_silence_ms, instead of waiting out the silence above. A task start
+  # ("start a task in <project>: ...") always waits long_silence_ms: people
+  # dictate tasks with pauses.
   instant_end: true
   instant_silence_ms: 0
   # Live transcript on the island while you talk: auto = when whisper is on the GPU.

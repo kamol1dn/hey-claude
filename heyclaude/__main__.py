@@ -37,6 +37,8 @@ def main(argv=None, harness=None):
     ap.add_argument("--no-ui", action="store_true", help="no island window")
     ap.add_argument("--no-tray", action="store_true", help="no tray icon")
     ap.add_argument("--muted", action="store_true", help="start with listening off (mic closed)")
+    ap.add_argument("--speech", choices=("local", "windows", "cloud", "auto"),
+                    help="speech backend for this run (overrides speech.backend)")
     ap.add_argument("--quit", action="store_true", help="ask the running hey-claude to quit, then exit")
     ap.add_argument("--record-wake-samples", nargs="?", type=int, const=40, metavar="N",
                     help="record N (default 40) clips of you saying \"hey claude\" into state/wake_samples")
@@ -55,6 +57,8 @@ def main(argv=None, harness=None):
         harness.configure(cfg)
     if args.muted:
         cfg["app"]["listening"] = False
+    if args.speech:
+        cfg.setdefault("speech", {}).update(backend=args.speech, stt_backend=None, tts_backend=None)
     # Simulated/typed runs are tests: they don't take the single-instance lock,
     # the global hotkey or the Startup shortcut away from a running copy.
     interactive = not (args.simulate or args.text or harness is not None)
@@ -305,6 +309,22 @@ def main(argv=None, harness=None):
         tray.quit_requested.connect(app.quit)
         bridge.listening.connect(lambda on, until: tray.set_listening(on, until or None))
         tray.set_listening(asst.listening.is_set())
+
+        # M4c: the speech switch and "Free memory now", no restart
+        def speech_chosen(name):
+            asst.set_speech_backend(name)
+            if interactive and not args.speech:
+                try:
+                    config.save_keys({"speech.backend": name, "speech.stt_backend": None,
+                                      "speech.tts_backend": None}, args.config)
+                except Exception as e:
+                    print(f"[speech] couldn't save the choice: {e}")
+        tray.speech_backend_chosen.connect(
+            lambda n: threading.Thread(target=speech_chosen, args=(n,), daemon=True, name="speech-switch").start())
+        tray.free_memory_requested.connect(asst.free_speech_memory)
+        bridge.stt.connect(lambda label: tray.set_speech(
+            str(cfg.get("speech", {}).get("stt_backend") or cfg.get("speech", {}).get("backend") or "local"), label))
+        tray.set_speech(str(cfg.get("speech", {}).get("backend") or "local"))
 
     # The hotkey opens the island ready to talk or type (toggle); without an island, it just listens.
     def talk_key():

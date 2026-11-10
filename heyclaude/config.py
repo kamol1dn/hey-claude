@@ -41,6 +41,10 @@ LIVE = (
     "instant.",                      # M10: read on every request (the classifier's threshold too)
     "hooks.approvals", "hooks.approval_timeout_s", "hooks.voice_approvals", "hooks.done_flash",  # M7: per request
     "app.",                          # hotkey re-registered, autostart toggled, guard re-read
+    "speech.",                       # M4c: backend switch applied at once; the rest read per request
+    "dictate.",                      # M4d: the key is re-hooked; the rest read per dictation
+    "dictionary.",                   # M4d: Whisper's prompt, replacements and snippets, per request
+    "stt.languages",
     "weather.local_route", "weather.mcp.timeout_s", "weather.mcp.fallback", "weather.mcp.cache_s",  # per question
 )
 
@@ -122,6 +126,27 @@ def save(cfg: dict, path: str | os.PathLike | None = None) -> Path:
     user = user_path(path)
     data = copy.deepcopy(cfg)
     data["projects"] = _norm_projects(data.get("projects"))
+    text = HEADER + yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    tmp = user.with_name(user.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, user)
+    return user
+
+
+def save_keys(updates: dict, path: str | os.PathLike | None = None) -> Path:
+    """Set a few dotted keys in config.yaml and leave everything else in it as
+    it is (the tray's speech switch; run-time overrides like --muted aren't saved)."""
+    user = ensure_user_config(path)
+    with open(user, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    for key, value in updates.items():
+        *parents, leaf = key.split(".")
+        d = data
+        for k in parents:
+            if not isinstance(d.get(k), dict):
+                d[k] = {}
+            d = d[k]
+        d[leaf] = value
     text = HEADER + yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)
     tmp = user.with_name(user.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")

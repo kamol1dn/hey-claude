@@ -353,6 +353,37 @@ class VoiceEngine:
             self.sapi = self._sapi_factory()
         return self.sapi
 
+    # -- lean mode (M4c) ---------------------------------------------------------------
+    unloaded = False
+
+    @property
+    def loaded(self) -> bool:
+        return self.gpu is not None or self.cpu is not None
+
+    def unload(self):
+        """Drop the Kokoro sessions (VRAM/RAM back). SAPI and piper stay: they hold no model."""
+        with self._lock:
+            if self.engine != "kokoro":
+                return
+            if self.current is self.gpu or self.current is self.cpu:
+                self.current = None
+            self.gpu = self.cpu = None
+            self.unloaded = True
+        import gc
+        gc.collect()
+        print("[tts] kokoro unloaded (lean)")
+
+    def reload(self):
+        """Load Kokoro again after unload() (blocking): the GPU unless it's off or busy."""
+        with self._lock:
+            if not self.unloaded:
+                return
+            self.unloaded = False
+        if self.want == "gpu" and not self.gpu_failed:
+            self._try_gpu()
+        if self.gpu is None:
+            self._ensure_cpu()
+
     # -- the per-reply choice ------------------------------------------------------------
     def _premiere_on(self) -> bool:
         if not self.stt_cfg.get("yield_to_premiere") or self._premiere is None:
@@ -369,6 +400,8 @@ class VoiceEngine:
     def pick(self):
         """Choose the engine for the next reply from the current load. Returns it."""
         from .stt import choose
+        if self.unloaded:
+            self.reload()
         with self._lock:
             before = self.label
             if self.engine == "sapi" or (self.engine == "piper" and self.piper is None) or self.kokoro_failed:
@@ -482,6 +515,12 @@ class Player:
         self.idle_close_s, self.device = idle_close_s, device
         self._chunks: list[list] = []            # [samples, pos, far, far_pos, rate]
         self._lock = threading.Lock()
+        # Opening, replacing and closing the stream happen under this one lock. begin()
+        # opens it on its own thread while the synth thread's play() may open it too: with
+        # M10's cached acks both land within milliseconds, and two OutputStreams were
+        # built for one player; the overwritten one kept PortAudio calling into a stream
+        # Python then freed (the live re-check's native crashes right after an ack).
+        self._open_lock = threading.RLock()
         self._stream = None
         self._rate = None
         self._idle_since = time.monotonic()
@@ -502,17 +541,18 @@ class Player:
 
     def _open(self, rate):
         import sounddevice as sd
-        with self._lock:
-            if self._stream is not None and self._rate == rate:
+        with self._open_lock:
+            with self._lock:
+                if self._stream is not None and self._rate == rate:
+                    self._idle_since = time.monotonic()
+                    return
+            self.close()
+            s = sd.OutputStream(samplerate=rate, channels=1, dtype="float32", callback=self._cb,
+                                latency="low", device=self.device)
+            s.start()
+            with self._lock:
+                self._stream, self._rate = s, rate
                 self._idle_since = time.monotonic()
-                return
-        self.close()
-        s = sd.OutputStream(samplerate=rate, channels=1, dtype="float32", callback=self._cb,
-                            latency="low", device=self.device)
-        s.start()
-        with self._lock:
-            self._stream, self._rate = s, rate
-            self._idle_since = time.monotonic()
 
     def play(self, samples: np.ndarray, rate: int, tag=None):
         """Queue audio. `tag` (the sentence) is handed to on_chunk when it starts playing."""
@@ -594,21 +634,26 @@ class Player:
     def _close_when_idle(self):
         while True:
             time.sleep(0.5)
-            with self._lock:
-                idle = self._stream is not None and not self._chunks and \
-                    time.monotonic() - self._idle_since > self.idle_close_s
-            if idle:
-                self.close()
+            if self._idle():
+                with self._open_lock:
+                    if self._idle():                # still idle: nothing was queued meanwhile
+                        self.close()
+
+    def _idle(self) -> bool:
+        with self._lock:
+            return self._stream is not None and not self._chunks and \
+                time.monotonic() - self._idle_since > self.idle_close_s
 
     def close(self):
-        with self._lock:
-            s, self._stream, self._rate = self._stream, None, None
-        if s is not None:
-            try:
-                s.stop()
-                s.close()
-            except Exception:
-                pass
+        with self._open_lock:
+            with self._lock:
+                s, self._stream, self._rate = self._stream, None, None
+            if s is not None:
+                try:
+                    s.stop()
+                    s.close()
+                except Exception:
+                    pass
 
 
 class Speaker:

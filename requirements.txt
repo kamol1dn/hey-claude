@@ -26,6 +26,10 @@ winrt-Windows.Foundation.Collections>=2.0
 winrt-Windows.Media.Control>=2.0
 winrt-Windows.Storage.Streams>=2.0
 winrt-Windows.Devices.Radios>=2.0
+# M4c: speech.backend: windows (WinRT speech recognition and voices; no models)
+winrt-Windows.Media.SpeechRecognition>=2.0
+winrt-Windows.Media.SpeechSynthesis>=2.0
+winrt-Windows.Globalization>=2.0
 # Kokoro on the GPU needs onnxruntime-gpu. It installs the same `onnxruntime`
 # module as the CPU package (which openWakeWord and kokoro-onnx pull in), so
 # install it after this file, and again after any later `pip install -r`:

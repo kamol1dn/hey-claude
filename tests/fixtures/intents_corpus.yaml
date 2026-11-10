@@ -405,8 +405,11 @@ context:
   - [["Dark mode.", theme.set, {mode: dark}], ["The opposite.", theme.set, {mode: light}]]
   - [["Mute.", volume.mute, {}], ["The other way.", volume.unmute, {}]]
   - [["Light mode.", theme.set, {mode: light}], ["Turn it to dark.", theme.set, {mode: dark}]]
+  - [["Switch to light mode.", theme.set, {mode: light}], ["Know the other way.", theme.set, {mode: dark}]]   # live Whisper slip
 
 near_miss:
+  - "I know the other way home."
+  - "No, the other way round is better for the essay."
   # the brief's examples
   - "What's the volume of a sphere?"
   - "The music was too dark."
@@ -575,3 +578,315 @@ near_miss:
   - "Set an alarm for 7 am."
   - "Go back to the last question."
   - "The volume of traffic is high today."
+
+# -- Russian and Uzbek ---------------------------------------------------------------
+# Only reached when stt.language lets Whisper write them (null = auto-detect, or
+# ru / uz); with the default `en` Whisper turns them into English. Russian comes
+# out in Cyrillic; Uzbek in Latin (any apostrophe: ' ʻ ‘ ’, or none) or Cyrillic,
+# slips included ("ko'shik", "minut"). The acks stay English (Kokoro has no
+# Russian or Uzbek voice). The classifier is English-only: it never decides these.
+corpus_ru:
+  # volume: set
+  - ["Громкость 30.", volume.set, {level: 30}]
+  - ["Громкость на 30%.", volume.set, {level: 30}]
+  - ["Поставь громкость на тридцать.", volume.set, {level: 30}]
+  - ["Сделай громкость 50.", volume.set, {level: 50}]
+  - ["Установи громкость на пятьдесят процентов.", volume.set, {level: 50}]
+  - ["Звук на 40.", volume.set, {level: 40}]
+  - ["Громкость двадцать пять.", volume.set, {level: 25}]
+  - ["Убавь громкость до 20.", volume.set, {level: 20}]
+  - ["Прибавь звук до восьмидесяти.", volume.set, {level: 80}]
+  - ["Громкость на максимум.", volume.set, {level: 100}]
+  - ["Сделай максимальную громкость.", volume.set, {level: 100}]
+  - ["Громкость на половину.", volume.set, {level: 50}]
+  - ["Поставь звук на 10 процентов.", volume.set, {level: 10}]
+  - ["Громкость 70, пожалуйста.", volume.set, {level: 70}]
+  - ["Клод, громкость 60.", volume.set, {level: 60}]
+  - ["Можешь поставить громкость на сорок?", volume.set, {level: 40}]
+  - ["ГРОМКОСТЬ 35 %", volume.set, {level: 35}]
+  # volume: up / down
+  - ["Громче.", volume.step, {delta: 10}]
+  - ["Тише.", volume.step, {delta: -10}]
+  - ["Сделай погромче.", volume.step, {delta: 10}]
+  - ["Сделай потише, пожалуйста.", volume.step, {delta: -10}]
+  - ["Чуть громче.", volume.step, {delta: 5}]
+  - ["Немного тише.", volume.step, {delta: -5}]
+  - ["Чуть-чуть потише.", volume.step, {delta: -5}]
+  - ["Намного громче.", volume.step, {delta: 25}]
+  - ["Прибавь звук.", volume.step, {delta: 10}]
+  - ["Убавь громкость.", volume.step, {delta: -10}]
+  - ["Убавь звук на 20.", volume.step, {delta: -20}]
+  - ["Увеличь громкость на десять.", volume.step, {delta: 10}]
+  - ["Уменьши громкость немного.", volume.step, {delta: -5}]
+  - ["Громкость выше.", volume.step, {delta: 10}]
+  - ["Громкость ниже.", volume.step, {delta: -10}]
+  - ["Слишком громко.", volume.step, {delta: -10}]
+  - ["Музыку погромче.", volume.step, {delta: 10}]
+  # mute / unmute
+  - ["Выключи звук.", volume.mute, {}]
+  - ["Отключи звук.", volume.mute, {}]
+  - ["Без звука.", volume.mute, {}]
+  - ["Убери звук.", volume.mute, {}]
+  - ["Звук выключи.", volume.mute, {}]
+  - ["Включи звук.", volume.unmute, {}]
+  - ["Верни звук.", volume.unmute, {}]
+  - ["Включи звук обратно.", volume.unmute, {}]
+  # brightness
+  - ["Яркость 70.", brightness.set, {level: 70}]
+  - ["Яркость на 50 процентов.", brightness.set, {level: 50}]
+  - ["Поставь яркость на тридцать.", brightness.set, {level: 30}]
+  - ["Яркость на максимум.", brightness.set, {level: 100}]
+  - ["Прибавь яркость.", brightness.step, {delta: 10}]
+  - ["Убавь яркость.", brightness.step, {delta: -10}]
+  - ["Уменьши яркость на 20.", brightness.step, {delta: -20}]
+  - ["Сделай ярче.", brightness.step, {delta: 10}]
+  - ["Сделай экран темнее.", brightness.step, {delta: -10}]
+  - ["Яркость выше.", brightness.step, {delta: 10}]
+  - ["Чуть ярче.", brightness.step, {delta: 5}]
+  - ["Увеличь яркость экрана.", brightness.step, {delta: 10}]
+  # dark / light mode
+  - ["Тёмная тема.", theme.set, {mode: dark}]
+  - ["Включи тёмную тему.", theme.set, {mode: dark}]
+  - ["Включи темный режим.", theme.set, {mode: dark}]
+  - ["Переключи на светлую тему.", theme.set, {mode: light}]
+  - ["Светлая тема, пожалуйста.", theme.set, {mode: light}]
+  - ["Выключи тёмную тему.", theme.set, {mode: light}]
+  - ["Смени тему на тёмную.", theme.set, {mode: dark}]
+  # media
+  - ["Следующая песня.", media.next, {}]
+  - ["Следующий трек.", media.next, {}]
+  - ["Включи следующую песню.", media.next, {}]
+  - ["Переключи трек.", media.next, {}]
+  - ["Пропусти эту песню.", media.next, {}]
+  - ["Предыдущая песня.", media.previous, {}]
+  - ["Включи предыдущий трек.", media.previous, {}]
+  - ["Верни прошлую песню.", media.previous, {}]
+  - ["Пауза.", media.pause, {}]
+  - ["Поставь музыку на паузу.", media.pause, {}]
+  - ["Останови музыку.", media.pause, {}]
+  - ["Продолжи воспроизведение.", media.play, {}]
+  - ["Включи музыку.", media.play, {}]
+  - ["Сними с паузы.", media.play, {}]
+  - ["Играй.", media.play, {}]
+  # timers
+  - ["Таймер на пять минут.", timer.set, {seconds: 300}]
+  - ["Поставь таймер на 10 минут.", timer.set, {seconds: 600}]
+  - ["Засеки 30 секунд.", timer.set, {seconds: 30}]
+  - ["Поставь таймер на полчаса.", timer.set, {seconds: 1800}]
+  - ["Таймер на одну минуту.", timer.set, {seconds: 60}]
+  - ["Установи таймер на две минуты.", timer.set, {seconds: 120}]
+  - ["Засеки пять минут.", timer.set, {seconds: 300}]
+  - ["Таймер на 1 час.", timer.set, {seconds: 3600}]
+  - ["Поставь таймер на полтора часа.", timer.set, {seconds: 5400}]
+  - ["Отмени таймер.", timer.cancel, {}]
+  - ["Выключи таймер.", timer.cancel, {}]
+  # the clock
+  - ["Который час?", clock.time, {}]
+  - ["Сколько времени?", clock.time, {}]
+  - ["Сколько сейчас времени?", clock.time, {}]
+  - ["Скажи, который час.", clock.time, {}]
+  - ["Какое сегодня число?", clock.date, {}]
+  # apps, lock
+  - ["Открой Spotify.", app.open, {app: Spotify}]
+  - ["Открой спотифай.", app.open, {app: Spotify}]
+  - ["Запусти калькулятор.", app.open, {app: Calculator}]
+  - ["Открой блокнот.", app.open, {app: Notepad}]
+  - ["Открой хром.", app.open, {app: Google Chrome}]
+  - ["Запусти телеграм.", app.open, {app: Telegram Desktop}]
+  - ["Открой настройки.", app.open, {app: Settings}]
+  - ["Заблокируй компьютер.", screen.lock, {}]
+  - ["Заблокируй экран.", screen.lock, {}]
+
+corpus_uz:
+  # volume: set
+  - ["Ovozni 30 ga qo'y.", volume.set, {level: 30}]
+  - ["Ovozni o'ttizga qo'ying.", volume.set, {level: 30}]
+  - ["Ovozni oʻttiz foizga qoʻy.", volume.set, {level: 30}]
+  - ["Ovoz 50.", volume.set, {level: 50}]
+  - ["Ovozni ellik foizga qo'y.", volume.set, {level: 50}]
+  - ["Ovozni 40 qil.", volume.set, {level: 40}]
+  - ["Ovoz balandligini 70 ga qo'ying.", volume.set, {level: 70}]
+  - ["Ovozni yigirma besh foizga qo'y.", volume.set, {level: 25}]
+  - ["Ovozni 20 gacha pasaytir.", volume.set, {level: 20}]
+  - ["Ovozni maksimal qil.", volume.set, {level: 100}]
+  - ["Ovozni o‘n foizga qo‘y.", volume.set, {level: 10}]
+  - ["Ovozni ottiz foiz qil.", volume.set, {level: 30}]
+  - ["Овозни ўттиз фоизга қўй.", volume.set, {level: 30}]
+  - ["Овоз эллик.", volume.set, {level: 50}]
+  # volume: up / down
+  - ["Ovozni oshir.", volume.step, {delta: 10}]
+  - ["Ovozni ko'tar.", volume.step, {delta: 10}]
+  - ["Ovozni pasaytir.", volume.step, {delta: -10}]
+  - ["Ovozni kamaytir.", volume.step, {delta: -10}]
+  - ["Ovozni biroz oshir.", volume.step, {delta: 5}]
+  - ["Ovozni sal pasaytiring.", volume.step, {delta: -5}]
+  - ["Ovozni 10 ga oshir.", volume.step, {delta: 10}]
+  - ["Ovozni 20 ga kamaytir.", volume.step, {delta: -20}]
+  - ["Ovozni baland qil.", volume.step, {delta: 10}]
+  - ["Ovozni balandroq qiling.", volume.step, {delta: 10}]
+  - ["Balandroq.", volume.step, {delta: 10}]
+  - ["Pastroq.", volume.step, {delta: -10}]
+  - ["Ovoz juda baland.", volume.step, {delta: -10}]
+  - ["Ovozni ancha oshir.", volume.step, {delta: 25}]
+  - ["Овозни камайтир.", volume.step, {delta: -10}]
+  # mute / unmute
+  - ["Ovozni o'chir.", volume.mute, {}]
+  - ["Ovozni o‘chiring.", volume.mute, {}]
+  - ["Ovozsiz rejim.", volume.mute, {}]
+  - ["Овозни ўчир.", volume.mute, {}]
+  - ["Ovozni yoq.", volume.unmute, {}]
+  - ["Ovozni yoqing.", volume.unmute, {}]
+  - ["Ovozni qaytar.", volume.unmute, {}]
+  # brightness
+  - ["Yorqinlikni 70 ga qo'y.", brightness.set, {level: 70}]
+  - ["Ekran yorqinligini 50 foizga qo'ying.", brightness.set, {level: 50}]
+  - ["Yorqinlikni oshir.", brightness.step, {delta: 10}]
+  - ["Yorqinlikni kamaytir.", brightness.step, {delta: -10}]
+  - ["Yorqinlikni biroz pasaytir.", brightness.step, {delta: -5}]
+  - ["Ekranni yorqinroq qil.", brightness.step, {delta: 10}]
+  - ["Ekranni xiraroq qil.", brightness.step, {delta: -10}]
+  - ["Yorug'likni oshir.", brightness.step, {delta: 10}]
+  # dark / light mode
+  - ["Qorong'i rejim.", theme.set, {mode: dark}]
+  - ["Qorong'i rejimni yoq.", theme.set, {mode: dark}]
+  - ["Qorong‘i rejimga o‘t.", theme.set, {mode: dark}]
+  - ["Tungi rejimni yoqing.", theme.set, {mode: dark}]
+  - ["Yorug' rejimga o't.", theme.set, {mode: light}]
+  - ["Qorong'i rejimni o'chir.", theme.set, {mode: light}]
+  - ["Қоронғи режимни ёқ.", theme.set, {mode: dark}]
+  # media
+  - ["Keyingi qo'shiq.", media.next, {}]
+  - ["Keyingi qoʻshiqni qoʻy.", media.next, {}]
+  - ["Keyingi trek.", media.next, {}]
+  - ["Qo'shiqni o'tkaz.", media.next, {}]
+  - ["Keyingi ko'shik.", media.next, {}]
+  - ["Кейинги қўшиқ.", media.next, {}]
+  - ["Oldingi qo'shiq.", media.previous, {}]
+  - ["Avvalgi qo'shiqni qo'y.", media.previous, {}]
+  - ["Pauza.", media.pause, {}]
+  - ["Musiqani to'xtat.", media.pause, {}]
+  - ["Musiqani davom ettir.", media.play, {}]
+  - ["Musiqani qo'y.", media.play, {}]
+  # timers
+  - ["Besh daqiqaga taymer qo'y.", timer.set, {seconds: 300}]
+  - ["Taymerni 10 daqiqaga qo'y.", timer.set, {seconds: 600}]
+  - ["O'n daqiqalik taymer.", timer.set, {seconds: 600}]
+  - ["30 soniyaga taymer qo'ying.", timer.set, {seconds: 30}]
+  - ["Yarim soatga taymer qo'y.", timer.set, {seconds: 1800}]
+  - ["Bir soatlik taymer.", timer.set, {seconds: 3600}]
+  - ["Taymer besh minut.", timer.set, {seconds: 300}]
+  - ["Беш дақиқага таймер қўй.", timer.set, {seconds: 300}]
+  - ["Taymerni o'chir.", timer.cancel, {}]
+  - ["Taymerni bekor qil.", timer.cancel, {}]
+  # the clock
+  - ["Soat necha?", clock.time, {}]
+  - ["Hozir soat necha bo'ldi?", clock.time, {}]
+  - ["Soat nechchi?", clock.time, {}]
+  - ["Соат неча?", clock.time, {}]
+  - ["Bugun nechanchi sana?", clock.date, {}]
+  # apps, lock
+  - ["Spotify'ni och.", app.open, {app: Spotify}]
+  - ["Telegramni och.", app.open, {app: Telegram Desktop}]
+  - ["Kalkulyatorni och.", app.open, {app: Calculator}]
+  - ["Chrome'ni ishga tushir.", app.open, {app: Google Chrome}]
+  - ["Bloknotni och.", app.open, {app: Notepad}]
+  - ["Kompyuterni qulfla.", screen.lock, {}]
+  - ["Ekranni qulflang.", screen.lock, {}]
+
+# Follow-ups in Russian and Uzbek (each list is one conversation).
+context_ru_uz:
+  - [["Громче.", volume.step, {delta: 10}], ["Ещё.", volume.step, {delta: 10}], ["Ещё немного.", volume.step, {delta: 5}],
+     ["Наоборот.", volume.step, {delta: -10}]]
+  - [["Тише.", volume.step, {delta: -10}], ["Ещё.", volume.step, {delta: -10}], ["Меньше.", volume.step, {delta: -10}]]
+  - [["Яркость 50.", brightness.set, {level: 50}], ["Больше.", brightness.step, {delta: 10}],
+     ["На 70.", brightness.set, {level: 70}]]
+  - [["Следующая песня.", media.next, {}], ["Ещё раз.", media.next, {}], ["Дальше.", media.next, {}],
+     ["Назад.", media.previous, {}]]
+  - [["Ovozni oshir.", volume.step, {delta: 10}], ["Yana.", volume.step, {delta: 10}], ["Yana biroz.", volume.step, {delta: 5}],
+     ["Teskari.", volume.step, {delta: -10}]]
+  - [["Yorqinlikni 50 ga qo'y.", brightness.set, {level: 50}], ["Balandroq.", brightness.step, {delta: 10}],
+     ["40 foiz.", brightness.set, {level: 40}]]
+  - [["Keyingi qo'shiq.", media.next, {}], ["Yana bir marta.", media.next, {}], ["Keyingisi.", media.next, {}],
+     ["Oldingisi.", media.previous, {}]]
+
+near_miss_ru:
+  - "Какой объём у шара?"
+  - "Громкость звука в физике."
+  - "Сколько времени займёт дорога?"
+  - "Следующая песня в альбоме называется Yesterday."
+  - "Следующая песня в альбоме называется как?"
+  - "Какая громкость безопасна для ушей?"
+  - "Почему у меня тихий звук на ноутбуке?"
+  - "Соседи слишком громко слушают музыку."
+  - "Сделай текст ярче в документе."
+  - "Тёмная тема лучше для глаз?"
+  - "Включи тёмную тему в VS Code."
+  - "Как включить тёмный режим в телеграме?"
+  - "Открой дверь."
+  - "Открой окно."
+  - "Открой ютуб."
+  - "Заблокируй его в телеграме."
+  - "Как заблокировать экран?"
+  - "Который час в Токио?"
+  - "Сколько времени осталось до встречи?"
+  - "Поставь будильник на 7 утра."
+  - "Напомни через пять минут позвонить маме."
+  - "Дай мне пять минут подумать."
+  - "Таймер в питоне."
+  - "Как работает таймер?"
+  - "Пауза между словами слишком длинная."
+  - "Продолжи."
+  - "Продолжай рассказ."
+  - "Играй в шахматы со мной."
+  - "Включи свет."
+  - "Выключи компьютер."
+  - "Перезагрузи компьютер."
+  - "Тише, я думаю."
+  - "Звук какой-то странный."
+  - "Яркость звезды Сириус."
+  - "Следующий вопрос."
+  - "Предыдущий ответ был неправильный."
+  - "Музыка была слишком тёмной."
+  - "Расскажи про Spotify."
+  - "Сколько стоит Spotify?"
+  - "Громкость в децибелах это сколько?"
+  - "Сделай мне кофе погромче."
+  - "Какой сегодня день рождения у Пушкина?"
+  - "Выключи звук уведомлений в телеграме."
+  - "Скажи громче, я не слышу."
+
+near_miss_uz:
+  - "Ovoz balandligi nima?"
+  - "Ovoz tezligi qancha?"
+  - "Soat nechada uchrashuv?"
+  - "Qancha vaqt kerak?"
+  - "Keyingi qo'shiq qaysi?"
+  - "Musiqa haqida gapir."
+  - "Taymer qanday ishlaydi?"
+  - "Ekran nima uchun qorong'i?"
+  - "Qorong'i rejim ko'zga foydalimi?"
+  - "Spotify haqida ma'lumot ber."
+  - "Eshikni qulfla."
+  - "Eshikni och."
+  - "Derazani och."
+  - "Kompyuterni o'chir."
+  - "Chiroqni yoq."
+  - "Besh daqiqadan keyin eslat."
+  - "Menga besh daqiqa vaqt ber."
+  - "Pauza qilmasdan gapir."
+  - "Davom et."
+  - "Qo'shnilar juda baland gaplashyapti."
+  - "Ovozing chiroyli."
+  - "Ovozni yozib ol."
+  - "Yorqinlik nima?"
+  - "Oldingi javob noto'g'ri edi."
+  - "Keyingi savol."
+  - "Soat nechida yopiladi?"
+  - "Telegramda kim yozdi?"
+  - "Bugun ob-havo qanday?"
+  - "Овоз баландлиги нима?"
+  - "Соат нечада учрашув?"
+  - "To'xtat."
+  - "Ovoz berish qachon?"
+  - "Musiqa maktabiga qachon boraman?"
+  - "Qorong'i tushdi."

@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 ACCENT = QColor("#D97757")   # same palette as island.py
@@ -17,6 +17,9 @@ DIM = QColor("#9A9A9A")
 BG = QColor(20, 20, 20)
 
 PAUSE_SECONDS = 3600
+# M4c: the speech backend switch (speech.backend), no restart.
+SPEECH_CHOICES = (("local", "Local (Whisper + Kokoro)"), ("windows", "Windows (no models)"),
+                  ("cloud", "Cloud (Groq / OpenAI)"), ("auto", "Auto (by free memory)"))
 
 
 def _draw(size: int, on: bool) -> QPixmap:
@@ -70,6 +73,8 @@ class Tray(QObject):
     logs_requested = Signal()
     record_samples_requested = Signal()
     quit_requested = Signal()
+    speech_backend_chosen = Signal(str)   # M4c: local | windows | cloud | auto
+    free_memory_requested = Signal()      # M4c: unload Whisper and Kokoro now
 
     def __init__(self, parent=None, hotkey_label: str = ""):
         super().__init__(parent)
@@ -90,6 +95,21 @@ class Tray(QObject):
         self.act_quit = QAction("Quit", self.menu, triggered=lambda: self.quit_requested.emit())
         for a in (self.act_talk, self.act_listen, self.act_pause):
             self.menu.addAction(a)
+        self.menu.addSeparator()
+        self.speech_menu = self.menu.addMenu("Speech")
+        self._speech_group = QActionGroup(self.speech_menu)
+        self._speech_group.setExclusive(True)
+        self.speech_actions = {}
+        for key, text in SPEECH_CHOICES:
+            a = QAction(text, self.speech_menu, checkable=True)
+            a.triggered.connect(lambda _c=False, k=key: self.speech_backend_chosen.emit(k))
+            self._speech_group.addAction(a)
+            self.speech_menu.addAction(a)
+            self.speech_actions[key] = a
+        self.speech_menu.addSeparator()
+        self.act_free = QAction("Free memory now", self.speech_menu,
+                                triggered=lambda: self.free_memory_requested.emit())
+        self.speech_menu.addAction(self.act_free)
         self.menu.addSeparator()
         self.menu.addAction(self.act_settings)
         self.menu.addAction(self.act_record)
@@ -122,6 +142,13 @@ class Tray(QObject):
             tip = "hey-claude — listening" if active else "hey-claude — listening off"
         self.icon.setToolTip(tip)
         self.icon.setIcon(self._icons[active])
+
+    def set_speech(self, backend: str, label: str = ""):
+        """Tick the active backend; `label` (e.g. "local: gpu (turbo)") goes in the menu title."""
+        a = self.speech_actions.get(str(backend or "").lower())
+        if a is not None:
+            a.setChecked(True)
+        self.speech_menu.setTitle(f"Speech: {label}" if label else "Speech")
 
     def set_hotkey_label(self, text: str):
         text = _pretty_hotkey((text or "").strip())

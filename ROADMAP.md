@@ -964,7 +964,7 @@ allow-list), `ui/effects.json` (with M5), README.
   wallpaper" work end to end in ≤ 2.5 s with their effect and an undo;
 - Windows-MCP's acting tools are confirmed on the island before they run.
 
-## M10: Instant commands without Claude (local intent engine) ⏳ built, live timing pending (2026-11-10)
+## M10: Instant commands without Claude (local intent engine) ✅ built (2026-11-10)
 
 **Status:** built; see README "Instant commands, no model". `heyclaude/intents/`
 (grammar + slots + Whisper-slip fixes, a numpy TF-IDF nearest-neighbour
@@ -980,10 +980,21 @@ for the player to report the new track (M9's media_control, up to 1.5 s).
 Offline UX harness (scenarios 19-25, CI; ~0.32 s of it is the simulated VAD
 tail): end of speech → effect median 0.32 s (0.26-0.40 s, 11 turns), all
 instant expectations met, near-misses reach the brain and change nothing.
-Not measured yet: the live speech end → effect median with
-the real VAD tail and Whisper (the harness's `instant_*` scenarios do it).
-Not built: acting on a confident *partial* transcript, Russian/Uzbek
-phrasings, the weather intent (that is weather-mcp's local route).
+Live (docs/ux-stress-report.md, pass 3): speech end → effect median 0.48 s over
+18 turns (0.30-0.69 s), every instant expectation met; a parsed command ends
+the turn as soon as its pause transcript is in (`listen.instant_end`). What's
+left of it is the pause probe + Whisper on the pause (~0.55 s in the app's log).
+Live native crashes right after a spoken ack (two PortAudio streams for one
+player: begin()'s prepare raced a cached ack's play) are fixed in `tts.Player`.
+Russian and Uzbek (Latin and Cyrillic) phrasings for the core commands
+(`intents/grammar_ru.py`, `grammar_uz.py`): RU 101 phrasings 100%, 44
+near-misses 0 triggered; UZ 85 phrasings 100%, 34 near-misses 0 triggered;
+the classifier stays English-only. They need `stt.language` empty (auto) or
+ru/uz: the default `en` makes Whisper write English. Not checked on recorded
+RU/UZ speech yet. Settings > Instant edits `instant:` live and lists /
+removes taught wordings.
+Not built: acting on a confident *partial* transcript, the weather intent
+(that is weather-mcp's local route), Russian/Uzbek acks (Kokoro is English).
 
 **Goal:** simple commands never wait for a model. "Volume 30", "turn it up a
 bit", "mute", "dark mode", "brightness down", "next song", "pause", "what

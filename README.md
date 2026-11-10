@@ -142,6 +142,7 @@ mic ─▶ echo canceller ─▶ openWakeWord ─▶ Silero VAD + end of turn �
 | `--simulate a.wav b.wav …` | a simulated conversation: each clip after the first is played into the follow-up window (so it needs no wake word; make one with `tools\make_test_wav.py - "and tomorrow?" f.wav`), or, if that's closed, once it's idle. It waits for running tasks to finish first. |
 | `--exit` | with `--simulate`: quit after the request (and any task it started) is done. |
 | `--muted` | start with listening off (mic closed); the hotkey and "Talk now" still work. |
+| `--speech local\|windows\|cloud\|auto` | the speech backend for this run, overriding `speech.backend` (M4c). |
 | `--quit` | ask the running hey-claude to quit, then exit. |
 | `--config f.yaml` | use another config file instead of `config.yaml`. |
 | `--record-wake-samples [N]` | record N (default 40) clips of you saying "hey claude" for training and `tools\wake_eval.py`, then exit. `--auto`: no Enter between clips. See [docs/train-hey-claude.md](docs/train-hey-claude.md). |
@@ -679,16 +680,36 @@ model and the agent.
 change ("give the boombox some juice" → volume +20), the wording is noted in
 `state/intents_misses.jsonl`. Say **"teach it"** right after, and that
 wording is instant from then on (`state/intents_taught.yaml`, yours to edit).
-Both files stay on your PC (`state/` is never committed).
+Both files stay on your PC (`state/` is never committed). Settings > Instant
+lists the taught wordings and removes one (it applies at once).
 
-**Measured** (tests/test_intents.py, CI): 369 phrasings, 99.2% routed right
-(345 by the grammar, 21 by the classifier); 156 near-misses, 0 acted on.
+**Russian and Uzbek.** The core commands also understand Russian ("громкость
+30", "сделай потише", "тёмная тема", "следующая песня", "таймер на пять
+минут", "который час", "открой спотифай", "заблокируй компьютер") and Uzbek,
+in Latin or Cyrillic ("ovozni o'ttizga qo'y", "ovozni pasaytir", "qorong'i
+rejim", "keyingi qo'shiq", "besh daqiqaga taymer qo'y", "soat necha"),
+with spoken numbers, durations, ё/е and every Uzbek apostrophe (' ʻ ‘ ’ or
+none) folded, and common Whisper slips ("ko'shik", "minut"). Follow-ups too
+("ещё", "наоборот", "yana", "teskari"). `intents/grammar_ru.py` and
+`grammar_uz.py`; the classifier stays English-only and never decides a
+Russian or Uzbek sentence. The acks stay English (Kokoro has no Russian or
+Uzbek voice). **Whisper must write them**: with the default `stt.language: en`
+it turns Russian and Uzbek speech into English, so set `stt.language` to empty
+(auto-detect) or `ru` / `uz`, and keep in mind that the CPU fallback
+(`base.en`) is English-only and that Whisper's Uzbek is much weaker than its
+Russian.
+
+**Measured** (tests/test_intents.py, CI): English 369 phrasings, 99.2% routed
+right (345 by the grammar, 21 by the classifier), 156 near-misses, 0 acted on;
+Russian 101 phrasings, 100%, 44 near-misses, 0 acted on; Uzbek 85 phrasings,
+100%, 34 near-misses, 0 acted on (the RU/UZ sets were written with the
+grammar, not from recorded speech).
 Text → match → executor with Windows mocked: median 0.11 ms, p95 0.22 ms.
 `tools\bench_instant.py` adds live read-only timings. Each turn is logged with
 `route=local-instant` and `speech_end_to_effect` in `state/latency.csv`, and
 the UX harness reports it per scenario (`tools/ux_scenarios/19-25`). Settings
 are under `instant:` in `config.example.yaml` (`ack: silent` for the effect
-only).
+only), and on the Settings window's Instant tab.
 
 ## The island (M5: "Ember & Thread")
 
@@ -925,6 +946,65 @@ in git-ignored `state\stt_eval\`), then compare:
 .venv\Scripts\python tools\stt_eval.py
 ```
 
+## Speech backends and lean mode (M4c)
+
+Tray → **Speech** switches how speech-to-text and the voice run, with no
+restart (it's saved as `speech.backend`; Settings → Voice has the same switch,
+the cloud key and a cost estimate). The island's tooltip and the tray menu
+say which one is active.
+
+| backend | speech-to-text | voice | memory | audio leaves the PC |
+|---|---|---|---|---|
+| `local` (default) | faster-whisper large-v3-turbo, GPU (CPU fallback) | Kokoro, GPU (CPU, then SAPI) | ~1.7 GB VRAM | never |
+| `windows` | Windows online dictation (WinRT), else the offline SAPI recognizer | Windows voices (WinRT), SAPI fallback | none | to Microsoft, with online recognition on |
+| `cloud` | Groq (hosted whisper-large-v3-turbo) or OpenAI | Windows voice, or OpenAI / ElevenLabs (`speech.cloud_tts_provider`) | none | yes: to Groq / OpenAI |
+| `auto` | local while the GPU (or RAM) has room, else windows/cloud | same | depends | depends |
+
+- **Mix them:** `speech.stt_backend` / `speech.tts_backend`, e.g. Groq
+  transcription with the Kokoro voice.
+- **Fallback:** when the chosen backend fails (no network, no key, a WinRT
+  error), the next one in `speech.fallback_order` runs and the island flashes
+  why, once ("cloud: no GROQ_API_KEY; used local").
+- **Windows online dictation** needs Settings → Privacy & security → Speech →
+  *Online speech recognition* on. Settings → Voice shows whether it is. Off,
+  the windows backend uses the old offline SAPI recognizer, which is rough
+  (fine for short commands, poor for names). WinRT only listens to the default
+  microphone, so the online path is used only when `listen.device` is null;
+  hey-claude still does its own capture, VAD, hold key and talk-or-type.
+- **Cloud keys** come only from `GROQ_API_KEY` / `OPENAI_API_KEY` /
+  `ELEVENLABS_API_KEY` or the Windows credential store (Settings → Voice →
+  *Set key…* stores it as `hey-claude/groq` etc.), never from `config.yaml`.
+  The estimated monthly cost is worked out from your usage in
+  `state/latency.csv` (Groq bills at least 10 s per request). Cloud and
+  windows skip the pause probes and live partials (each would be a request),
+  so the end of turn waits `listen.end_silence_ms`.
+
+**Lean mode** (`speech.lean: true`) unloads Whisper and Kokoro after
+`speech.unload_after_min` (10) idle, and starts reloading both the moment the
+wake word fires, while you talk; if they aren't ready when you stop, the
+island says "loading whisper…". Tray → Speech → **Free memory now** unloads
+at once, lean or not (they reload when next needed). The wake word (~20 MB,
+CPU) always stays. Checked with NVML (`tools\speech_check.py`, RTX 4060,
+2026-11-10): loading turbo + Kokoro took 1658 MB of VRAM, *Free memory now*
+gave back 1556 MB of it (94%; the rest is the CUDA contexts), and the next
+wake loaded them again.
+
+Cold start per model (load + warm-up, fresh process, `tools\speech_check.py --cold`):
+
+| model | device | cold start |
+|---|---|---|
+| whisper large-v3-turbo (int8_float16) | GPU | 5.7 s |
+| whisper large-v3 (int8_float16) | GPU | 11.2 s |
+| whisper base.en (int8), the CPU fallback | CPU | 2.8 s |
+| Kokoro v1.0 | GPU | 3.9 s |
+| Kokoro v1.0 | CPU | 3.2 s |
+
+Whisper and Kokoro reload in parallel, so a lean wake costs about the
+slower of the two (turbo: ~5-6 s, mostly hidden while you speak).
+
+The Claude desktop app's own voice is out of scope: it runs on a private
+Anthropic service with no public API.
+
 ## Measured latency
 
 ### M4 (2026-11-09): speech end → first word, quick questions
@@ -1105,8 +1185,8 @@ heyclaude/
   undo.py         M9: "undo that" and the island's Undo button (inverse calls, run locally)
   mcp_windows/    M9: the Windows settings MCP server (audio, display, radios, power, media, apps,
                   clipboard, screen, Settings pages) and its tool registry (allow-list, undo)
-  intents/        M10: instant commands without a model: grammar, slots, classifier (numpy),
-                  executors over mcp_windows, local timers, "teach it"
+  intents/        M10: instant commands without a model: grammar (English, Russian, Uzbek), slots,
+                  classifier (numpy), executors over mcp_windows, local timers, "teach it"
   claude_cli.py   finds claude.exe, launch flags
   hookrelay/      M7: heyclaude_hook.py (the hook relay, stdlib only), pipe.py (the per-user named
                   pipe), install.py (settings.json merge/uninstall), sessions.py (the session hub:

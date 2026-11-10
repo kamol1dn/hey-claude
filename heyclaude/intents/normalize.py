@@ -49,6 +49,8 @@ _SLIPS = [
     (re.compile(r"\bspot\s?ify\b"), "spotify"), (re.compile(r"\bspotty\s?fi\b"), "spotify"),
     (re.compile(r"\btimes\s+(?=for\s)"), "timer "),
     (re.compile(r"\bmutes\b(?=\s*$)"), "mute"),
+    # "Now the other way." came out of Whisper live as "Know the other way." (twice)
+    (re.compile(r"^(?:know|no)\s+(?=(?:the\s+)?other\s+way\b)"), "now "),
 ]
 
 # Keywords a slightly misheard word is pulled to (only words of 5+ letters, close spellings).
@@ -68,9 +70,22 @@ def _fuzzy_word(w: str) -> str:
     return hit[0] if hit else w
 
 
+# Apostrophes (Uzbek o‘ g‘ come out as any of these), and the letters Whisper
+# uses when it hears Uzbek as Turkish, Azerbaijani or Kazakh.
+_FOLD = str.maketrans({"’": "'", "‘": "'", "ʻ": "'", "ʼ": "'", "`": "'", "´": "'", "′": "'",
+                       "ş": "sh", "ç": "ch", "ğ": "g", "ı": "i", "ö": "o", "ü": "u", "ŏ": "o", "ò": "o",
+                       "ә": "а", "ө": "о", "ү": "у", "ұ": "у", "і": "и", "ң": "н", "һ": "ҳ", "̇": ""})
+# Letters kept: Latin, Cyrillic (Russian, plus Uzbek ў қ ғ ҳ).
+_KEEP = r"a-z0-9а-яёўқғҳ"
+_UZ_CYR = re.compile(r"[ўқғҳ]")
+
+
 def basic(text: str) -> str:
-    """Lower case, '%' -> percent, contractions out, punctuation out, one space."""
-    t = (text or "").lower().replace("’", "'").replace("‘", "'")
+    """Lower case, '%' -> percent, contractions out, punctuation out, one space.
+    Cyrillic is kept (Russian and Uzbek: grammar_ru.py, grammar_uz.py)."""
+    t = (text or "").lower().translate(_FOLD)
+    if "ё" in t and not _UZ_CYR.search(t):
+        t = t.replace("ё", "е")                         # Russian ё = е; Uzbek Cyrillic keeps it (ёқ = yoq)
     t = re.sub(r"(\d)\s*%", r"\1 percent", t)
     t = t.replace("%", " percent").replace("&", " and ").replace("+", " plus ")
     t = re.sub(r"(\d)\.(\d)", r"\1point\2", t)          # keep 1.5 together through the punctuation pass
@@ -78,11 +93,11 @@ def basic(text: str) -> str:
     for rx, rep in _CONTRACTIONS:
         t = rx.sub(rep, t)
     t = re.sub(r"[-‐–—/_]", " ", t)
-    t = re.sub(r"[^a-z0-9' ]+", " ", t)
+    t = re.sub(r"[^" + _KEEP + r"' ]+", " ", t)
     t = re.sub(r"'s\b", "s", t).replace("'", "")
     t = re.sub(r"(\d)point(\d)", r"\1.\2", t)
     t = re.sub(r"(\d)colon(\d\d)", r"\1:\2", t)
-    t = re.sub(r"(\d)([a-z])", r"\1 \2", t)              # 5min -> 5 min, 30percent -> 30 percent
+    t = re.sub(r"(\d)([a-zа-яёўқғҳ])", r"\1 \2", t)       # 5min -> 5 min, 30percent -> 30 percent, 30ga -> 30 ga
     return " ".join(t.split())
 
 

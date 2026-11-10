@@ -144,6 +144,28 @@ class EndOfTurn:
 
     def __init__(self, cfg: dict):
         self.cfg = cfg                           # live listen section
+        # Optional judges of the transcript at a pause, set by the assistant:
+        #   instant(text) -> True: a confident instant command (M10), so the turn can
+        #     end as soon as that transcript is in (instant_silence_ms);
+        #   more_expected(text) -> True: clearly unfinished although it looks like a
+        #     sentence ("Start a task in the scratch project." with no task yet).
+        self.instant = None
+        self.more_expected = None
+        self._memo: tuple[str, str] | None = None   # (text, verdict): asked once per pause
+
+    def _judge(self, text: str) -> str:
+        if self._memo is not None and self._memo[0] == text:
+            return self._memo[1]
+        verdict = ""
+        try:
+            if self.more_expected is not None and self.more_expected(text):
+                verdict = "more"
+            elif self.instant is not None and self.instant(text):
+                verdict = "instant"
+        except Exception as e:
+            print(f"[listen] end-of-turn check failed: {e}")
+        self._memo = (text, verdict)
+        return verdict
 
     def needed_ms(self, text: str | None) -> float:
         c = self.cfg
@@ -151,6 +173,12 @@ class EndOfTurn:
         if not c.get("smart_end", True):
             return base
         kind = turn_complete(text)
+        if text and kind != "incomplete":
+            verdict = self._judge(text.strip())
+            if verdict == "more":
+                return max(base, float(c.get("long_silence_ms", 1200)))
+            if verdict == "instant":
+                return min(base, float(c.get("instant_silence_ms", 0)))
         if kind == "complete":
             return min(base, float(c.get("short_silence_ms", 300)))
         if kind == "incomplete":

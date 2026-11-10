@@ -47,6 +47,13 @@ listen:
   short_silence_ms: 300
   long_silence_ms: 1200
   pause_probe_ms: 160     # silence before the pause is transcribed
+  # An instant command (M10) the grammar fully parsed at that pause ("mute",
+  # "volume 30") ends the turn as soon as its transcript is in, after
+  # instant_silence_ms, instead of waiting out the silence above. A task start
+  # ("start a task in <project>: ...") always waits long_silence_ms: people
+  # dictate tasks with pauses.
+  instant_end: true
+  instant_silence_ms: 0
   # Live transcript on the island while you talk: auto = when whisper is on the GPU.
   partials: auto
   partial_interval_s: 0.8
@@ -293,7 +300,7 @@ agent:
   timeout: 180                 # seconds to wait for one answer
   filler: "Let me check."      # spoken right away while it looks things up
   filler_min_words: 8          # ...but only for requests of at least this many words (0 = always)
-  filler_after_s: 3.5          # a shorter request still gets it if nothing has been said after this long (0 = never)
+  filler_after_s: 1.8          # a shorter request still gets it if nothing has been said this long after you stop talking (0 = never)
   extra_args: []
   disallowed_tools: []         # more tools the agent is never offered (Claude Code's own PowerShell never is)
 
@@ -378,6 +385,11 @@ instant:
   # on the last one: "a bit more", "again", "the other way", "make it 40".
   # Anything it isn't sure about still goes to Claude. Sleep, restart and
   # shutdown are never instant (they keep the click to confirm).
+  # Russian and Uzbek wordings work too ("громкость 30", "тише", "таймер на пять
+  # минут"; "ovozni o'ttizga qo'y", "keyingi qo'shiq", "soat necha"), but only
+  # when Whisper writes them: set stt.language to empty (auto-detect) or ru/uz.
+  # With `en` it turns them into English. The acks stay English.
+  # Settings > Instant edits everything here and lists the taught wordings.
   enabled: true
   # The paraphrase classifier (for wordings the grammar doesn't know, like "my
   # ears hurt"): how similar to one of its example phrasings a request must be,
@@ -448,3 +460,10 @@ island:
   fetch_favicons: false   # fetch a favicon once for services without a bundled icon (state/icons/)
   service_icons: {}       # per-server override, e.g. {google_calendar: C:/icons/cal.png}
   usage_pill: true        # plan usage (5 h / week) in the hover list, as Claude Code reports it
+  # M6: a character in the island instead of the ember (characters/README.md). Settings > Character.
+  character:
+    pack: ember           # ember (the theme's own), echo, cinder, wren, tycho, hum, or a pack in state/characters/
+    where: island         # island, desktop (a companion above the taskbar), or both
+    desktop_size: 120     # the companion's size in px
+    antics: normal        # idle antics: off, rare (~10 min apart), normal (~4 min), lively (~1.5 min)
+    antics_off: []        # antic ids to skip, e.g. [fishing]

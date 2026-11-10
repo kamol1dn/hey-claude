@@ -618,16 +618,36 @@ model and the agent.
 change ("give the boombox some juice" → volume +20), the wording is noted in
 `state/intents_misses.jsonl`. Say **"teach it"** right after, and that
 wording is instant from then on (`state/intents_taught.yaml`, yours to edit).
-Both files stay on your PC (`state/` is never committed).
+Both files stay on your PC (`state/` is never committed). Settings > Instant
+lists the taught wordings and removes one (it applies at once).
 
-**Measured** (tests/test_intents.py, CI): 369 phrasings, 99.2% routed right
-(345 by the grammar, 21 by the classifier); 156 near-misses, 0 acted on.
+**Russian and Uzbek.** The core commands also understand Russian ("громкость
+30", "сделай потише", "тёмная тема", "следующая песня", "таймер на пять
+минут", "который час", "открой спотифай", "заблокируй компьютер") and Uzbek,
+in Latin or Cyrillic ("ovozni o'ttizga qo'y", "ovozni pasaytir", "qorong'i
+rejim", "keyingi qo'shiq", "besh daqiqaga taymer qo'y", "soat necha"),
+with spoken numbers, durations, ё/е and every Uzbek apostrophe (' ʻ ‘ ’ or
+none) folded, and common Whisper slips ("ko'shik", "minut"). Follow-ups too
+("ещё", "наоборот", "yana", "teskari"). `intents/grammar_ru.py` and
+`grammar_uz.py`; the classifier stays English-only and never decides a
+Russian or Uzbek sentence. The acks stay English (Kokoro has no Russian or
+Uzbek voice). **Whisper must write them**: with the default `stt.language: en`
+it turns Russian and Uzbek speech into English, so set `stt.language` to empty
+(auto-detect) or `ru` / `uz`, and keep in mind that the CPU fallback
+(`base.en`) is English-only and that Whisper's Uzbek is much weaker than its
+Russian.
+
+**Measured** (tests/test_intents.py, CI): English 369 phrasings, 99.2% routed
+right (345 by the grammar, 21 by the classifier), 156 near-misses, 0 acted on;
+Russian 101 phrasings, 100%, 44 near-misses, 0 acted on; Uzbek 85 phrasings,
+100%, 34 near-misses, 0 acted on (the RU/UZ sets were written with the
+grammar, not from recorded speech).
 Text → match → executor with Windows mocked: median 0.11 ms, p95 0.22 ms.
 `tools\bench_instant.py` adds live read-only timings. Each turn is logged with
 `route=local-instant` and `speech_end_to_effect` in `state/latency.csv`, and
 the UX harness reports it per scenario (`tools/ux_scenarios/19-25`). Settings
 are under `instant:` in `config.example.yaml` (`ack: silent` for the effect
-only).
+only), and on the Settings window's Instant tab.
 
 ## The island (M5: "Ember & Thread")
 
@@ -734,6 +754,34 @@ first theme (`ui/themes/ember-thread`).
 events, with an fps readout. `--shots DIR` saves a png of every state and
 widget, and `--measure` runs the acceptance measurements. Neither touches a
 running hey-claude.
+
+### Characters (M6)
+
+**Settings → Character** puts a little character in the island where the ember
+is: **Echo** (a pixel bat), **Cinder** (a living coal), **Wren** (a folded-paper
+bird), **Tycho** (a one-eyed orrery) or **Hum** (the island's own face). Pick one
+and the island switches at once; a live preview has a button per state. It can
+also sit on the desktop as a companion above the taskbar (`island.character.where`:
+`island`, `desktop` or `both`).
+
+- It follows the assistant: listening to your level, talking with the voice,
+  thinking, working while tasks run, a little celebration when one finishes, a
+  wince on an error. An answer can carry a mood (`MOOD happy`, never spoken) that
+  it shows as it finishes.
+- **Idle antics:** when nothing has happened for a while it does small things on
+  its own (Echo hangs upside down, Wren goes fishing, Tycho watches a comet…), a
+  dozen each. Settings: off / rare / normal / lively, a checkbox and a ▶ preview
+  per antic. Never while you type, in a full-screen app or game, in calm motion,
+  on battery saver, or while the island is hidden; the wake word, the hotkey, a
+  task or the pointer ends one at once with a short "caught!".
+- **Sleep:** drowsy after ~15 min without you, asleep after ~30 (the wake word
+  still works), and a stretch when you come back.
+- At rest it draws at the island's 8 fps (0 in calm motion), 30 fps for an antic.
+
+Packs are plug-ins: `characters/<id>/` (by PR) or `state/characters/<id>/`
+(local). [characters/README.md](characters/README.md) explains the interface,
+the antics and the CI checks; `tools/character_lab.py` cycles every state, plays
+the antics, measures fps and runs the checks.
 
 ## Conversations and sessions
 
@@ -1145,8 +1193,8 @@ heyclaude/
   undo.py         M9: "undo that" and the island's Undo button (inverse calls, run locally)
   mcp_windows/    M9: the Windows settings MCP server (audio, display, radios, power, media, apps,
                   clipboard, screen, Settings pages) and its tool registry (allow-list, undo)
-  intents/        M10: instant commands without a model: grammar, slots, classifier (numpy),
-                  executors over mcp_windows, local timers, "teach it"
+  intents/        M10: instant commands without a model: grammar (English, Russian, Uzbek), slots,
+                  classifier (numpy), executors over mcp_windows, local timers, "teach it"
   claude_cli.py   finds claude.exe, launch flags
 tools/            make_test_wav.py, bench_fastpath.py, trace_agent.py,
                   wake_eval.py (wake word hit rate, false wakes per hour, threshold),

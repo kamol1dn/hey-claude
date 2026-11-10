@@ -450,7 +450,9 @@ function enter(st, o) {
     if (st !== 'listening' && st !== 'woke' && (S.notMe || O.notme > 0)) { S.notMe = false; T(O, 'notme', 0, 120, inQuad); }
     if (['listening', 'holding', 'followup', 'woke'].indexOf(st) < 0) S.partial = '';
     if (st === 'thinking' || st === 'speaking') T(O, 'ctl', 1, 200, outCubic, O.ctl > 0.5 ? 0 : 140);
-    else if (O.ctl > 0) T(O, 'ctl', 0, 120, inQuad);
+    // also when the fade-in is still waiting out its delay (thinking left within 140 ms, e.g. an
+    // instant command): else that pending tween fires later and leaves mic + stop over the rest label
+    else if (O.ctl > 0 || TWEENS.some(function (w) { return w.o === O && w.k === 'ctl'; })) T(O, 'ctl', 0, 120, inQuad);
     S.prev = prev; S.state = st; S.enteredAt = NOW; S.lastChange = NOW; S.baseTau = 0.12;
     if (st === 'ready' || st === 'off') S.resting = st;
     if (st === 'paused') S.resting = 'off';

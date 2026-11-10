@@ -170,6 +170,21 @@ def _reset(isl):
     _spin(500)
 
 
+def test_controls_dont_stick_after_a_short_think():
+    """Thinking left before the mic/stop fade-in's 140 ms delay (an instant command) must not
+    leave the buttons over the resting label."""
+    isl = _island()
+    _reset(isl)
+    b = isl.bridge_
+    b.state.emit("thinking", "")
+    _spin(40)
+    b.state.emit("idle", "")
+    _spin(700)
+    p = _v(isl.call("probeUx"))
+    assert p["state"] == "ready" and p["ctl"] < 0.01, (p["state"], p["ctl"])
+    _reset(isl)
+
+
 def test_sessions_show_in_the_hover_list_with_tasks():
     isl = _island()
     _reset(isl)

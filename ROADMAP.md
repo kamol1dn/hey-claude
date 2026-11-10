@@ -958,8 +958,15 @@ tail): end of speech → effect median 0.32 s (0.26-0.40 s, 11 turns), all
 instant expectations met, near-misses reach the brain and change nothing.
 Not measured yet: the live speech end → effect median with
 the real VAD tail and Whisper (the harness's `instant_*` scenarios do it).
-Not built: acting on a confident *partial* transcript, Russian/Uzbek
-phrasings, the weather intent (that is weather-mcp's local route).
+Russian and Uzbek (Latin and Cyrillic) phrasings for the core commands
+(`intents/grammar_ru.py`, `grammar_uz.py`): RU 101 phrasings 100%, 44
+near-misses 0 triggered; UZ 85 phrasings 100%, 34 near-misses 0 triggered;
+the classifier stays English-only. They need `stt.language` empty (auto) or
+ru/uz: the default `en` makes Whisper write English. Not checked on recorded
+RU/UZ speech yet. Settings > Instant edits `instant:` live and lists /
+removes taught wordings.
+Not built: acting on a confident *partial* transcript, the weather intent
+(that is weather-mcp's local route), Russian/Uzbek acks (Kokoro is English).
 
 **Goal:** simple commands never wait for a model. "Volume 30", "turn it up a
 bit", "mute", "dark mode", "brightness down", "next song", "pause", "what

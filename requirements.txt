@@ -9,6 +9,7 @@ scipy                # resampling the voice for the echo canceller
 pyyaml
 nvidia-ml-py>=12     # GPU load for picking the speech-to-text / voice device (NVML)
 psutil>=5.9          # CPU load, same
+Pillow>=10           # M5b: the directions card's map (OSM tiles composed into one image); ux tooling
 anthropic>=0.40      # the direct API path for quick answers (only with an API key)
 kokoro-onnx>=0.6     # tts.engine: kokoro (bundles espeak-ng; no system install)
 livekit>=1.2         # WebRTC echo cancellation (AEC3) for barge-in

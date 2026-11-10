@@ -117,11 +117,16 @@ def test_map_url_only_takes_our_own_maps():
 
 
 # ------------------------------------------------------------------ the places tool, offline
-def _png(colour=(240, 238, 230)):
-    from PIL import Image
-    b = io.BytesIO()
-    Image.new("RGB", (256, 256), colour).save(b, "PNG")
-    return b.getvalue()
+def _png(colour=(240, 238, 230), size=256):
+    """A flat 256 px tile as PNG bytes, stdlib only (Pillow isn't a dependency)."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    row = b"\x00" + bytes(colour) * size
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(row * size)) + chunk(b"IEND", b""))
 
 
 class FakeNet:

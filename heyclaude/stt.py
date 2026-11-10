@@ -138,14 +138,30 @@ class Transcriber:
         self.language, self.prompt = language or None, prompt
         self.transcribe(np.zeros(16000, np.int16))   # first real request doesn't pay init
 
-    def transcribe(self, audio: np.ndarray) -> str:
+    def transcribe(self, audio: np.ndarray, prompt: str | None = None, languages=None) -> str:
         f = audio.astype(np.float32) / 32768.0
         segments, _ = self.model.transcribe(
-            f, language=self.language, beam_size=1, vad_filter=False,
+            f, language=self.pick_language(f, languages), beam_size=1, vad_filter=False,
             condition_on_previous_text=False, without_timestamps=True,
-            initial_prompt=self.prompt,
+            initial_prompt=prompt if prompt is not None else self.prompt,
         )
         return " ".join(s.text.strip() for s in segments).strip()
+
+    def pick_language(self, f: np.ndarray, languages) -> str | None:
+        """stt.languages: one code fixes it; several limit detection to them
+        (the most likely of those, so a short English phrase can't come out
+        as Welsh). English-only models (*.en) are always "en"."""
+        langs = [str(x).lower() for x in (languages or []) if str(x).strip()]
+        if not langs or not getattr(self.model, "model", None) or not self.model.model.is_multilingual:
+            return self.language
+        if len(langs) == 1:
+            return langs[0]
+        try:
+            _, _, probs = self.model.detect_language(f)
+        except Exception:
+            return self.language
+        allowed = [(lang, p) for lang, p in probs if lang in langs]
+        return max(allowed, key=lambda x: x[1])[0] if allowed else self.language
 
 
 class SpeechToText:
@@ -292,6 +308,8 @@ class SpeechToText:
 
     @property
     def label(self) -> str:
+        if self.unloaded:
+            return "unloaded (lean)"
         if self.device == "cuda":
             return f"gpu ({self.reason or short_model(self.gpu_model)})"
         if self.want == "gpu":
@@ -310,7 +328,7 @@ class SpeechToText:
     def poll(self, background=True):
         """Re-decide from the current load; load whatever the choice needs.
         Called before each request and by a 10 s timer (keeps the island current)."""
-        if self.want != "gpu":
+        if self.want != "gpu" or self.unloaded:
             return
         with self._lock:
             before = self.label
@@ -336,20 +354,53 @@ class SpeechToText:
                 self._decide()
                 self._changed(before)
 
-    # -- transcription -------------------------------------------------------------
-    def transcribe(self, audio: np.ndarray) -> str:
-        """Thread-safe: pause/partial transcripts (vad.TurnListener) and the
-        final one take turns on the model."""
-        with self._run_lock:
-            return self._transcribe(audio)
+    # -- lean mode (M4c) ------------------------------------------------------------
+    unloaded = False                             # models dropped on purpose; poll() won't reload them
 
-    def _transcribe(self, audio: np.ndarray) -> str:
+    @property
+    def loaded(self) -> bool:
+        return self.gpu is not None or self.cpu is not None
+
+    def unload(self):
+        """Drop both models (VRAM and RAM back to the system). The next
+        transcribe(), or reload(), loads what the load rule picks again."""
+        with self._run_lock, self._lock:
+            before = self.label
+            self.gpu = self.cpu = None
+            self.unloaded = True
+            self._changed(before)
+        import gc
+        gc.collect()
+
+    def reload(self):
+        """Load again after unload() (blocking): the GPU model if the load rule
+        picks the GPU, else the CPU one."""
+        with self._lock:
+            if not self.unloaded and self.loaded:
+                return
+            self.unloaded = False
+        before = self.label
+        self._start()
+        with self._lock:
+            self._changed(before)
+
+    # -- transcription -------------------------------------------------------------
+    def transcribe(self, audio: np.ndarray, prompt: str | None = None, languages=None) -> str:
+        """Thread-safe: pause/partial transcripts (vad.TurnListener) and the
+        final one take turns on the model. `prompt` replaces the vocabulary
+        hint for this call; `languages` limits language detection."""
+        if self.unloaded:
+            self.reload()
+        with self._run_lock:
+            return self._transcribe(audio, prompt, languages)
+
+    def _transcribe(self, audio: np.ndarray, prompt=None, languages=None) -> str:
         self.poll(background=True)
         model = self.gpu if self.device == "cuda" else None
         if model is not None:
             try:
                 with own_gpu(self.monitor):
-                    return model.transcribe(audio)
+                    return _run(model, audio, prompt, languages)
             except Exception as e:
                 if not is_cuda_error(e):
                     raise
@@ -359,7 +410,7 @@ class SpeechToText:
                     self._decide()
                     self._changed(before)
                 print("[stt] retrying that request on the CPU")
-        return self._ensure_cpu().transcribe(audio)
+        return _run(self._ensure_cpu(), audio, prompt, languages)
 
     def readings(self) -> str:
         m = self.monitor
@@ -368,6 +419,13 @@ class SpeechToText:
         g, f, c = m.gpu_util(), m.gpu_free_mb(), m.cpu_pct()
         return ", ".join(x for x in (f"gpu {g:.0f}%" if g is not None else "", f"vram free {f / 1024:.1f} GB"
                                      if f is not None else "", f"cpu {c:.0f}%" if c is not None else "") if x)
+
+
+def _run(model, audio, prompt, languages) -> str:
+    """model.transcribe, passing the prompt / languages only when there are any."""
+    if prompt is None and not languages:
+        return model.transcribe(audio)
+    return model.transcribe(audio, prompt, languages)
 
 
 def own_gpu(monitor):

@@ -273,6 +273,17 @@ def test_switch_without_restart_unloads_local_and_routes_next_request():
     assert local.loaded and sp.transcribe(AUDIO) == "from local"
 
 
+def test_switch_to_an_unusable_backend_keeps_its_fallback_loaded():
+    local = FakeStt("local", text="from local")
+    cloud = FakeStt("cloud", avail=(False, "no GROQ_API_KEY"))
+    sp, _, notes, _ = _speech(_cfg(backend="local", fallback_order=["cloud", "local", "windows"]),
+                              local=local, cloud=cloud)
+    sp.backend("local")
+    sp.set_backend("cloud")
+    assert local.loaded and local.unloads == 0      # local is what will run: don't pay a reload
+    assert sp.transcribe(AUDIO) == "from local"
+
+
 def test_switch_one_side_only():
     sp, _, _, _ = _speech(_cfg(backend="local"))
     sp.set_backend("cloud", kind="stt")

@@ -36,6 +36,8 @@ ALT_WIN = {0xA4, 0xA5, 0x12, 0x5B, 0x5C}
 CAPS = 0x14
 TYPING_WPM = 40                     # for "time saved"
 CLEANUP_STYLES = ("off", "as_said", "natural", "polished")
+SLOW_PASTE_APPS = {"windowsterminal.exe", "openconsole.exe", "conhost.exe", "cmd.exe", "powershell.exe",
+                   "pwsh.exe", "wezterm-gui.exe", "alacritty.exe", "mintty.exe"}
 
 
 class DictateKeys:
@@ -169,7 +171,7 @@ class Dictation:
 
     def __init__(self, cfg: dict, speech, ui=None, level=None, note=None, mic_factory=None, paster=None,
                  cleaner=None, vad_factory=None, on_active=None, stats_path=None, foreground=None,
-                 clock=time.perf_counter, rest=None):
+                 clock=time.perf_counter, rest=None, warmup=None):
         self.cfg = cfg                                 # the whole live config
         self.speech = speech
         self.ui = ui or (lambda mode, text="": None)
@@ -196,6 +198,8 @@ class Dictation:
         self._lock = threading.Lock()
         self.hook = None
         threading.Thread(target=self._worker, daemon=True, name="dictate").start()
+        if warmup is not None:                         # e.g. UI Automation's first call (~0.5 s) off the hot path
+            self._q.put(("call", warmup))
 
     # -- config ------------------------------------------------------------------------------
     @property
@@ -217,7 +221,10 @@ class Dictation:
             return False
         actions, swallow = self.keys.key(vk, down)
         if down and vk in self.keys.vks and vk in ALT_WIN and self.keys.active:
-            _mask_key()                                # a lone Alt/Win must not open a menu
+            # A lone Alt/Win must not open a menu (or WinUI's access keys, which then eat
+            # the Ctrl+V). Input injected from inside the hook callback is lost, so send
+            # the masking key from another thread; it still lands long before the release.
+            threading.Thread(target=_mask_key, daemon=True, name="dictate-mask").start()
         for a in actions:
             self._q.put((a, self.clock()))
         return swallow
@@ -247,6 +254,12 @@ class Dictation:
                 continue
             if a == "quit":
                 return
+            if a == "call":
+                try:
+                    t()
+                except Exception as e:
+                    print(f"[dictate] warm-up: {e}")
+                continue
             self._do(a, t)
 
     def _do(self, a: str, t: float):
@@ -261,6 +274,9 @@ class Dictation:
                 self._finish(t)
             elif a == "cancel":
                 self._cancel()
+            elif a == "again":
+                if self.last_text and self.paster is not None:
+                    self.paster(self.last_text)
         except Exception as e:
             print(f"[dictate] {a}: {e}")
             self._stop_mic()
@@ -355,14 +371,16 @@ class Dictation:
             self.note("didn't catch that")
             self.rest()
             return
-        if self.dcfg.get("trailing_space", True) and text[-1:] in ".!?,;:":
-            text += " "                                 # the next dictation joins it naturally
+        if self.dcfg.get("trailing_space", True) and not text[-1:].isspace():
+            text += " "                                 # the next dictation doesn't glue onto it
         self.last_text = text
         r = self.paster(text) if self.paster is not None else None
         t_done = self.clock()
         ok = bool(getattr(r, "ok", True)) if r is not None else True
-        self.last_ms = (t_done - t_release) * 1000
-        row = dict(audio_s=round(spoken_s, 2), stt_ms=round((t_stt - t0) * 1000), release_to_text_ms=round(self.last_ms),
+        t_text = getattr(r, "sent_at", None) or t_done   # Ctrl+V out: the text is in the window
+        self.last_ms = (t_text - t_release) * 1000
+        row = dict(audio_s=round(spoken_s, 2), stt_ms=round((t_stt - t0) * 1000),
+                   release_to_stt_ms=round((t0 - t_release) * 1000), release_to_text_ms=round(self.last_ms),
                    app=getattr(r, "app", app) or app, ok=ok, reason=getattr(r, "reason", ""), style=style,
                    words=len(text.split()))
         self.timings.append(row)
@@ -378,8 +396,7 @@ class Dictation:
 
     def paste_again(self):
         """The "paste last dictation again" hotkey."""
-        if self.last_text and self.paster is not None:
-            threading.Thread(target=self.paster, args=(self.last_text,), daemon=True, name="dictate-again").start()
+        self._q.put(("again", self.clock()))       # on the dictation thread (its COM / UI Automation)
 
 
 def _mask_key():
@@ -423,12 +440,17 @@ def attach(asst, bridge, cfg: dict, mic_factory=None, install: bool = True) -> D
         if sig is not None:
             sig.emit(text)
 
+    def paster(text):
+        dc = cfg.get("dictate", {})
+        delay = float(dc.get("restore_delay_s", 0.3))
+        if paste.foreground_app() in SLOW_PASTE_APPS:   # terminals read the clipboard late
+            delay = max(delay, float(dc.get("restore_delay_terminal_s", 0.6)))
+        return paste.paste_text(text, restore_delay_s=delay)
+
     d = Dictation(cfg, asst.speech, ui=ui, level=bridge.level.emit, note=note,
                   mic_factory=mic_factory or (lambda: MicSource(cfg["listen"].get("device"))),
-                  paster=lambda text: paste.paste_text(text, restore_delay_s=float(
-                      cfg.get("dictate", {}).get("restore_delay_s", 0.3))),
-                  vad_factory=vad, on_active=on_active, stats_path=STATE_DIR / "dictation.json",
-                  foreground=paste.foreground_app, rest=rest)
+                  paster=paster, vad_factory=vad, on_active=on_active, stats_path=STATE_DIR / "dictation.json",
+                  foreground=paste.foreground_app, rest=rest, warmup=paste.focused_is_password)
     if install:
         d.install()
     return d

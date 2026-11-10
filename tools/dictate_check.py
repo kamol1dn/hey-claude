@@ -10,6 +10,9 @@ Then, while it runs, focus a text field and write a line to the command file:
     dictate <n>        # hold the dictation key (injected), "speak" clip n, let go
     handsfree <n>      # double tap, clip n, tap
     status             # print the speech labels and NVML used memory
+    focus <title>      # bring the window whose title contains <title> to the front
+    tray <backend>     # trigger the tray's Speech > <backend> action (same as a click)
+    free               # trigger the tray's Free memory now
     quit
 
 Results (one JSON line per command) go to <cmd-file>.out. The tray's Speech
@@ -136,6 +139,18 @@ class Harness:
                     self.write(event="status", speech=asst.speech.label, voice=asst.speaker.label,
                                vram_mb=used_mb(), backend=cfg["speech"].get("backend"))
                     continue
+                if cmd == "focus":
+                    self.write(event="focus", ok=_focus(" ".join(parts[1:])), window=_foreground_title())
+                    continue
+                if cmd in ("tray", "free"):
+                    tray = ctx.get("tray")
+                    act = tray.act_free if cmd == "free" else tray.speech_actions[parts[1]]
+                    from PySide6.QtCore import QMetaObject, Qt
+                    QMetaObject.invokeMethod(act, "trigger", Qt.QueuedConnection)
+                    time.sleep(3)
+                    self.write(event=cmd, arg=parts[1:] or None, speech=asst.speech.label,
+                               voice=asst.speaker.label, vram_mb=used_mb(), backend=cfg["speech"].get("backend"))
+                    continue
                 n = int(parts[1]) if len(parts) > 1 else 0
                 self.clip = self.clips[n]
                 secs = len(self.clip) / 16000 + 0.4
@@ -159,6 +174,31 @@ class Harness:
                            speech=asst.speech.label)
 
 
+def _focus(part: str) -> bool:
+    """SetForegroundWindow on the first visible window whose title contains `part`
+    (a tap of Alt first: Windows lets the process that sent the last input do it)."""
+    u = ctypes.windll.user32
+    found = []
+    proto = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def cb(h, _):
+        buf = ctypes.create_unicode_buffer(256)
+        u.GetWindowTextW(h, buf, 256)
+        if u.IsWindowVisible(h) and part.lower() in buf.value.lower():
+            found.append(h)
+            return False
+        return True
+    u.EnumWindows(proto(cb), 0)
+    if not found:
+        return False
+    u.keybd_event(0x12, 0, 0, 0)
+    u.keybd_event(0x12, 0, KEYUP, 0)
+    u.ShowWindow(found[0], 9)                       # SW_RESTORE
+    ok = bool(u.SetForegroundWindow(found[0]))
+    time.sleep(0.3)
+    return ok
+
+
 def _foreground_title() -> str:
     u = ctypes.windll.user32
     h = u.GetForegroundWindow()
@@ -175,7 +215,7 @@ def main():
     h = Harness(Path(a.cmd_file))
     Path(h.out).unlink(missing_ok=True)
     from heyclaude.__main__ import main as app_main
-    argv = (["--config", a.config] if a.config else [])
+    argv = ["--muted"] + (["--config", a.config] if a.config else [])   # its own wake word stays off
     app_main(argv, harness=h)
 
 

@@ -346,7 +346,22 @@ milestone adds a second check after the wake word fires.
 accepts on other speakers at the chosen threshold, with the added wake
 latency ≤ 100 ms.
 
-## M4c: Speech backends: local, lean, Windows, cloud
+## M4c: Speech backends: local, lean, Windows, cloud ✅ built (2026-11-10)
+
+**Status:** built (PR #19, plus fixes from the live check in the M4d PR); see
+README "Speech backends and lean mode".
+- **Backends:** `heyclaude/speech/` has local / windows / cloud / auto, with fallback along `speech.fallback_order` (the reason is flashed on the island once). Settings > Voice has the switch, a cloud key, the cost estimate and where audio goes.
+- **Simulated question on each backend:**
+  - windows → SAPI, because online speech recognition is off on this PC;
+  - local → turbo;
+  - cloud → no key here, so it fell back to local and said so.
+- **Lean mode, checked with NVML:** turbo + Kokoro take 1658 MB, Free memory now gives back 1556 MB (94%), and they reload in parallel on the next wake.
+- **Live, in the running app:** the tray's Speech actions switched local → windows (VRAM 5663 → 3834 MB) → cloud (falls back to local, which stays loaded) → local with no restart, and dictation used each backend in turn.
+- **Tests:**
+  - offline, every backend mocked: `tests/test_speech*.py`, 74 tests;
+  - cloud was tested with mocks only: no Groq/OpenAI keys on this machine.
+- **WinRT** can only listen to the default mic; it can't take our buffer. So online dictation runs alongside our own capture, and the offline SAPI recognizer handles buffers.
+
 
 **Goal:** the user can choose how much RAM/VRAM speech uses, down to almost
 none, from a tray switch. Build after M4 (it reworks `stt.py`/`tts.py`).
@@ -402,7 +417,17 @@ VRAM (verified with NVML) and reloads on the next wake; switching backends
 from the tray works without a restart; offline tests cover backend selection
 and fallback with every backend mocked.
 
-## M4d: Dictate anywhere
+## M4d: Dictate anywhere ✅ built (2026-11-10)
+
+**Status:** built; see README "Dictate anywhere".
+- **What it is:** `dictate.py` (Right Alt held, double tap for hands-free, Esc cancels) plus `paste.py` (clipboard paste and restore, kept out of clipboard history, password fields skipped via UIA). There is a personal dictionary (Whisper prompt, replacements, snippets), `stt.languages`, optional Claude clean-up per app (off by default), a `dictating` island state and local stats.
+- **Live in the running app:** the real key hook, speech and paste were used; only the mic was fed spoken clips, because the headset can't hear its own speakers.
+  - Typed into Notepad, a Chrome text box and Windows Terminal; hands-free worked too.
+  - The user's clipboard came back intact.
+  - Key release → text: 568-745 ms for 4-6 s sentences on turbo, with the user's own hey-claude sharing the GPU (target ≤ 1 s).
+- **Dictionary,** simulated with three Kokoro voices on turbo: 27/36 of the words spelled right without it, 35/36 with it (`tools/dictionary_eval.py`).
+- **Win11 Notepad** (WinUI) loses a Ctrl+V after a lone Alt unless a masking key is sent. Input injected from inside the low-level hook is dropped, so the mask goes out from another thread.
+
 
 **Goal:** hold a key, speak, and let go: the words are typed wherever the cursor
 is, in any app. Same idea as Coucou's "Flow" dictation (Mac only there), built

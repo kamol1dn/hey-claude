@@ -156,7 +156,7 @@ dictate:
   restore_delay_s: 0.3           # wait before putting your clipboard back (slow apps read it late)
   min_speech_ms: 150             # less speech than this pastes nothing (no "Thank you." from silence)
   max_seconds: 300
-  trailing_space: true           # a space after the final full stop, so the next dictation joins on
+  trailing_space: true           # a space after each dictation, so the next one doesn't glue onto it
 
 dictionary:
   # M4d: your own words. Used by dictation and the assistant's speech-to-text.

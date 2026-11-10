@@ -734,6 +734,34 @@ events, with an fps readout. `--shots DIR` saves a png of every state and
 widget, and `--measure` runs the acceptance measurements. Neither touches a
 running hey-claude.
 
+### Characters (M6)
+
+**Settings → Character** puts a little character in the island where the ember
+is: **Echo** (a pixel bat), **Cinder** (a living coal), **Wren** (a folded-paper
+bird), **Tycho** (a one-eyed orrery) or **Hum** (the island's own face). Pick one
+and the island switches at once; a live preview has a button per state. It can
+also sit on the desktop as a companion above the taskbar (`island.character.where`:
+`island`, `desktop` or `both`).
+
+- It follows the assistant: listening to your level, talking with the voice,
+  thinking, working while tasks run, a little celebration when one finishes, a
+  wince on an error. An answer can carry a mood (`MOOD happy`, never spoken) that
+  it shows as it finishes.
+- **Idle antics:** when nothing has happened for a while it does small things on
+  its own (Echo hangs upside down, Wren goes fishing, Tycho watches a comet…), a
+  dozen each. Settings: off / rare / normal / lively, a checkbox and a ▶ preview
+  per antic. Never while you type, in a full-screen app or game, in calm motion,
+  on battery saver, or while the island is hidden; the wake word, the hotkey, a
+  task or the pointer ends one at once with a short "caught!".
+- **Sleep:** drowsy after ~15 min without you, asleep after ~30 (the wake word
+  still works), and a stretch when you come back.
+- At rest it draws at the island's 8 fps (0 in calm motion), 30 fps for an antic.
+
+Packs are plug-ins: `characters/<id>/` (by PR) or `state/characters/<id>/`
+(local). [characters/README.md](characters/README.md) explains the interface,
+the antics and the CI checks; `tools/character_lab.py` cycles every state, plays
+the antics, measures fps and runs the checks.
+
 ## Conversations and sessions
 
 - **One conversation across all tiers.** hey-claude keeps a rolling

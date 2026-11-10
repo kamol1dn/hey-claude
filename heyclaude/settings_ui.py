@@ -267,6 +267,8 @@ class SettingsWindow(QWidget):
     saved = Signal(dict, list)       # (new full config, changed dotted keys)
     island_preview = Signal(object)  # a scale to show on the island now (float), or None = back to the saved one
     restart_requested = Signal()
+    character_preview = Signal(object)   # M6: a pack id to show on the island now, or None = the saved one
+    character_play = Signal(str)         # M6: "play now" an antic on the island
 
     def __init__(self, cfg: dict, config_path=None, parent=None, wake_hooks=None):
         super().__init__(parent, Qt.Window)
@@ -286,6 +288,7 @@ class SettingsWindow(QWidget):
         self.tabs.setDocumentMode(False)
         lay.addWidget(self.tabs, 1)
         self._build_general()
+        self._build_character()
         self._build_voice()
         self._build_wake()
         self._build_models()
@@ -462,6 +465,18 @@ class SettingsWindow(QWidget):
                                "Keys not shown here (listen timings, island position, claude.exe path, piper/kokoro "
                                "paths…) can be edited in config.yaml by hand." % ACCENT))
         v.addStretch(1)
+
+    def _build_character(self):
+        """M6: Settings > Character (heyclaude/character_settings.py)."""
+        from .character_settings import CharacterTab
+        self.char_tab = CharacterTab()
+        self.char_tab.preview_pack.connect(self.character_preview.emit)
+        self.char_tab.play_antic.connect(self.character_play.emit)
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setFrameShape(QFrame.NoFrame)
+        sa.setWidget(self.char_tab)
+        self.tabs.addTab(sa, "Character")
 
     def _build_wake(self):
         v = self._scroll_tab("Wake word")
@@ -670,6 +685,7 @@ class SettingsWindow(QWidget):
         self._set_combo(self.cmb_motion, str(_get(cfg, "island.motion", "auto")))
         self.cb_hide_idle.setChecked(bool(_get(cfg, "island.hide_when_idle", False)))
         self.ed_weather.setText(str(_get(cfg, "weather.location", "") or ""))
+        self.char_tab.fill(cfg)
 
         self._set_combo(self.cmb_wake, _get(cfg, "wake.model", "hey_jarvis"))
         self.sp_threshold.setValue(float(_get(cfg, "wake.threshold", 0.5)))
@@ -820,6 +836,7 @@ class SettingsWindow(QWidget):
 
         _set(new, "agent.allowed_tools", self._tools(self.ed_agent_tools))
         _set(new, "tasks.allowed_tools", self._tools(self.ed_tasks_tools))
+        self.char_tab.collect(new)
         return new, errors, warnings
 
     def _text(self, edit: QLineEdit, key: str):
@@ -1092,4 +1109,5 @@ class SettingsWindow(QWidget):
             if ans == QMessageBox.Discard:
                 self._fill(self._orig)
         self.island_preview.emit(None)               # drop an unsaved size preview
+        self.character_preview.emit(None)            # ...and an unsaved character
         e.accept()

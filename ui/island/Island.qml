@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Shapes
+import ".."
 import "engine.js" as E
 
 // The hey-claude island, "Ember & Thread" (docs/island-motion.md).
@@ -33,6 +34,12 @@ Item {
     property string clockMode: model ? model.clockMode : "real"
     property real fakeNow: 0
     property bool inputOpen: false
+    // M6: a character pack in place of the ember (model.characterUrl; "" = the theme's ember)
+    readonly property bool hasChar: model ? model.characterUrl !== "" && !charFailed : false
+    property bool charFailed: false              // the pack didn't load: the ember comes back
+    Connections { target: model; ignoreUnknownSignals: true; function onCharacterChanged() { root.charFailed = false } }
+    readonly property real charPad: 6
+    onHasCharChanged: { E.setCharacter(hasChar, charPad); kick() }
     property string attachment: ""
 
     // Where the pill sits in the window: centred, and vertically centred in a
@@ -59,6 +66,7 @@ Item {
             log: function (m) { if (model) model.log(m); else console.log(m) },
             pinList: false, suspended: false
         })
+        if (root.hasChar) E.setCharacter(true, root.charPad)
         if (model) model.ready()
         tick()
     }
@@ -112,6 +120,19 @@ Item {
         onTriggered: root.tick()
     }
     Timer { id: rest; repeat: false; onTriggered: root.tick() }
+
+    property bool suspendedChar: false
+    // M6: antics from the scheduler (heyclaude/island_qml.py), and their interrupt
+    Connections {
+        target: model
+        ignoreUnknownSignals: true
+        function onCharCmd(fn, args) {
+            if (fn === "play") { if (!character.playAntic(args[0], args[1]) && model) model.characterAnticDone(args[0], false) }
+            else if (fn === "interrupt") character.interrupt()
+            else if (fn === "suspend") root.suspendedChar = !!args[0]
+        }
+    }
+    function characterInfo() { return character.info() }
 
     // Commands from Python: model.cmd("go", ["ready", {}]) etc.
     Connections {
@@ -192,7 +213,7 @@ Item {
         var c = dimC && o.hov > 0.005 ? [154 + (242 - 154) * o.hov, 154 + (242 - 154) * o.hov, 154 + (242 - 154) * o.hov] : l.color
         item.color = rgba(c, 1)
         item.opacity = l.a
-        item.x = l.x + xo + (o.trem || 0)
+        item.x = l.x + xo + (o.trem || 0) + (o.chpad || 0)
         var fm = l.big ? fm10 : fm9
         item.y = o.cy + (l.big ? 4.6 : 4.2) + (l.yo || 0) + l.dy - fm.ascent
         item.reveal = l.nib && l.rev < 1 ? l.rev : 1
@@ -220,12 +241,42 @@ Item {
             aa: 0.6 / (Math.max(1, Screen.devicePixelRatio) * root.uiScale)   // AA in device pixels
         }
 
+        // ---- the character (M6), where the ember would be; clipped to the pill -------
+        Item {
+            id: charLayer
+            anchors.fill: parent
+            clip: true
+            visible: root.hasChar
+            CharacterHost {
+                id: character
+                objectName: "character"
+                x: o.ex; y: o.cy
+                source: model ? model.characterUrl : ""
+                manifest: model ? model.characterManifest : ({})
+                budgets: model ? model.characterBudgets : ({ idle_fps: 8, rest_fps: 4, antic_fps: 30, live_fps: 60 })
+                stateId: model ? model.characterState : "idle"
+                mood: model ? model.characterMood : "neutral"
+                count: model ? model.characterCount : 0
+                // 22 px at rest (28 px head), 28 with a 40 px head: whole pixels only
+                size: Math.round(22 + 6 * Math.max(0, Math.min(1.33, (o.head - 28) / 12)))
+                small: true
+                level: o.mic || 0
+                amplitude: o.tts || 0
+                progress: o.progress || 0
+                reducedMotion: o.motion !== "full"
+                running: o.hide > 0.02 && !root.suspendedChar
+                pixelScale: root.uiScale
+                onAnticFinished: function (id, caught) { if (model) model.characterAnticDone(id, caught) }
+                onLoadFailed: function (why) { root.charFailed = true; if (model) model.log("[character] " + why + " (showing nothing; check tools/character_lab.py --check)") }
+            }
+        }
+
         // ---- small vector bits on top of the body --------------------------------
         // off: 2 px slash over a 3 px underlay; holding-muted reuses it
         Shape {
             id: slashShape
             readonly property real t: Math.max(o.slash || 0, o.muteSlash || 0)
-            visible: t > 0.01
+            visible: t > 0.01 && !o.character
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath { strokeColor: "#080808"; strokeWidth: 3.2; capStyle: ShapePath.RoundCap; fillColor: "transparent"
@@ -237,12 +288,12 @@ Item {
         }
         // paused: pilot light + resume arc (fills clockwise from 12 o'clock)
         Rectangle {
-            visible: (o.pilotA || 0) > 0.01
+            visible: (o.pilotA || 0) > 0.01 && !o.character
             x: o.ex - 1.5; y: o.cy - 1.5; width: 3; height: 3; radius: 1.5
             color: root.cLive; opacity: o.pilotA || 0
         }
         Shape {
-            visible: (o.arcA || 0) > 0.01
+            visible: (o.arcA || 0) > 0.01 && !o.character
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath { strokeColor: Qt.rgba(92 / 255, 86 / 255, 82 / 255, 0.5 * (o.arcA || 0) / 0.35 * 0.5); strokeWidth: 1; fillColor: "transparent"
@@ -275,7 +326,7 @@ Item {
             visible: (o.check || 0) > 0.01
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
-            readonly property real x0: o.ex + 10
+            readonly property real x0: o.ex + 10 + (o.chpad || 0)
             readonly property var pts: {
                 var t = o.check || 0, l1 = Math.sqrt(18), l2 = Math.sqrt(2 * 6.4 * 6.4), L = (l1 + l2) * t, cy = o.cy
                 if (L <= l1) { var f = L / l1; return [Qt.point(x0, cy), Qt.point(x0 + 3 * f, cy + 3 * f)] }
@@ -288,7 +339,7 @@ Item {
         }
         // task satellites + kindling sparks
         Repeater {
-            model: o.sats ? o.sats.length : 0
+            model: o.sats && !o.character ? o.sats.length : 0
             Rectangle {
                 readonly property var s: o.sats[index] || ({ x: 0, y: 0, sz: 1, a: 0, off: false })
                 x: s.x - s.sz * 1.4; y: s.y - s.sz * 1.4; width: s.sz * 2.8; height: width; radius: width / 2
@@ -482,14 +533,15 @@ Item {
         Shape {
             id: followupDrain
             objectName: "followupDrain"
+            readonly property real r: o.character ? character.size / 2 + 3 : 9.5
             visible: (o.drainA || 0) > 0.01
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath { strokeColor: Qt.rgba(92 / 255, 86 / 255, 82 / 255, 0.35 * (o.drainA || 0)); strokeWidth: 1; fillColor: "transparent"
-                PathAngleArc { centerX: o.ex; centerY: o.cy; radiusX: 9.5; radiusY: 9.5; startAngle: 0; sweepAngle: 360 } }
+                PathAngleArc { centerX: o.ex; centerY: o.cy; radiusX: followupDrain.r; radiusY: followupDrain.r; startAngle: 0; sweepAngle: 360 } }
             ShapePath { strokeColor: Qt.rgba(217 / 255, 119 / 255, 87 / 255, 0.9 * (o.drainA || 0)); strokeWidth: 1.4
                 capStyle: ShapePath.RoundCap; fillColor: "transparent"
-                PathAngleArc { centerX: o.ex; centerY: o.cy; radiusX: 9.5; radiusY: 9.5; startAngle: -90
+                PathAngleArc { centerX: o.ex; centerY: o.cy; radiusX: followupDrain.r; radiusY: followupDrain.r; startAngle: -90
                     sweepAngle: 360 * Math.max(0.001, o.drainU || 0) } }
         }
 
@@ -537,9 +589,12 @@ Item {
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             cursorShape: root.hitCtl(mouseX, mouseY) || (o.state === "speaking") || (o.state === "ready" && !(o.rows && o.rows.length)) || o.state === "off" ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onEntered: { E.setHover(true); root.kick(); if (model) model.hover(true) }
-            onExited: { E.setHover(false); E.setCtlHover(null); root.kick(); if (model) model.hover(false) }
-            onPositionChanged: function (m) { E.setCtlHover(root.hitCtl(m.x, m.y)); root.kick() }
+            onEntered: { E.setHover(true); root.kick(); if (model) model.hover(true); if (root.hasChar) { character.interrupt(); character.near = 1 } }
+            onExited: { E.setHover(false); E.setCtlHover(null); root.kick(); if (model) model.hover(false); if (root.hasChar) { character.near = 0; character.look = Qt.point(0, 0) } }
+            onPositionChanged: function (m) {
+                E.setCtlHover(root.hitCtl(m.x, m.y)); root.kick()
+                if (root.hasChar) character.look = Qt.point(Math.max(-1, Math.min(1, (m.x - o.ex) / 80)), Math.max(-1, Math.min(1, (m.y - o.cy) / 24)))
+            }
             onClicked: function (m) {
                 if (!model) return
                 if (m.button === Qt.RightButton) { model.contextMenu(); return }

@@ -225,7 +225,10 @@ def widget_prompt(cfg: dict | None) -> str:
         return ""
     from .widgets import prompt_text
     return ("\n\nIsland cards. " + prompt_text() +
-            "\nThe WIDGET line is the only exception to the plain-spoken-sentences rule, and it must come last.")
+            "\nThe WIDGET line is the only exception to the plain-spoken-sentences rule, and it must come last."
+            "\nYou may also end with one line `MOOD happy`, `MOOD excited`, `MOOD sorry` or `MOOD confused` when "
+            "the answer clearly carries that feeling (something worked, good news, an apology, you didn't "
+            "understand); the island's character shows it. Most answers have no MOOD line.")
 
 
 def system_prompt(projects: Projects, has_agent: bool = True) -> str:

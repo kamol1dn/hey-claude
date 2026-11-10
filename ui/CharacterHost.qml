@@ -43,7 +43,8 @@ Item {
         ld.setSource(host.source, {
             stateId: host.stateId, size: host.size, small: host.small, bounds: boundsFor(),
             budgets: host.budgets, manualClock: host.manualClock, reducedMotion: host.reducedMotion,
-            pixelScale: host.pixelScale, running: host.running, level: host.level, amplitude: host.amplitude
+            pixelScale: host.pixelScale, running: host.running, level: host.level, amplitude: host.amplitude,
+            oneshots: (host.manifest && host.manifest.oneshot) || {}
         })
     }
     onSourceChanged: load()

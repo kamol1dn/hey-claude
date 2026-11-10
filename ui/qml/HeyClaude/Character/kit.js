@@ -156,7 +156,7 @@ function Sim(def) {
     this.blink = 0; this.blinkAt = 1.5 + random() * 3; this.blinkT = -1;
     this.p = {}; this.cs = {}; this.parts = []; this.calm = false;
     this.progress = 0; this.count = 0; this.mood = 'neutral';
-    this.antic = null; this.caught = null;
+    this.antic = null; this.caught = null; this.small = true;   // small: in the island (the host keeps it current)
     if (def.enter) def.enter(this, 'idle');
 }
 Sim.prototype.set = function (state) {
@@ -259,9 +259,11 @@ var LIVE = { listening: 1, talking: 1, thinking: 1, woke: 1, holding: 1, followu
 function wantFps(s, B) {
     var st = s.state, calm = s.calm;
     if (s.caught) return B.live_fps;
-    if (s.antic) return calm ? 0 : B.antic_fps;
+    if (s.antic) return B.antic_fps;          // (the scheduler never starts one in calm; "play now" may)
     if (st === 'thinking' && s.t > 30) return calm ? 15 : 30;
     if (st === 'working') return calm ? 0 : Math.min(B.live_fps, 24);
+    // long waits after their entrance: an approval card, a model load
+    if ((st === 'approval_needed' || st === 'loading') && s.t > 1.2) return calm ? 0 : Math.min(B.live_fps, 24);
     if (LIVE[st]) return calm && s.t > 1.2 && !(st === 'listening' || st === 'talking' || st === 'holding' || st === 'followup' || st === 'dictating') ? 0 : B.live_fps;
     if (calm) return 0;
     // resting: short 30 fps bursts for a blink, the pointer arriving, a fresh state;

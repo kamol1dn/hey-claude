@@ -637,7 +637,7 @@ Next packs, each with its own small animation:
 **Done when:** each pack renders from a recorded real tool result, has a
 schema test, and passes the M5 frame-budget check.
 
-## M6: Characters as plug-ins (pick one in Settings, add new ones by PR)
+## M6: Characters as plug-ins (pick one in Settings, add new ones by PR) ✅ built (2026-11-10)
 
 **Goal:** the character is a swappable pack behind one interface. All five (Echo, Cinder, Wren, Tycho, Hum)
 original designs in `docs/character-options.html` ship as built-in packs, the
@@ -756,6 +756,35 @@ motion and character.
 - a test pack that implements only the five core states runs every app state
   through fallbacks;
 - adding a new state to the registry needs no change to any existing pack.
+
+**Built (2026-11-10):**
+- Registry 1.1 (`ui/states.json`): `budgets` (idle 8 fps, rest 4, antic 30, live 60, antics ≤ 20 s, interrupt
+  ≤ 150 ms) and the sleep progression `drowsy` → `asleep` → `waking` (fallbacks to `idle`). Ember & Thread
+  (registry 1.0) still loads unchanged.
+- The kit `ui/qml/HeyClaude/Character` (`import HeyClaude.Character`): `CanvasCharacter.qml` (the QML
+  interface; `stateId` because `Item.state` is taken) and `kit.js` (the design page's simulation and helpers,
+  a frame driver that stops at 0 fps). `ui/CharacterHost.qml` hosts a pack; `ui/Companion.qml` +
+  `heyclaude/companion.py` are the desktop companion (click-through, bottom right).
+- Five built-in packs ported from `docs/character-options.html` (`characters/<id>/`): Echo (13 antics),
+  Cinder (13), Wren (12), Tycho (13), Hum (12). Each adds `drowsy`, `asleep`, `waking`, `woke` and
+  `approval_needed`; every antic has a "caught!" exit ≤ 0.3 s.
+- `heyclaude/characters.py`: pack loader and validation (built-in + `state/characters/`), fallback
+  resolution logged once, `AnticScheduler` (weighted, never twice in a row, cooldowns, `min_idle`, time /
+  month / weekday / weather / user-idle conditions; gates: typing, full screen, calm, battery saver, hidden,
+  busy), `Sleep`, `InputWatch` (typing = input without the pointer moving), and `Driver` (modes and events
+  to registry states, one-shots that real states cut short, the antic and sleep ticks).
+- The island: the character replaces the ember in the pill (labels move over 6 px), the pointer makes it
+  look and ends an antic, a pack that fails to load brings the ember back. Weather antics read the last
+  weather card. Settings → Character (`heyclaude/character_settings.py`): gallery, live preview with a
+  button per state, where (island / desktop / both), desktop size, antics on/off, how often, a checkbox and
+  ▶ per antic; picking a pack switches the island live.
+- Mood: answers may end with `MOOD happy|excited|sorry|confused` (never spoken; `widgets.WidgetFilter`);
+  the character plays it as the answer finishes.
+- `tools/character_lab.py` (lab window, `--check`, `--shots`, `--previews`), `characters/README.md`
+  (contributing), a PR template with the originality check, `tests/test_characters.py` (registry
+  fallbacks, pack loading, the scheduler, the driver, every pack's CI checks, a core-only fixture pack
+  through every app state, the island and Settings).
+- Default `island.character.pack: ember` (no character) until you pick one.
 
 ## M7: Tasks v2
 

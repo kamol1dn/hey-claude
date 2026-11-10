@@ -414,3 +414,31 @@ def fullscreen_app() -> bool:
     except (AttributeError, OSError):
         return False
     return st.value in (QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE)
+
+
+def battery_saver() -> bool:
+    """Windows battery saver (Energy saver) is on."""
+    s = _SYSTEM_POWER_STATUS()
+    if not _kernel32.GetSystemPowerStatus(ctypes.byref(s)):
+        return False
+    return bool(s.SystemStatusFlag & 1)
+
+
+class _LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+
+def last_input_s() -> float:
+    """Seconds since the last keyboard or mouse input anywhere (GetLastInputInfo)."""
+    li = _LASTINPUTINFO()
+    li.cbSize = ctypes.sizeof(li)
+    if not _user32.GetLastInputInfo(ctypes.byref(li)):
+        return 0.0
+    return max(0, (_kernel32.GetTickCount() - li.dwTime) & 0xFFFFFFFF) / 1000.0
+
+
+def cursor_pos() -> tuple[int, int]:
+    p = wintypes.POINT()
+    if not _user32.GetCursorPos(ctypes.byref(p)):
+        return (0, 0)
+    return (p.x, p.y)

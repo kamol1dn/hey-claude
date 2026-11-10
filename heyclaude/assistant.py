@@ -1091,6 +1091,8 @@ class Assistant:
             else:
                 print(f"[widget] {wf.spec.get('widget')}")
                 self._ui_emit("widget", wf.spec)
+        if wf.mood and gen == self.gen:
+            self._ui_emit("mood", wf.mood)          # M6: the character's mood for this answer
         self._wf = None
         self.speaker.flush()
         if answered and gen == self.gen:

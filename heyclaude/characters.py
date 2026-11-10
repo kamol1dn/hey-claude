@@ -33,6 +33,9 @@ DEFAULT_BOUNDS = [-60, -60, 120, 120]
 DEFAULT_DESKTOP_BOUNDS = [-100, -80, 200, 170]
 WHERE = ("pill", "desktop")
 WEATHER = ("clear", "cloudy", "rain", "snow", "storm", "fog", "wind")
+# the weather card's icon (widgets/weather) -> an antic's `when.weather`
+ICON_WEATHER = {"sun": "clear", "night": "clear", "partly": "cloudy", "cloud": "cloudy", "rain": "rain",
+                "storm": "storm", "snow": "snow", "fog": "fog", "wind": "wind"}
 FREQUENCY_S = {"rare": 600.0, "normal": 240.0, "lively": 90.0}   # mean gap between antics while idle
 
 
@@ -384,3 +387,185 @@ class AnticScheduler:
         self.last_id = antic["id"]
         self.last_played[antic["id"]] = now
         self.ends_at = now + float(antic.get("duration", 6))
+
+
+# ------------------------------------------------------------------ input watch
+class InputWatch:
+    """User presence from the OS: how long since the last input, and whether that input
+    looks like typing (the last-input time moved but the pointer didn't)."""
+
+    def __init__(self, typing_hold_s: float = 4.0, probe=None):
+        self.hold = typing_hold_s
+        self._probe = probe or self._win_probe
+        self._last_cursor = None
+        self._typing_until = 0.0
+
+    @staticmethod
+    def _win_probe():
+        from . import winsys
+        return winsys.last_input_s(), winsys.cursor_pos()
+
+    def poll(self, now: float) -> tuple[float, bool]:
+        try:
+            idle, cur = self._probe()
+        except Exception:
+            return 0.0, False
+        if idle < 1.5 and self._last_cursor is not None and cur == self._last_cursor:
+            self._typing_until = now + self.hold
+        self._last_cursor = cur
+        return idle, now < self._typing_until
+
+
+# ------------------------------------------------------------------ the driver
+ONESHOT_EVENTS = {"woke": 0.6, "done": 2.4, "happy": 2.4, "error": 2.0, "confused": 2.0, "voice_mismatch": 1.6,
+                  "sending": 3.2, "waking": 1.6}
+
+
+class Driver:
+    """Turns the assistant's modes and events into the character's state, runs the sleep
+    progression and the antic scheduler. Qt-free: `send(fn, args)` talks to the QML host
+    ("state", "play", "interrupt"), `later(ms, fn)` schedules a callback."""
+
+    def __init__(self, send, later, clock=time.time, log=print):
+        self.send, self.later, self.clock, self.log = send, later, clock, log
+        self.man: dict | None = None
+        self.mode = "loading"
+        self.tasks = 0
+        self.paused = False
+        self.sleep = Sleep()
+        self.sleep_stage = ""
+        self.over: tuple[str, float] | None = None      # a one-shot playing over the mode
+        self.rest_since = clock()
+        self.sched: AnticScheduler | None = None
+        self.shown = ""
+        self.mood = "neutral"
+
+    # -- configuration -------------------------------------------------------------
+    def configure(self, man: dict | None, frequency: str = "normal", disabled=(), where: str = "pill"):
+        self.man = man
+        self.where = where
+        if man is None:
+            self.sched = None
+            self.shown = ""
+            return
+        antics = [a for a in man.get("antics", []) if where in a.get("where", WHERE)]
+        en = {a["id"] for a in antics} - set(disabled or ())
+        self.sched = AnticScheduler(antics, frequency=frequency, enabled=en)
+        self.shown = ""
+        self._push()
+
+    # -- inputs ----------------------------------------------------------------------
+    def set_mode(self, mode: str, tasks: int | None = None, paused: bool | None = None):
+        if tasks is not None:
+            self.tasks = tasks
+        if paused is not None:
+            self.paused = paused
+        was_rest = self._resting_mode(self.mode)
+        was_speaking = self.mode in ("speaking", "talking")
+        self.mode = mode
+        rest = self._resting_mode(mode)
+        if not rest:
+            self._interrupt()
+            # a real state cuts a one-shot short (the wake catch carries on into listening)
+            if self.over and not (self.over[0] == "woke" and mode in ("listening", "holding", "followup")):
+                self.over = None
+        if rest and not was_rest:
+            self.rest_since = self.clock()
+        mood_kind = ""
+        if was_speaking and mode not in ("speaking", "talking") and self.mood != "neutral":
+            # the answer's mood (its MOOD line) shows as it finishes: a little celebration or a wince
+            if mode in ("idle", "ready", "followup", "off"):
+                mood_kind = "happy" if self.mood in ("happy", "excited") else "confused"
+            self.mood = "neutral"
+        if mood_kind:
+            self.event(mood_kind)
+        else:
+            self._push()
+
+    def event(self, kind: str):
+        """A one-shot: woke, done, error, voice_mismatch, sending, happy, confused."""
+        secs = ONESHOT_EVENTS.get(kind)
+        if secs is None:
+            return
+        if self.man:
+            secs = float(self.man.get("oneshot", {}).get(resolve(self.man, kind, log=None), secs))
+        self._interrupt()
+        until = self.clock() + secs
+        self.over = (kind, until)
+        self._push()
+        self.later(int(secs * 1000) + 30, self._expire)
+
+    def set_mood(self, mood: str):
+        self.mood = mood if mood in MOODS else "neutral"
+
+    def pointer(self):
+        """The pointer arrived on the island or the companion."""
+        self._interrupt()
+
+    def antic_done(self, aid: str, caught: bool):
+        if self.sched and self.sched.playing == aid:
+            self.sched.interrupt(self.clock()) if caught else setattr(self.sched, "playing", "")
+
+    def tick(self, ctx: Context):
+        """Every second or so: sleep progression, then maybe an antic."""
+        if not self.man:
+            return
+        stage = self.sleep.update(ctx.user_idle_s)
+        if stage == "waking":
+            self.sleep_stage = ""
+            if self._resting_mode(self.mode):
+                self.event("waking")
+        elif stage != self.sleep_stage:
+            self.sleep_stage = stage
+            self._interrupt()
+            self._push()
+        if not self.sched:
+            return
+        ctx.idle_s = self.clock() - self.rest_since if self._resting_mode(self.mode) else 0.0
+        ctx.resting = self.state() in ("idle", "drowsy") and self.over is None
+        ctx.where = self.where
+        a = self.sched.tick(ctx)
+        if a is not None:
+            self.send("play", [a["id"], float(a.get("duration", 6))])
+
+    def play_now(self, aid: str) -> bool:
+        """Settings' "play now" preview."""
+        if not self.man:
+            return False
+        for a in self.man.get("antics", []):
+            if a["id"] == aid:
+                if self.sched:
+                    self.sched.start(a, self.clock())
+                self.send("play", [aid, float(a.get("duration", 6))])
+                return True
+        return False
+
+    # -- state -----------------------------------------------------------------------
+    @staticmethod
+    def _resting_mode(mode: str) -> bool:
+        return mode in ("idle", "ready")
+
+    def state(self) -> str:
+        """The registry state now (before the pack's fallbacks)."""
+        if self.over and self.clock() < self.over[1]:
+            return self.over[0]
+        self.over = None
+        return state_for(self.mode, tasks=self.tasks, paused=self.paused, sleep=self.sleep_stage)
+
+    def _expire(self):
+        if self.over and self.clock() >= self.over[1] - 0.02:
+            self.over = None
+            self._push()
+
+    def _interrupt(self):
+        if self.sched and self.sched.playing:
+            self.sched.interrupt(self.clock())
+        self.send("interrupt", [])
+
+    def _push(self):
+        if not self.man:
+            return
+        shown = resolve(self.man, self.state(), log=self.log)
+        if shown != self.shown:
+            self.shown = shown
+            self.send("state", [shown])

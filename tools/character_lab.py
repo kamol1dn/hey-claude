@@ -37,7 +37,7 @@ if "--check" in sys.argv or "--shots" in sys.argv or "--previews" in sys.argv:
 if os.environ.get("QT_QPA_PLATFORM") == "offscreen" and sys.platform == "win32":
     os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 
-from PySide6.QtCore import QEventLoop, QMetaObject, QPoint, QRect, Qt, QTimer, QUrl, Q_ARG, Q_RETURN_ARG  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEventLoop, QMetaObject, QPoint, QRect, Qt, QTimer, QUrl, Q_ARG, Q_RETURN_ARG  # noqa: E402
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QImage, QPainter  # noqa: E402
 from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface  # noqa: E402
 
@@ -67,7 +67,8 @@ class Lab:
             if software:
                 QQuickWindow.setGraphicsApi(QSGRendererInterface.Software)
             QQuickWindow.setDefaultAlphaBuffer(True)
-            self.app = QGuiApplication(sys.argv[:1])
+            from PySide6.QtWidgets import QApplication
+            self.app = QApplication(sys.argv[:1])      # widgets too (tests, Settings)
         self.warnings: list[str] = []
         self.view = QQuickView()
         self.view.setColor(QColor(0, 0, 0, 0) if clear else QColor("#080808"))
@@ -97,7 +98,7 @@ class Lab:
         self.man = man
         h = self.host
         h.setProperty("source", QUrl())
-        h.setProperty("manifest", {k: v for k, v in man.items() if k in ("bounds", "desktop_bounds")})
+        h.setProperty("manifest", {k: v for k, v in man.items() if k in ("bounds", "desktop_bounds", "oneshot")})
         h.setProperty("small", small)
         h.setProperty("size", size or (man.get("size", {}).get("pill" if small else "desktop") or (24 if small else 120)))
         h.setProperty("budgets", self.budgets)
@@ -130,6 +131,8 @@ class Lab:
             t += dt
             if f > 0:
                 frames += 1
+                if frames % 3 == 0:            # render now: the draw code really runs and its errors surface
+                    self.view.grabWindow()
         return frames, t
 
     def grab(self, size_px: int | None = None) -> QImage:
@@ -174,8 +177,11 @@ def check_pack(lab: Lab, man: dict, builtin: bool = True) -> list[str]:
             out.append("nothing was drawn")
     # idle budget (pill)
     lab.load(man, small=True)
-    for st, cap in (("idle", B.get("idle_fps", 8) * 1.5), ("off", B.get("rest_fps", 4) * 1.5 + 1),
-                    ("asleep", B.get("rest_fps", 4) * 1.5 + 1), ("drowsy", B.get("idle_fps", 8) * 1.5)):
+    caps = {"idle": B.get("idle_fps", 8) * 1.5, "drowsy": B.get("idle_fps", 8) * 1.5,
+            "off": B.get("rest_fps", 4) * 1.5 + 1, "asleep": B.get("rest_fps", 4) * 1.5 + 1}
+    for st in ("idle", "off", "asleep", "drowsy"):
+        shown = CH.resolve(man, st, log=None)
+        cap = caps.get(shown, caps["idle"])
         lab.state(st)
         lab.run(2.0)                                     # let the entry settle
         n, secs = lab.run(20.0)
@@ -254,13 +260,11 @@ def contact_sheet(lab: Lab, man: dict, path: Path):
         tiles.append((st + ("" if CH.resolve(man, st, log=None) == st else " *"), lab.grab()))
     lab.inputs(0, 0)
     pill: list[tuple[str, QImage]] = []
-    lab.load(man, small=True, size=24)
-    lab.host.setProperty("pixelScale", 3.0)
+    lab.load(man, small=True, size=72)             # the island drawing (small) at 3x, rendered, not upscaled
     for st in SHOW_STATES:
         lab.state(st)
         lab.run(0.25 if st in ("happy", "sending", "waking", "confused") else 0.9, at_fps=60, fake_audio=st in ("listening", "talking"))
         pill.append((st, lab.grab()))
-    lab.host.setProperty("pixelScale", 1.0)
     antic_tiles: list[tuple[str, QImage]] = []
     for a in man.get("antics", []):
         small = "desktop" not in a.get("where", CH.WHERE)

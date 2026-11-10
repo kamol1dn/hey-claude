@@ -139,6 +139,11 @@ antics: {
 }
 ```
 
+A good pattern (Wren, Cinder and Tycho use it): give your `update()` a pose object of
+targets (lean, squash, eyelid…) that an antic's own `pose(s, a, P)` may change before the
+followers run, so an antic moves the real body with the same easing as the states, and
+letting go (an interrupt) eases back by itself.
+
 The app's scheduler (`heyclaude/characters.py`) picks a weighted random antic, never
 the same twice in a row, honouring cooldowns, at most one per few minutes (Settings:
 rare / normal / lively / off). Nothing plays while the user types, in a full-screen app

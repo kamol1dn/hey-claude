@@ -35,11 +35,12 @@ Item {
     property real near: 0                   // 0..1, how close the pointer is
     property var budgets: ({ idle_fps: 8, rest_fps: 4, antic_fps: 30, live_fps: 60 })
     property bool manualClock: false        // tests and the lab: advance(dt) instead of the timer
+    property var oneshots: ({})             // character.json "oneshot": state -> seconds (the JS may also say)
 
     // ---- outputs ----------------------------------------------------------------
     signal finished(string stateId)         // a one-shot state has played out
     signal anticFinished(string id, bool caught)
-    readonly property string antic: sim && sim.antic ? sim.antic.id : ""
+    property string antic: ""              // the antic playing now (set here, never by the app)
     property real fps: 0                    // the rate it is running at now (0 = still)
     property int frames: 0                  // paints so far (the lab measures fps with it)
     property var def: null
@@ -67,6 +68,7 @@ Item {
         if (sim.antic) interrupt()
         sim.caught = null
         sim.antic = { id: id, t: 0, dur: Math.max(0.2, dur || 6), u: 0 }
+        antic = id
         var a = def.antics[id]
         if (a.start) a.start(sim, sim.antic)
         kick()
@@ -79,6 +81,7 @@ Item {
         if (a && a.end) a.end(sim, sim.antic, true)
         sim.caught = { id: id, t: 0, dur: (a && a.exitDur) || 0.25 }
         sim.antic = null
+        antic = ""
         anticFinished(id, true)
         step(0)                                  // the next paint already shows the real state
         canvas.requestPaint()
@@ -91,18 +94,26 @@ Item {
         K.seed(0)
         def = pack.make(K)
         sim = new K.Sim(def)
+        antic = ""
         sim.calm = reducedMotion
+        sim.small = small
         sim.set(stateId)
-        _oneshot = def.oneshot && def.oneshot[stateId] ? def.oneshot[stateId] : -1
+        _oneshot = oneshotFor(stateId)
+        step(0)                                  // the first paint sees a stepped simulation
         kick()
     }
+    function oneshotFor(st) {
+        var m = (def && def.oneshot) || oneshots || {}
+        return m[st] ? m[st] : -1
+    }
+    onSmallChanged: if (sim) { sim.small = small; canvas.requestPaint() }
     onPackChanged: _make()
     Component.onCompleted: _make()
     onStateIdChanged: {
         if (!sim) return
         if (sim.antic) interrupt()
         sim.set(stateId)
-        _oneshot = def.oneshot && def.oneshot[stateId] ? def.oneshot[stateId] : -1
+        _oneshot = oneshotFor(stateId)
         kick()
     }
     onReducedMotionChanged: if (sim) { sim.calm = reducedMotion; if (reducedMotion) { sim.parts = []; interrupt() } kick() }
@@ -127,6 +138,7 @@ Item {
             var id = sim.antic.id, a = def.antics[id]
             if (a && a.end) a.end(sim, sim.antic, false)
             sim.antic = null
+            antic = ""
             anticFinished(id, false)
         }
         if (_oneshot > 0 && sim.t >= _oneshot) { _oneshot = -1; finished(stateId) }
@@ -135,6 +147,7 @@ Item {
         if (!sim || !running) return 0
         var f = def.fps ? def.fps(sim, budgets) : K.wantFps(sim, budgets)
         if (f === undefined || f === null) f = K.wantFps(sim, budgets)
+        if (f <= 0 && _oneshot > 0) f = 4         // still at rest, but a one-shot's clock must reach finished()
         return Math.max(0, Math.min(f, sim.antic ? budgets.antic_fps : budgets.live_fps))
     }
     // tests / lab: step by dt and paint now

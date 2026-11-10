@@ -288,6 +288,7 @@ class SettingsWindow(QWidget):
         self._build_general()
         self._build_voice()
         self._build_wake()
+        self._build_dictation()
         self._build_models()
         self._build_projects()
         self._build_permissions()
@@ -544,6 +545,77 @@ class SettingsWindow(QWidget):
         v.addWidget(g)
         v.addStretch(1)
 
+    # -- M4d: dictation and the personal dictionary --------------------------------------
+    CLEANUP = [("Off (fastest)", "off"), ("As said: punctuation only", "as_said"),
+               ("Natural: drop um/uh and false starts", "natural"), ("Polished", "polished")]
+
+    def _build_dictation(self):
+        v = self._scroll_tab("Dictation")
+        g = QGroupBox("Dictate anywhere")
+        f = self._form(g)
+        self.cb_dictate = QCheckBox("Hold the key, speak, let go: it types where the cursor is")
+        self._row(f, "dictate.enabled", "Dictation", self.cb_dictate)
+        self.ed_dictate_key = QLineEdit()
+        self.ed_dictate_key.setPlaceholderText("right alt, caps lock, f13, right ctrl…")
+        self._row(f, "dictate.key", "Key", self.ed_dictate_key)
+        self.ed_paste_again = QLineEdit()
+        self.ed_paste_again.setPlaceholderText("e.g. win+alt+v; empty = none")
+        self._row(f, "dictate.paste_again_hotkey", "Paste again", self.ed_paste_again)
+        self.cmb_cleanup = self._combo(self.CLEANUP)
+        self._row(f, "dictate.cleanup", "Clean-up by Claude", self.cmb_cleanup)
+        f.addRow("", self._help("Double tap the key for hands-free (tap again to finish); Esc cancels. "
+                                "Your clipboard is put back after each paste; nothing is typed into "
+                                "password fields. Clean-up adds a second or two; set it per app in "
+                                "config.yaml (dictate.cleanup_apps)."))
+        self.lbl_dictate_stats = self._help("")
+        f.addRow("", self.lbl_dictate_stats)
+        v.addWidget(g)
+
+        g = QGroupBox("Personal dictionary (dictation and the assistant)")
+        f = self._form(g)
+        self.ed_dict_words = QPlainTextEdit()
+        self.ed_dict_words.setPlaceholderText("One per line: names, course names, words it gets wrong")
+        self.ed_dict_words.setFixedHeight(80)
+        self._row(f, "dictionary.words", "Words", self.ed_dict_words)
+        self.ed_dict_repl = QPlainTextEdit()
+        self.ed_dict_repl.setPlaceholderText("heard => meant, one per line (e.g. hey cloud => hey Claude)")
+        self.ed_dict_repl.setFixedHeight(80)
+        self._row(f, "dictionary.replacements", "Replacements", self.ed_dict_repl)
+        self.ed_dict_snip = QPlainTextEdit()
+        self.ed_dict_snip.setPlaceholderText("spoken phrase => text, one per line (\\n for a new line)")
+        self.ed_dict_snip.setFixedHeight(80)
+        self._row(f, "dictionary.snippets", "Snippets", self.ed_dict_snip)
+        v.addWidget(g)
+        v.addStretch(1)
+
+    @staticmethod
+    def _pairs_text(d: dict) -> str:
+        return "\n".join(f"{k} => {str(v).replace(chr(10), chr(92) + 'n')}" for k, v in (d or {}).items())
+
+    @staticmethod
+    def _pairs(edit: QPlainTextEdit) -> tuple[dict, list[str]]:
+        out, bad = {}, []
+        for line in edit.toPlainText().splitlines():
+            if not line.strip():
+                continue
+            if "=>" not in line:
+                bad.append(line.strip())
+                continue
+            k, v = line.split("=>", 1)
+            if k.strip():
+                out[k.strip()] = v.strip().replace("\\n", "\n")
+        return out, bad
+
+    def _dictate_stats(self):
+        import json
+        try:
+            st = json.loads((config.STATE_DIR / "dictation.json").read_text(encoding="utf-8"))
+            self.lbl_dictate_stats.setText(f"{st.get('dictations', 0)} dictations, {st.get('words', 0)} words, "
+                                           f"about {float(st.get('saved_s', 0)) / 60:.0f} min saved vs typing "
+                                           "(kept on this PC only)")
+        except Exception:
+            self.lbl_dictate_stats.setText("No dictations yet.")
+
     # -- M4c: speech backends ---------------------------------------------------------
     SPEECH_BACKENDS = [("Local: Whisper + Kokoro on this PC", "local"), ("Windows: no models", "windows"),
                        ("Cloud: Groq / OpenAI", "cloud"), ("Auto: local while memory is free", "auto")]
@@ -752,6 +824,14 @@ class SettingsWindow(QWidget):
         self.sp_threshold.setValue(float(_get(cfg, "wake.threshold", 0.5)))
         self.sp_cooldown.setValue(float(_get(cfg, "wake.cooldown", 1.0)))
         self._wake_status(cfg)
+        self.cb_dictate.setChecked(bool(_get(cfg, "dictate.enabled", True)))
+        self.ed_dictate_key.setText(str(_get(cfg, "dictate.key") or ""))
+        self.ed_paste_again.setText(str(_get(cfg, "dictate.paste_again_hotkey") or ""))
+        self._set_combo(self.cmb_cleanup, str(_get(cfg, "dictate.cleanup", "off") or "off"))
+        self.ed_dict_words.setPlainText("\n".join(str(w) for w in (_get(cfg, "dictionary.words") or [])))
+        self.ed_dict_repl.setPlainText(self._pairs_text(_get(cfg, "dictionary.replacements") or {}))
+        self.ed_dict_snip.setPlainText(self._pairs_text(_get(cfg, "dictionary.snippets") or {}))
+        self._dictate_stats()
         self._set_combo(self.cmb_speech, str(_get(cfg, "speech.backend", "local") or "local"))
         self.cb_lean.setChecked(bool(_get(cfg, "speech.lean", False)))
         self.sp_unload.setValue(int(_get(cfg, "speech.unload_after_min", 10) or 10))
@@ -857,6 +937,27 @@ class SettingsWindow(QWidget):
         # keep the resume point 10 below the busy point unless set by hand lower
         if int(_get(new, "stt.gpu_resume_pct", 60)) >= self.sp_gpu_busy.value():
             _set(new, "stt.gpu_resume_pct", max(5, self.sp_gpu_busy.value() - 10))
+        _set(new, "dictate.enabled", self.cb_dictate.isChecked())
+        dkey = self.ed_dictate_key.text().strip()
+        try:
+            holdkey.parse(dkey or "right alt")
+        except ValueError as e:
+            errors.append(f"Dictation key: {e}")
+        _set(new, "dictate.key", dkey or "right alt")
+        pa = self.ed_paste_again.text().strip()
+        if pa:
+            try:
+                hotkey.parse(pa)
+            except ValueError as e:
+                errors.append(f"Paste-again hotkey: {e}")
+        _set(new, "dictate.paste_again_hotkey", pa)
+        _set(new, "dictate.cleanup", self._combo_value(self.cmb_cleanup) or "off")
+        _set(new, "dictionary.words", [w.strip() for w in self.ed_dict_words.toPlainText().splitlines() if w.strip()])
+        for key, edit in (("dictionary.replacements", self.ed_dict_repl), ("dictionary.snippets", self.ed_dict_snip)):
+            pairs, bad = self._pairs(edit)
+            if bad:
+                errors.append(f"{key.split('.')[1].title()}: write each as \"heard => meant\" ({bad[0]!r})")
+            _set(new, key, pairs)
         if self._combo_value(self.cmb_speech) != str(_get(self._orig, "speech.backend", "local") or "local"):
             _set(new, "speech.stt_backend", None)        # the one switch sets both sides
             _set(new, "speech.tts_backend", None)

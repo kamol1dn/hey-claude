@@ -140,6 +140,35 @@ speech:
   elevenlabs_voice: 21m00Tcm4TlvDq8ikWAM
   cloud_timeout_s: 15
 
+dictate:
+  # M4d: hold this key, speak, let go: the words are typed where the cursor is,
+  # in any app (through the clipboard; yours is put back). Double tap it for
+  # hands-free until the next tap; Esc cancels. Its own key, separate from
+  # listen.hold_key. right alt, caps lock, f13, right ctrl... Uses speech.backend.
+  enabled: true
+  key: right alt
+  paste_again_hotkey: win+alt+v   # paste the last dictation again; "" = none
+  # Clean-up by Claude (on your subscription, via the claude CLI): off | as_said
+  # (punctuation only) | natural (drops um/uh, false starts) | polished. Adds
+  # a second or two. cleanup_apps sets it per app, by exe name.
+  cleanup: off
+  cleanup_apps: {}               # e.g. {outlook.exe: polished, windowsterminal.exe: as_said}
+  restore_delay_s: 0.3           # wait before putting your clipboard back (slow apps read it late)
+  min_speech_ms: 150             # less speech than this pastes nothing (no "Thank you." from silence)
+  max_seconds: 300
+  trailing_space: true           # a space after the final full stop, so the next dictation joins on
+
+dictionary:
+  # M4d: your own words. Used by dictation and the assistant's speech-to-text.
+  # words: Whisper's spelling hint (initial prompt), e.g. [Phoenix, eClass, Dilnoza]
+  words: []
+  # replacements: what it still gets wrong -> what you meant (whole words, any case)
+  replacements:
+    hey cloud: hey Claude
+    cloud code: Claude Code
+  # snippets (dictation): a short spoken phrase -> saved text
+  snippets: {}
+
 fast:
   # auto  = the Anthropic API if there's a key (see api_key_file), otherwise the claude CLI
   # cli   = always the claude CLI (your subscription login)

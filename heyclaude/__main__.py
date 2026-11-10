@@ -229,6 +229,13 @@ def main(argv=None, harness=None):
             set_hold_key(cfg["listen"].get("hold_key"))
         if "app.hotkey" in changed:
             set_hotkey(cfg["app"].get("hotkey"))
+        if "dictate.key" in changed and dictation["d"] is not None:
+            try:
+                dictation["d"].set_key()
+            except ValueError as e:
+                print(f"[dictate] {e}")
+        if "dictate.paste_again_hotkey" in changed and dict_hk is not None:
+            set_paste_again(cfg["dictate"].get("paste_again_hotkey"))
         if "app.start_with_windows" in changed and interactive:
             from .winsys import set_autostart
             try:
@@ -276,6 +283,8 @@ def main(argv=None, harness=None):
         threading.Thread(target=attach_tm, daemon=True).start()
 
     # -- tray -----------------------------------------------------------------------
+    dictation: dict = {"d": None}                  # M4d, made once the assistant has loaded
+    dict_hk = None
     tray = None
     if not args.no_tray:
         from .tray import Tray
@@ -360,6 +369,27 @@ def main(argv=None, harness=None):
                 tray.notify("hey-claude is already running", "It's in the tray. Right-click it for settings.")
         instance.poked.connect(poked)
 
+        # M4d: dictate anywhere (its own hold key; a hook that passes everything else on)
+        dict_hk = GlobalHotkey(lambda: dictation["d"] and dictation["d"].paste_again())
+
+        def set_paste_again(spec):
+            err = dict_hk.set(spec or None)
+            print(f"[dictate] paste again: {spec or 'none'}" + (f" (not registered: {err})" if err else ""))
+
+        def start_dictation():
+            asst.ready.wait()
+            if not cfg.get("dictate", {}).get("enabled", True) or asst.speech is None:
+                return
+            from .dictate import attach
+            try:
+                dictation["d"] = attach(asst, bridge, cfg)
+                print(f"[dictate] hold {cfg['dictate'].get('key') or 'right alt'} to dictate anywhere "
+                      "(double tap: hands-free; Esc cancels)")
+            except Exception as e:
+                print(f"[dictate] off: {e}")
+        threading.Thread(target=start_dictation, daemon=True, name="dictate-start").start()
+        set_paste_again(cfg.get("dictate", {}).get("paste_again_hotkey"))
+
     print(f"[app] log: {log_path}")
     if harness is not None and hasattr(harness, "started"):
         harness.started(dict(app=app, asst=asst, bridge=bridge, island=island, tray=tray, cfg=cfg))
@@ -376,6 +406,10 @@ def main(argv=None, harness=None):
         hk.close()
     if interactive:
         stop_hk.close()
+        if dict_hk is not None:
+            dict_hk.close()
+    if dictation["d"] is not None:
+        dictation["d"].close()
     if asst.hold:
         asst.hold.close()
     try:

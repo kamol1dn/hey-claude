@@ -413,7 +413,7 @@ class Speech:
             if changed or failed:
                 self._label_changed()
             self.touch()
-            return text
+            return self.fix(text)
         why = "; ".join(f"{n}: {w}" for n, w in failed)
         self.note(f"speech-to-text failed ({why})")
         return ""
@@ -424,7 +424,16 @@ class Speech:
         b = self.backend(name)
         if not b.probe_ok:
             return ""
-        return b.transcribe(audio, prompt=self.prompt(), languages=self.languages())
+        return self.fix(b.transcribe(audio, prompt=self.prompt(), languages=self.languages()))
+
+    def fix(self, text: str) -> str:
+        """The dictionary's replacements ("hey cloud" -> "hey Claude"); snippets are dictation's."""
+        from .. import dictionary
+        try:
+            return dictionary.apply(text, self.cfg.get("dictionary"), snippets=False)
+        except Exception as e:
+            print(f"[speech] dictionary: {e}")
+            return text
 
     # -- switching and memory -----------------------------------------------------------------
     def set_backend(self, name: str, kind: str | None = None):

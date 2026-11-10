@@ -519,7 +519,11 @@ var ENTER = {
         ER.to(3.2, 'snap'); S.wokeGlow = true; GA.to(0.22, 0.05); GR.to(30, 0.06);
         if (!fl && HEAD.x <= 30) { HEAD.to(26, 'snap'); H.to(26 + S.extraH, 'snap'); }
         at(80, function () {
-            ER.to(6.5, 'snap'); W.to(S.turn ? turnW() : S.notMe ? 300 + NOTME_W : 300, 'glide');   // the catch bounces in the ember, not the width HEAD.to(40, 'snap'); H.to(40 + S.extraH, 'snap'); EX.to(20, 'soft');
+            // the catch bounces in the ember and the head, not the width (§5.1: head -> 40 at 80 ms;
+            // these three calls sat behind this comment on one line: without the "not me" chip's
+            // resize the head stayed squashed at 26 px until listening took over at 420 ms)
+            ER.to(6.5, 'snap'); W.to(S.turn ? turnW() : S.notMe ? 300 + NOTME_W : 300, 'glide');
+            HEAD.to(40, 'snap'); H.to(40 + S.extraH, 'snap'); EX.to(20, 'soft');
             GA.to(0.42, 0.06); GR.to(90, 0.06);
         });
         if (!fl) at(120, function () { S.rings.push({ kind: 'ring', x: 20, y: 20, t0: NOW, d: 320, r0: 6, r1: 40, w0: 2, w1: 0.5, a0: 0.5, c: C.live }); });

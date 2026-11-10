@@ -1175,6 +1175,28 @@ def test_island_fps_applies_live_and_rest_stays_at_zero():
         _spin(300)
 
 
+def test_woke_releases_the_head_at_80_ms():
+    """Regression: woke's release (docs/island-motion.md §5.1: head 26 -> 40 on `snap` at 80 ms)
+    had been commented out by a comment pasted mid-line. A wake word hides it (the "not me" chip
+    resizes the pill softly), but a woke without one (the hotkey, a click) kept the head squashed
+    at 26 px through the whole catch until listening took over at 420 ms."""
+    isl = _island()
+    b = isl.bridge_
+    b.listening.emit(True, 0.0)
+    b.state.emit("idle", "")
+    _spin(1500)
+    assert _v(isl.call("snapshot"))["head"] <= 28.5
+    isl._send("go", ["woke", {}])
+    heads = []
+    for _ in range(6):                       # sampled through the catch, before 420 ms
+        _spin(50)
+        s = _v(isl.call("snapshot"))
+        heads.append((s["state"], round(s["head"], 1)))
+    assert any(st == "woke" and h >= 34 for st, h in heads[2:]), heads
+    b.state.emit("idle", "")
+    _spin(1200)
+
+
 def test_the_speaking_wave_fills_the_head_up_to_the_controls():
     """Regression: in a turn (every voice request) the answer goes to the row under the head, and
     the speaking wave stopped at x 208 of a 440+ px pill: half the head looked empty. It runs to

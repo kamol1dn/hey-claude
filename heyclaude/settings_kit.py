@@ -259,7 +259,8 @@ class SettingRow(QWidget):
         head.addStretch(1)
         text.addLayout(head)
         self.desc_label = _label(desc, "rowDesc", wrap=True)
-        self.desc_label.setVisible(bool(desc))
+        if not desc:                                 # hide only: show() on a label with no parent yet
+            self.desc_label.hide()                   # (its layout isn't on a widget) opens it as a window
         text.addWidget(self.desc_label)
         if tip:
             self.title_label.setToolTip(tip)
@@ -445,7 +446,8 @@ class Page(QScrollArea):
         self.title_label = _label(title, "pageTitle")
         head.addWidget(self.title_label)
         self.subtitle_label = _label(subtitle, "pageSubtitle", wrap=True)
-        self.subtitle_label.setVisible(bool(subtitle))
+        if not subtitle:                             # hide only (see Row): a parentless show is a window
+            self.subtitle_label.hide()
         head.addWidget(self.subtitle_label)
         self._v.addLayout(head)
         self._v.addStretch(1)

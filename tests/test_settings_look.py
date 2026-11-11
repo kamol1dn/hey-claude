@@ -156,6 +156,35 @@ def test_window_keeps_every_value():
         w.deleteLater()
 
 
+def test_opening_settings_shows_one_window():
+    """Building the pages never shows a label as its own top-level window (they flashed on
+    screen: a description shown before its row was on a widget)."""
+    from PySide6.QtCore import QEvent, QObject
+    shown = []
+
+    class Watch(QObject):
+        def eventFilter(self, o, e):
+            if e.type() == QEvent.Show and isinstance(o, QWidget) and o.isWindow():
+                shown.append(f"{type(o).__name__}#{o.objectName()}")
+            return False
+
+    app = QApplication.instance()
+    watch = Watch()
+    app.installEventFilter(watch)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            w = _window(config.defaults(), d)
+            w.show()
+            for i in range(w.tabs.count()):                       # every page, lazy ones too
+                w.tabs.setCurrentIndex(i)
+                app.processEvents()
+            w.close()
+            w.deleteLater()
+    finally:
+        app.removeEventFilter(watch)
+    assert shown == ["SettingsWindow#settingsWindow"], shown
+
+
 def _window(cfg, d, reg=None):
     from heyclaude import plugins
     from heyclaude.settings_ui import SettingsWindow

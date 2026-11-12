@@ -129,8 +129,9 @@ mic ─▶ echo canceller ─▶ openWakeWord ─▶ Silero VAD + end of turn �
    After that, startup takes about 5 s.
 
    To run it all day without a terminal, tick **Start with Windows** in the
-   tray's Settings… (see below), or start it silently once with
-   `.venv\Scripts\pythonw.exe -m heyclaude`.
+   tray's Settings… (see below), or double-click **`launch.bat`** to start it
+   silently (`launch.bat restart` quits the running one first). `run.cmd` keeps
+   a console open with the logs.
 
 ### Flags
 
